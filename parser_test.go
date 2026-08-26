@@ -1,8 +1,6 @@
 package ipfw_test
 
 import (
-	"errors"
-	"io"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -21,7 +19,7 @@ func next(t *testing.T, parser *ipfw.Parser, expected ipfw.Record) {
 	t.Helper()
 	var state ipfw.CollectState
 	rec, err := parser.Next(&state)
-	require.NoError(t, err)
+	require.Nil(t, err)
 	require.Equal(t, expected, rec)
 	require.Equal(t, ipfw.CollectState{}, state)
 }
@@ -31,15 +29,18 @@ func nextError(t *testing.T, parser *ipfw.Parser, expected ipfw.ParseError) {
 	t.Helper()
 	var state ipfw.CollectState
 	_, err := parser.Next(&state)
-	var parseErr *ipfw.ParseError
-	require.ErrorAs(t, err, &parseErr)
-	require.Equal(t, expected, *parseErr)
+	require.NotNil(t, err)
+	require.Equal(t, expected, *err)
 }
 
-// verifies that an empty input yields io.EOF at once.
+// eof is the record every exhausted parser returns.
+var eof = ipfw.Record{Kind: ipfw.RecordEOF}
+
+// verifies that an empty input is exhausted at once and stays so.
 func Test_Parser_Next_EOF(t *testing.T) {
-	_, err := ipfw.NewParser("").Next(ipfw.DiscardState{})
-	require.ErrorIs(t, err, io.EOF)
+	parser := ipfw.NewParser("")
+	next(t, parser, eof)
+	next(t, parser, eof)
 }
 
 // verifies that blank lines, with or without whitespace or a final newline,
@@ -60,8 +61,7 @@ func Test_Parser_Next_EmptyLines(t *testing.T) {
 			for line := 1; line <= tc.lines; line++ {
 				next(t, parser, ipfw.Record{Line: line, Kind: ipfw.RecordEmpty})
 			}
-			_, err := parser.Next(ipfw.DiscardState{})
-			require.ErrorIs(t, err, io.EOF)
+			next(t, parser, eof)
 		})
 	}
 }
@@ -121,16 +121,14 @@ func Test_Parser_Next_LineNumbers(t *testing.T) {
 	next(t, parser, ipfw.Record{Line: 1, Text: "# a", Kind: ipfw.RecordComment, Comment: " a"})
 	next(t, parser, ipfw.Record{Line: 2, Kind: ipfw.RecordEmpty})
 	next(t, parser, ipfw.Record{Line: 3, Text: ":L", Kind: ipfw.RecordLabel, Label: "L"})
-	_, err := parser.Next(ipfw.DiscardState{})
-	require.ErrorIs(t, err, io.EOF)
+	next(t, parser, eof)
 }
 
 // verifies that the last line needs no newline.
 func Test_Parser_Next_NoTrailingNewline(t *testing.T) {
 	parser := ipfw.NewParser(":L")
 	next(t, parser, ipfw.Record{Line: 1, Text: ":L", Kind: ipfw.RecordLabel, Label: "L"})
-	_, err := parser.Next(ipfw.DiscardState{})
-	require.ErrorIs(t, err, io.EOF)
+	next(t, parser, eof)
 }
 
 // verifies that a failing line is skipped as a whole, so the next call
@@ -139,8 +137,7 @@ func Test_Parser_Next_SkipsFailedLine(t *testing.T) {
 	parser := ipfw.NewParser("bad line\n:L\n")
 	nextError(t, parser, ipfw.ParseError{Kind: ipfw.ErrExpectedLine, Line: 1, Column: 0, Text: "bad line"})
 	next(t, parser, ipfw.Record{Line: 2, Text: ":L", Kind: ipfw.RecordLabel, Label: "L"})
-	_, err := parser.Next(ipfw.DiscardState{})
-	require.ErrorIs(t, err, io.EOF)
+	next(t, parser, eof)
 }
 
 // verifies that the error text is the line with leading whitespace skipped
@@ -155,7 +152,7 @@ func Test_ParseError_Position(t *testing.T) {
 func Test_Parser_All_StopsAtError(t *testing.T) {
 	parser := ipfw.NewParser(":A\n# c\nbad\n:B\n")
 	var records []ipfw.Record
-	var errs []error
+	var errs []*ipfw.ParseError
 	for rec, err := range parser.All(ipfw.DiscardState{}) {
 		records = append(records, rec)
 		errs = append(errs, err)
@@ -166,8 +163,8 @@ func Test_Parser_All_StopsAtError(t *testing.T) {
 		{},
 	}, records)
 	require.Len(t, errs, 3)
-	require.NoError(t, errs[0])
-	require.NoError(t, errs[1])
+	require.Nil(t, errs[0])
+	require.Nil(t, errs[1])
 	require.ErrorIs(t, errs[2], ipfw.ErrExpectedLine)
 }
 
@@ -176,7 +173,7 @@ func Test_Parser_All_StopsAtError(t *testing.T) {
 func Test_Parser_All_EOFAndBreak(t *testing.T) {
 	count := 0
 	for _, err := range ipfw.NewParser(":A\n:B\n").All(ipfw.DiscardState{}) {
-		require.NoError(t, err)
+		require.Nil(t, err)
 		count++
 	}
 	require.Equal(t, 2, count)
@@ -199,7 +196,7 @@ func Test_ParseLine_Table(t *testing.T) {
 		name     string
 		input    string
 		expected ipfw.Record
-		err      error
+		err      *ipfw.ParseError
 	}{
 		{name: "with newline", input: ":A\n", expected: label},
 		{name: "without newline", input: ":A", expected: label},
@@ -214,7 +211,7 @@ func Test_ParseLine_Table(t *testing.T) {
 				require.Equal(t, tc.err, err)
 				return
 			}
-			require.NoError(t, err)
+			require.Nil(t, err)
 			require.Equal(t, tc.expected, rec)
 		})
 	}
@@ -308,8 +305,8 @@ func Test_Parser_Next_NoAllocs(t *testing.T) {
 	allocs := testing.AllocsPerRun(100, func() {
 		parser.Reset(src)
 		for calls := 0; ; calls++ {
-			_, err := parser.Next(&state)
-			if errors.Is(err, io.EOF) {
+			rec, err := parser.Next(&state)
+			if rec.Kind == ipfw.RecordEOF {
 				break
 			}
 			if err != nil || calls > len(src) {
@@ -323,7 +320,7 @@ func Test_Parser_Next_NoAllocs(t *testing.T) {
 }
 
 // verifies that arbitrary input never panics, is always consumed, and only
-// ever fails with a positioned parse error.
+// ever fails with a positioned parse error before reaching the end.
 func Fuzz_Parser_Next(f *testing.F) {
 	for _, seed := range []string{"", "# c\n", ":L\n", "add \n", "x", "\n\n", "  :L  # x", "table\n", ":\n", "add allow ip from any to any\n"} {
 		f.Add(seed)
@@ -334,16 +331,14 @@ func Fuzz_Parser_Next(f *testing.F) {
 		for calls := 0; ; calls++ {
 			require.LessOrEqual(t, calls, len(input)+1, "the parser must consume input on every call")
 			rec, err := parser.Next(&state)
-			if errors.Is(err, io.EOF) {
-				return
-			}
 			if err != nil {
-				var parseErr *ipfw.ParseError
-				require.ErrorAs(t, err, &parseErr)
-				require.GreaterOrEqual(t, parseErr.Line, 1)
-				require.GreaterOrEqual(t, parseErr.Column, 0)
-				require.LessOrEqual(t, parseErr.Column, len(parseErr.Text))
+				require.GreaterOrEqual(t, err.Line, 1)
+				require.GreaterOrEqual(t, err.Column, 0)
+				require.LessOrEqual(t, err.Column, len(err.Text))
 				continue
+			}
+			if rec.Kind == ipfw.RecordEOF {
+				return
 			}
 			require.GreaterOrEqual(t, rec.Line, 1)
 		}

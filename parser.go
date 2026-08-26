@@ -1,7 +1,6 @@
 package ipfw
 
 import (
-	"io"
 	"iter"
 	"strings"
 )
@@ -40,11 +39,12 @@ func (m *Parser) Reset(src string) {
 
 // Next parses the next line, pushing the rule body into state.
 //
-// It returns io.EOF once the input is exhausted and a *ParseError when the
-// line does not parse, in which case the offending line is skipped.
-func (m *Parser) Next(state State) (Record, error) {
+// Once the input is exhausted it returns a record of kind RecordEOF. A line
+// that does not parse is skipped as a whole and reported as a *ParseError,
+// a concrete pointer to compare with nil before storing it in an error.
+func (m *Parser) Next(state State) (Record, *ParseError) {
 	if m.rest == "" {
-		return Record{}, io.EOF
+		return Record{Kind: RecordEOF}, nil
 	}
 	m.line++
 	text := ws0(m.rest)
@@ -186,18 +186,15 @@ func trimRightSpace(s string) string {
 
 // All iterates over the records until the input ends or a line fails, the
 // failure being the last value yielded.
-func (m *Parser) All(state State) iter.Seq2[Record, error] {
-	return func(yield func(Record, error) bool) {
+func (m *Parser) All(state State) iter.Seq2[Record, *ParseError] {
+	return func(yield func(Record, *ParseError) bool) {
 		for {
 			record, err := m.Next(state)
-			if err == io.EOF {
-				return
-			}
 			if err != nil {
 				yield(Record{}, err)
 				return
 			}
-			if !yield(record, nil) {
+			if record.Kind == RecordEOF || !yield(record, nil) {
 				return
 			}
 		}
@@ -206,7 +203,7 @@ func (m *Parser) All(state State) iter.Seq2[Record, error] {
 
 // ParseLine parses exactly one line, with or without its trailing newline.
 // An empty input is an empty line.
-func ParseLine(line string, state State, options ...ParserOption) (Record, error) {
+func ParseLine(line string, state State, options ...ParserOption) (Record, *ParseError) {
 	if len(options) > 0 {
 		return parseSingleLine(NewParser(line, options...), state)
 	}
@@ -214,13 +211,13 @@ func ParseLine(line string, state State, options ...ParserOption) (Record, error
 	return parseSingleLine(&parser, state)
 }
 
-func parseSingleLine(parser *Parser, state State) (Record, error) {
+func parseSingleLine(parser *Parser, state State) (Record, *ParseError) {
 	record, err := parser.Next(state)
-	if err == io.EOF {
-		return Record{Line: 1, Kind: RecordEmpty}, nil
-	}
 	if err != nil {
 		return Record{}, err
+	}
+	if record.Kind == RecordEOF {
+		return Record{Line: 1, Kind: RecordEmpty}, nil
 	}
 	if parser.rest != "" {
 		return Record{}, &ParseError{Kind: ErrExpectedNewlineOrEOF, Line: 1, Column: len(record.Text), Text: record.Text}
@@ -231,13 +228,14 @@ func parseSingleLine(parser *Parser, state State) (Record, error) {
 // RecordKind is what a line holds.
 type RecordKind uint8
 
-// The record kinds.
+// The record kinds. RecordEOF is returned once the input is exhausted.
 const (
 	RecordEmpty RecordKind = iota
 	RecordComment
 	RecordInstruction
 	RecordTable
 	RecordLabel
+	RecordEOF
 )
 
 // Record is one parsed line.
