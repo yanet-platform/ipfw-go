@@ -24,7 +24,8 @@ var (
 
 // fields is everything the matcher reads from a packet, for comparison.
 type fields struct {
-	version, protocol         uint8
+	version                   vm.IPVersion
+	protocol                  uint8
 	src, dst                  netip.Addr
 	srcPort, dstPort          uint16
 	hasSrcPort, hasDstPort    bool
@@ -60,13 +61,13 @@ func Test_Packet_Table(t *testing.T) {
 		{
 			name:     "IPv4 without transport",
 			packet:   vm.NewIPv4Packet(src4, dst4),
-			expected: fields{version: 4, src: src4, dst: dst4},
+			expected: fields{version: vm.IPv4, src: src4, dst: dst4},
 		},
 		{
 			name:   "IPv4 TCP",
 			packet: vm.NewIPv4Packet(src4, dst4).WithTCP(ipfw.TCPSyn|ipfw.TCPAck, 40000, 22),
 			expected: fields{
-				version: 4, protocol: 6, src: src4, dst: dst4,
+				version: vm.IPv4, protocol: 6, src: src4, dst: dst4,
 				srcPort: 40000, dstPort: 22, hasSrcPort: true, hasDstPort: true,
 				flags: ipfw.TCPSyn | ipfw.TCPAck, hasFlags: true,
 			},
@@ -75,7 +76,7 @@ func Test_Packet_Table(t *testing.T) {
 			name:   "IPv4 UDP",
 			packet: vm.NewIPv4Packet(src4, dst4).WithUDP(53, 65535),
 			expected: fields{
-				version: 4, protocol: 17, src: src4, dst: dst4,
+				version: vm.IPv4, protocol: 17, src: src4, dst: dst4,
 				srcPort: 53, dstPort: 65535, hasSrcPort: true, hasDstPort: true,
 			},
 		},
@@ -83,20 +84,20 @@ func Test_Packet_Table(t *testing.T) {
 			name:   "IPv4 ICMP",
 			packet: vm.NewIPv4Packet(src4, dst4).WithICMP(8, 0),
 			expected: fields{
-				version: 4, protocol: 1, src: src4, dst: dst4,
+				version: vm.IPv4, protocol: 1, src: src4, dst: dst4,
 				icmpType: 8, hasICMPType: true,
 			},
 		},
 		{
 			name:     "IPv6 without transport",
 			packet:   vm.NewIPv6Packet(src6, dst6),
-			expected: fields{version: 6, src: src6, dst: dst6},
+			expected: fields{version: vm.IPv6, src: src6, dst: dst6},
 		},
 		{
 			name:   "IPv6 TCP",
 			packet: vm.NewIPv6Packet(src6, dst6).WithTCP(ipfw.TCPRst, 1, 65535),
 			expected: fields{
-				version: 6, protocol: 6, src: src6, dst: dst6,
+				version: vm.IPv6, protocol: 6, src: src6, dst: dst6,
 				srcPort: 1, dstPort: 65535, hasSrcPort: true, hasDstPort: true,
 				flags: ipfw.TCPRst, hasFlags: true,
 			},
@@ -105,7 +106,7 @@ func Test_Packet_Table(t *testing.T) {
 			name:   "IPv6 UDP",
 			packet: vm.NewIPv6Packet(src6, dst6).WithUDP(546, 547),
 			expected: fields{
-				version: 6, protocol: 17, src: src6, dst: dst6,
+				version: vm.IPv6, protocol: 17, src: src6, dst: dst6,
 				srcPort: 546, dstPort: 547, hasSrcPort: true, hasDstPort: true,
 			},
 		},
@@ -113,7 +114,7 @@ func Test_Packet_Table(t *testing.T) {
 			name:   "IPv6 ICMPv6",
 			packet: vm.NewIPv6Packet(src6, dst6).WithICMP6(135, 0),
 			expected: fields{
-				version: 6, protocol: 58, src: src6, dst: dst6,
+				version: vm.IPv6, protocol: 58, src: src6, dst: dst6,
 				icmp6Type: 135, hasICMP6Type: true,
 			},
 		},
@@ -158,26 +159,27 @@ func Test_Packet_ShortBuffer(t *testing.T) {
 		expected fields
 	}{
 		{name: "empty IPv4", packet: vm.RawIPv4Packet(nil), expected: fields{}},
-		{name: "one byte of IPv4", packet: vm.RawIPv4Packet{0x45}, expected: fields{version: 4}},
+		{name: "one byte of IPv4", packet: vm.RawIPv4Packet{0x45}, expected: fields{version: vm.IPv4}},
+		{name: "neither version", packet: vm.RawIPv4Packet{0x50}, expected: fields{}},
 		{
 			name:     "IPv4 header only",
 			packet:   vm.NewIPv4Packet(src4, dst4).WithTCP(ipfw.TCPSyn, 1, 2)[:20],
-			expected: fields{version: 4, protocol: 6, src: src4, dst: dst4},
+			expected: fields{version: vm.IPv4, protocol: 6, src: src4, dst: dst4},
 		},
 		{
 			name:   "IPv4 TCP cut before the flags",
 			packet: vm.NewIPv4Packet(src4, dst4).WithTCP(ipfw.TCPSyn, 1, 2)[:33],
 			expected: fields{
-				version: 4, protocol: 6, src: src4, dst: dst4,
+				version: vm.IPv4, protocol: 6, src: src4, dst: dst4,
 				srcPort: 1, dstPort: 2, hasSrcPort: true, hasDstPort: true,
 			},
 		},
 		{name: "empty IPv6", packet: vm.RawIPv6Packet(nil), expected: fields{}},
-		{name: "one byte of IPv6", packet: vm.RawIPv6Packet{0x60}, expected: fields{version: 6}},
+		{name: "one byte of IPv6", packet: vm.RawIPv6Packet{0x60}, expected: fields{version: vm.IPv6}},
 		{
 			name:     "IPv6 header only",
 			packet:   vm.NewIPv6Packet(src6, dst6).WithICMP6(128, 0)[:40],
-			expected: fields{version: 6, protocol: 58, src: src6, dst: dst6},
+			expected: fields{version: vm.IPv6, protocol: 58, src: src6, dst: dst6},
 		},
 	}
 	for _, tc := range cases {

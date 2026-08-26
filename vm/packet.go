@@ -42,10 +42,31 @@ type Context struct {
 	LocalAddrs []netip.Addr
 }
 
+// IPVersion is the IP version of a packet, the zero value being neither.
+type IPVersion uint8
+
+// The IP versions.
+const (
+	_ IPVersion = iota
+	IPv4
+	IPv6
+)
+
+// ipVersion tells the version from the first nibble of a packet.
+func ipVersion(nibble byte) IPVersion {
+	switch nibble {
+	case 4:
+		return IPv4
+	case 6:
+		return IPv6
+	}
+	return 0
+}
+
 // Packet is what the matcher reads from a packet.
 type Packet interface {
-	// Version is the IP version, 4 or 6.
-	Version() uint8
+	// Version is the IP version.
+	Version() IPVersion
 	// Protocol is the transport protocol number.
 	Protocol() uint8
 	// SourceAddr is the source address.
@@ -118,8 +139,8 @@ func (m RawIPv4Packet) WithFragmentOffset(offset uint16) RawIPv4Packet {
 }
 
 // Version implements Packet.
-func (m RawIPv4Packet) Version() uint8 {
-	return byteAt(m, 0) >> 4
+func (m RawIPv4Packet) Version() IPVersion {
+	return ipVersion(byteAt(m, 0) >> 4)
 }
 
 // Protocol implements Packet.
@@ -210,8 +231,8 @@ func (m RawIPv6Packet) WithICMP6(typ, code uint8) RawIPv6Packet {
 }
 
 // Version implements Packet.
-func (m RawIPv6Packet) Version() uint8 {
-	return byteAt(m, 0) >> 4
+func (m RawIPv6Packet) Version() IPVersion {
+	return ipVersion(byteAt(m, 0) >> 4)
 }
 
 // Protocol implements Packet.
