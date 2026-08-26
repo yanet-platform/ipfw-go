@@ -1,19 +1,25 @@
 ---
 name: execute
-description: Execute one roadmap step from .roadmap/ end to end — read the plan and the Rust reference, TDD, gates, commit, mark done. Use with a step number, e.g. /execute 051.
-argument-hint: <step number, e.g. 051>
+description: Execute roadmap steps from .roadmap/ end to end — read the plan and the Rust reference, TDD, gates, commit, mark done. Use with a step number or a range, e.g. /execute 051 or /execute 061-070.
+argument-hint: <step number or range, e.g. 051 or 061-070>
 disable-model-invocation: true
 ---
 
 Execute roadmap step `$ARGUMENTS` of this repository from scratch, as one
 self-contained session. The step number is the three-digit prefix of a file
-in `.roadmap/` (`051` → `.roadmap/051-action-pass.md`). Never do more than one
-step.
+in `.roadmap/` (`051` → `.roadmap/051-action-pass.md`).
+
+A range `NNN-MMM` (`061-070`) means every step file whose number lies in the
+range, in ascending order, each one run through the whole procedure below —
+its own tests, gates, commit and status update — before the next one starts.
+Stop at the first step that fails a gate or needs a decision (section 5) and
+report where you stopped. Anything else is one step: never do more.
 
 ## 1. Locate and validate the step
 
-- Resolve `.roadmap/$ARGUMENTS-*.md`. If no file matches, or several match,
-  list `.roadmap/` and stop.
+- Resolve `.roadmap/$ARGUMENTS-*.md` (for a range: every file in the range).
+  If no file matches, or a single number matches several, list `.roadmap/`
+  and stop.
 - Open `.roadmap/README.md` and check the status table:
   - the step must be `todo` (or `later` if the user explicitly asked for it);
     if it is `done` (its file is gone by then), say so and stop;
