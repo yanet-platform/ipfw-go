@@ -315,6 +315,9 @@ func parseTable(s string) (Table, string, fail) {
 	case strings.HasPrefix(rest, "create"):
 		table.Kind = TableCreate
 		table.Type, rest, err = parseTableCreate(rest[len("create"):])
+	case strings.HasPrefix(rest, "add"):
+		table.Kind = TableAdd
+		rest, err = parseTableAdd(rest[len("add"):], &table)
 	default:
 		return Table{}, s, fail{Kind: ErrExpectedTableCommand, At: rest}
 	}
@@ -345,6 +348,43 @@ func parseTableCreate(s string) (TableType, string, fail) {
 		buf, ok = ws1Keyword(rest, "type")
 	}
 	return tableType, rest, fail{}
+}
+
+// parseTableAdd parses the `KEY [VALUE]` after `add` into the table, the
+// value being the next whitespace-separated token when there is one.
+func parseTableAdd(s string, table *Table) (string, fail) {
+	rest, ok := ws1(s)
+	if !ok {
+		return s, fail{Kind: ErrExpectedWhitespace, At: rest}
+	}
+	key, rest, err := parseTableKey(rest)
+	if err.Failed() {
+		return s, err
+	}
+	table.Key = key
+	if buf, ok := ws1(rest); ok {
+		if value, afterValue := token(buf); value != "" {
+			table.Value, rest = value, afterValue
+		}
+	}
+	return rest, fail{}
+}
+
+// parseTableKey classifies a table key by its shape: IPv4 or IPv6 network
+// text, or else an interface name, none of them validated.
+func parseTableKey(s string) (TableKey, string, fail) {
+	text, rest := token(s)
+	switch {
+	case isNetwork6Text(text):
+		return TableKey{Kind: TableKeyNetwork6, Text: text}, rest, fail{}
+	case isNetwork4Text(text):
+		return TableKey{Kind: TableKeyNetwork4, Text: text}, rest, fail{}
+	}
+	name, rest := takeWhile(s, isIfNameByte)
+	if name == "" {
+		return TableKey{}, s, fail{Kind: ErrExpectedTableKey, At: s}
+	}
+	return TableKey{Kind: TableKeyIfName, Text: name}, rest, fail{}
 }
 
 // tableTypeNames are the table types by keyword, in the order tried.

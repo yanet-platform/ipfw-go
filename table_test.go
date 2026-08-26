@@ -70,6 +70,139 @@ func Test_Parser_Next_TableCreate(t *testing.T) {
 	}
 }
 
+// verifies that `table NAME add KEY [VALUE]` parses into a table record,
+// the key classified by shape without validation and the value kept raw.
+func Test_Parser_Next_TableAdd(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		table ipfw.Table
+	}{
+		{
+			name:  "IPv4 network",
+			input: "table _ACCESS_NETS_ add 192.0.2.0/28\n",
+			table: ipfw.Table{
+				Name: "_ACCESS_NETS_",
+				Kind: ipfw.TableAdd,
+				Key:  ipfw.TableKey{Kind: ipfw.TableKeyNetwork4, Text: "192.0.2.0/28"},
+			},
+		},
+		{
+			name:  "IPv6 network with a value",
+			input: "table t add 2001:db8::/32 x\n",
+			table: ipfw.Table{
+				Name:  "t",
+				Kind:  ipfw.TableAdd,
+				Key:   ipfw.TableKey{Kind: ipfw.TableKeyNetwork6, Text: "2001:db8::/32"},
+				Value: "x",
+			},
+		},
+		{
+			name:  "interface name with a label value",
+			input: "table _JUMP_EARLY_OUT_ add vlan42 :JUMPED\n",
+			table: ipfw.Table{
+				Name:  "_JUMP_EARLY_OUT_",
+				Kind:  ipfw.TableAdd,
+				Key:   ipfw.TableKey{Kind: ipfw.TableKeyIfName, Text: "vlan42"},
+				Value: ":JUMPED",
+			},
+		},
+		{
+			name:  "interface name without a value",
+			input: "table t add eth0\n",
+			table: ipfw.Table{
+				Name: "t",
+				Kind: ipfw.TableAdd,
+				Key:  ipfw.TableKey{Kind: ipfw.TableKeyIfName, Text: "eth0"},
+			},
+		},
+		{
+			name:  "trailing whitespace is not a value",
+			input: "table t add eth0 \n",
+			table: ipfw.Table{
+				Name: "t",
+				Kind: ipfw.TableAdd,
+				Key:  ipfw.TableKey{Kind: ipfw.TableKeyIfName, Text: "eth0"},
+			},
+		},
+		{
+			name:  "network text is not validated",
+			input: "table t add 300.1.1.1\n",
+			table: ipfw.Table{
+				Name: "t",
+				Kind: ipfw.TableAdd,
+				Key:  ipfw.TableKey{Kind: ipfw.TableKeyNetwork4, Text: "300.1.1.1"},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			next(t, ipfw.NewParser(tc.input), ipfw.Record{
+				Line:  1,
+				Text:  strings.TrimSpace(tc.input),
+				Kind:  ipfw.RecordTable,
+				Table: tc.table,
+			})
+		})
+	}
+}
+
+// verifies that a missing or malformed key of a table add is a positioned
+// error and that a key cut by a slash leaves trailing content.
+func Test_Parser_Next_TableAddErrors(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		expected ipfw.ParseError
+	}{
+		{
+			name:  "nothing after add",
+			input: "table t add\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 11,
+				Text:   "table t add",
+			},
+		},
+		{
+			name:  "key starting with a brace",
+			input: "table t add {x\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedTableKey,
+				Line:   1,
+				Column: 12,
+				Text:   "table t add {x",
+			},
+		},
+		{
+			name:  "interface name cut by a slash",
+			input: "table t add eth0/1\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedNewlineOrEOF,
+				Line:   1,
+				Column: 16,
+				Text:   "table t add eth0/1",
+			},
+		},
+		{
+			name:  "second value is trailing content",
+			input: "table t add x y z\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedNewlineOrEOF,
+				Line:   1,
+				Column: 16,
+				Text:   "table t add x y z",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			nextError(t, ipfw.NewParser(tc.input), tc.expected)
+		})
+	}
+}
+
 // verifies that each missing or wrong piece of a table command is a
 // positioned error.
 //
