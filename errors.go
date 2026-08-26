@@ -109,54 +109,86 @@ const (
 	ErrState
 )
 
-// The messages in kind order; index 0 is the unused zero value.
-var errorKindMessages = [...]string{
-	"",
-	"expected `add`, `table`, a `:label` or a `#` comment",
-	"expected command",
-	"expected `from`",
-	"unexpected token",
-	"expected action",
-	"expected `or` separator",
-	"expected protocol",
-	"expected whitespace",
-	"expected IP protocol",
-	"expected IP or transport protocol",
-	"expected IPv4 network",
-	"expected IPv6 network",
-	"expected hostname",
-	"expected port",
-	"unexpected escape character in port name",
-	"expected token",
-	"expected flow name",
-	"unknown option",
-	"expected target",
-	"expected closing `'` of a quoted hostname",
-	"expected table command (`create` or `add`)",
-	"expected table key (network or interface name)",
-	"expected skipto target (label, rule number or `tablearg`)",
-	"expected 8-bit unsigned integer",
-	"expected 16-bit unsigned integer",
-	"expected 32-bit unsigned integer",
-	"unknown ICMP type",
-	"unknown ICMPv6 type",
-	"unknown TCP flag",
-	"expected interface name",
-	"invalid interface mask pattern",
-	"expected table type",
-	"expected table name",
-	"expected table value",
-	"expected option argument",
-	"expected `\\n` or EOF",
-	"state error",
-}
-
 // Error returns the human-readable message of the kind.
 func (k ErrorKind) Error() string {
-	if k == 0 || int(k) >= len(errorKindMessages) {
+	switch k {
+	case ErrExpectedLine:
+		return "expected `add`, `table`, a `:label` or a `#` comment"
+	case ErrExpectedCommand:
+		return "expected command"
+	case ErrExpectedFrom:
+		return "expected `from`"
+	case ErrExpectedPrefix:
+		return "unexpected token"
+	case ErrExpectedAction:
+		return "expected action"
+	case ErrExpectedOr:
+		return "expected `or` separator"
+	case ErrExpectedProto:
+		return "expected protocol"
+	case ErrExpectedWhitespace:
+		return "expected whitespace"
+	case ErrExpectedIPProto:
+		return "expected IP protocol"
+	case ErrExpectedEitherIPOrProto:
+		return "expected IP or transport protocol"
+	case ErrExpectedIPv4Network:
+		return "expected IPv4 network"
+	case ErrExpectedIPv6Network:
+		return "expected IPv6 network"
+	case ErrExpectedHostname:
+		return "expected hostname"
+	case ErrExpectedPort:
+		return "expected port"
+	case ErrUnexpectedEscape:
+		return "unexpected escape character in port name"
+	case ErrExpectedToken:
+		return "expected token"
+	case ErrExpectedFlowName:
+		return "expected flow name"
+	case ErrUnknownOption:
+		return "unknown option"
+	case ErrExpectedTarget:
+		return "expected target"
+	case ErrExpectedHostnameEscapeClose:
+		return "expected closing `'` of a quoted hostname"
+	case ErrExpectedTableCommand:
+		return "expected table command (`create` or `add`)"
+	case ErrExpectedTableKey:
+		return "expected table key (network or interface name)"
+	case ErrExpectedSkipTo:
+		return "expected skipto target (label, rule number or `tablearg`)"
+	case ErrExpectedU8:
+		return "expected 8-bit unsigned integer"
+	case ErrExpectedU16:
+		return "expected 16-bit unsigned integer"
+	case ErrExpectedU32:
+		return "expected 32-bit unsigned integer"
+	case ErrUnknownICMPType:
+		return "unknown ICMP type"
+	case ErrUnknownICMP6Type:
+		return "unknown ICMPv6 type"
+	case ErrUnknownTCPFlag:
+		return "unknown TCP flag"
+	case ErrExpectedIfName:
+		return "expected interface name"
+	case ErrExpectedIfMask:
+		return "invalid interface mask pattern"
+	case ErrExpectedTableType:
+		return "expected table type"
+	case ErrExpectedTableName:
+		return "expected table name"
+	case ErrExpectedTableValue:
+		return "expected table value"
+	case ErrExpectedOpt:
+		return "expected option argument"
+	case ErrExpectedNewlineOrEOF:
+		return "expected `\\n` or EOF"
+	case ErrState:
+		return "state error"
+	default:
 		return "unknown error kind " + strconv.Itoa(int(k))
 	}
-	return errorKindMessages[k]
 }
 
 // ParseError is a parse failure located in the input.
