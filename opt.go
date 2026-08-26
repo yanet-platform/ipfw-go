@@ -86,7 +86,7 @@ func parseOptions(s string, state State, hook OptionHook) (string, fail) {
 	rest := s
 	var ok bool
 	for rest != "" && rest[0] != '\n' && !strings.HasPrefix(rest, "//") {
-		buf, err := parseOption(rest, state, hook)
+		buf, err := parseOptionGroup(rest, state, hook)
 		if err.Failed() {
 			return s, err
 		}
@@ -97,15 +97,37 @@ func parseOptions(s string, state State, hook OptionHook) (string, fail) {
 	return rest, fail{}
 }
 
+// parseOptionGroup parses one option or a `{ a or b … }` group of them,
+// every member after the first carrying the Or flag.
+func parseOptionGroup(s string, state State, hook OptionHook) (string, fail) {
+	g, rest := openGroup(s)
+	or := false
+	for {
+		buf, err := parseOption(rest, state, hook, or)
+		if err.Failed() {
+			return s, err
+		}
+		var more bool
+		if rest, more, err = g.next(buf); err.Failed() {
+			return s, err
+		}
+		if !more {
+			return rest, fail{}
+		}
+		or = true
+	}
+}
+
 // parseOption parses one optionally negated option, the keyword matching
 // by prefix and a failure pointing at the keyword.
-func parseOption(s string, state State, hook OptionHook) (string, fail) {
+func parseOption(s string, state State, hook OptionHook, or bool) (string, fail) {
 	rest, neg := notWS1(s)
 	buf, ok := prefix(rest, "established")
 	if !ok {
 		return s, fail{Kind: ErrUnknownOption, At: rest}
 	}
-	if err := failFrom(state.OnOption(Opt{Neg: neg, Kind: OptEstablished}), rest); err.Failed() {
+	opt := Opt{Neg: neg, Or: or, Kind: OptEstablished}
+	if err := failFrom(state.OnOption(opt), rest); err.Failed() {
 		return s, err
 	}
 	return buf, fail{}

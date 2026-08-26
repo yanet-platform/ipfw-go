@@ -1525,6 +1525,19 @@ func Test_Parser_Next_Options(t *testing.T) {
 			},
 		},
 		{
+			name:  "or-group with a negated member",
+			input: "add allow tcp from any to any { established or not established }\n",
+			state: ipfw.ReduceState{
+				Protos:       tcp,
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options: []ipfw.Opt{
+					established,
+					{Neg: true, Or: true, Kind: ipfw.OptEstablished},
+				},
+			},
+		},
+		{
 			name:    "option before an inline comment",
 			input:   "add allow tcp from any to any established // c\n",
 			comment: " c",
@@ -1604,6 +1617,26 @@ func Test_Parser_Next_OptionErrors(t *testing.T) {
 				Line:   1,
 				Column: 46,
 				Text:   "add allow tcp from any to any established not foo",
+			},
+		},
+		{
+			name:  "option group without or",
+			input: "add allow tcp from any to any { established established }",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedOr,
+				Line:   1,
+				Column: 44,
+				Text:   "add allow tcp from any to any { established established }",
+			},
+		},
+		{
+			name:  "option group left open",
+			input: "add allow tcp from any to any { established",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedOr,
+				Line:   1,
+				Column: 43,
+				Text:   "add allow tcp from any to any { established",
 			},
 		},
 		{

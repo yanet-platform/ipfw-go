@@ -118,6 +118,43 @@ func Test_ParseOptions_Table(t *testing.T) {
 		{name: "not glued to a keyword", input: "notestablished", n: 0, err: ipfw.ErrUnknownOption},
 		{name: "not alone", input: "not", n: 0, err: ipfw.ErrUnknownOption},
 		{name: "nothing after not", input: "not ", n: 4, err: ipfw.ErrUnknownOption},
+		{
+			name:    "group of two",
+			input:   "{ established or established }",
+			n:       30,
+			options: []ipfw.Opt{established, {Or: true, Kind: ipfw.OptEstablished}},
+		},
+		{
+			name:    "tight group",
+			input:   "{established or established}",
+			n:       28,
+			options: []ipfw.Opt{established, {Or: true, Kind: ipfw.OptEstablished}},
+		},
+		{
+			name:  "group then a plain option",
+			input: "{ not established or established } established",
+			n:     46,
+			options: []ipfw.Opt{
+				{Neg: true, Kind: ipfw.OptEstablished},
+				{Or: true, Kind: ipfw.OptEstablished},
+				established,
+			},
+		},
+		{
+			name:    "group without or keeps the first member",
+			input:   "{ established established }",
+			n:       14,
+			err:     ipfw.ErrExpectedOr,
+			options: []ipfw.Opt{established},
+		},
+		{
+			name:    "unclosed group keeps the first member",
+			input:   "{ established",
+			n:       13,
+			err:     ipfw.ErrExpectedOr,
+			options: []ipfw.Opt{established},
+		},
+		{name: "empty group", input: "{ }", n: 2, err: ipfw.ErrUnknownOption},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -139,17 +176,17 @@ func Test_ParseOptions_StateError(t *testing.T) {
 	require.Equal(t, ipfw.ErrExpectedOpt, err)
 }
 
-// verifies that parsing an option list into a warmed-up state allocates
-// nothing.
-func Test_ParseOptions_NoAllocs(t *testing.T) {
-	input := "not established established\n"
+// verifies that parsing an option list with an or-group into a warmed-up
+// state allocates nothing.
+func Test_ParseOptions_Group_NoAllocs(t *testing.T) {
+	input := "{ not established or established } established\n"
 	var state ipfw.ReduceState
 	_, _ = ipfw.ParseOptions(input, &state, nil)
 	ok := true
 	allocs := testing.AllocsPerRun(100, func() {
 		state.Reset()
 		n, err := ipfw.ParseOptions(input, &state, nil)
-		if err != nil || n != 27 {
+		if err != nil || n != 46 {
 			ok = false
 		}
 	})
