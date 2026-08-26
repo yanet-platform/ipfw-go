@@ -65,10 +65,7 @@ type ProtoMatch struct {
 // with the error, an ErrorKind unless the state returned something else.
 func ParseProtocols(s string, state State) (int, error) {
 	rest, err := parseProtocols(s, state)
-	if err.Failed() {
-		return len(s) - len(err.At), err.ToError()
-	}
-	return len(s) - len(rest), nil
+	return consumed(s, rest, err)
 }
 
 // parseProtocols parses one protocol or a `{ a or b … }` group of them, the

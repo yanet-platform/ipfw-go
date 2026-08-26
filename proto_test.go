@@ -188,6 +188,16 @@ func (m rejectingState) IPProto(ProtoIPMatch) error {
 	return m.err
 }
 
+// SourceTarget implements State.
+func (m rejectingState) SourceTarget(Target) error {
+	return m.err
+}
+
+// DestinationTarget implements State.
+func (m rejectingState) DestinationTarget(Target) error {
+	return m.err
+}
+
 // verifies that an error from the state comes back as is, positioned at
 // the rejected token.
 func Test_ParseProtocols_StateError(t *testing.T) {

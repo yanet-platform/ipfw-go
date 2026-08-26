@@ -27,6 +27,15 @@ func (m fail) ToError() error {
 	return m.Kind
 }
 
+// consumed reports a sub-parser outcome the public way: the number of bytes
+// consumed, or the offset of the failure together with its error.
+func consumed(s, rest string, err fail) (int, error) {
+	if err.Failed() {
+		return len(s) - len(err.At), err.ToError()
+	}
+	return len(s) - len(rest), nil
+}
+
 // failFrom turns the error a State or a hook returned into a failure at the
 // rejected token.
 //

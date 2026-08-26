@@ -27,3 +27,67 @@ type Target struct {
 	// custom token, and empty for any, me and me6.
 	Text string
 }
+
+// ParseSourceTargets parses the source part of a rule body into state.
+//
+// It returns the number of bytes consumed, or on failure its offset together
+// with the error, an ErrorKind unless the state returned something else.
+func ParseSourceTargets(s string, state State) (int, error) {
+	rest, err := parseTargets(s, state, false)
+	return consumed(s, rest, err)
+}
+
+// ParseDestinationTargets is ParseSourceTargets for the destination part.
+func ParseDestinationTargets(s string, state State) (int, error) {
+	rest, err := parseTargets(s, state, true)
+	return consumed(s, rest, err)
+}
+
+// parseTargets parses one target or a `{ a or b … }` group of them into the
+// source or the destination side of the state.
+func parseTargets(s string, state State, destination bool) (string, fail) {
+	return orDelimited(s, func(element string) (string, fail) {
+		return parseTargetElement(element, state, destination)
+	})
+}
+
+// parseTargetElement parses one optionally negated target, a failure
+// pointing at the token after the negation.
+func parseTargetElement(s string, state State, destination bool) (string, fail) {
+	rest, neg := notWS1(s)
+	token, afterToken := scanTargetToken(rest)
+	target, kind := classifyTarget(token)
+	if kind != 0 {
+		return s, fail{Kind: kind, At: rest}
+	}
+	target.Neg = neg
+	var err error
+	if destination {
+		err = state.DestinationTarget(target)
+	} else {
+		err = state.SourceTarget(target)
+	}
+	if failure := failFrom(err, rest); failure.Failed() {
+		return s, failure
+	}
+	return afterToken, fail{}
+}
+
+func scanTargetToken(s string) (string, string) {
+	return takeWhile(s, isTargetByte)
+}
+
+func isTargetByte(c byte) bool {
+	return !isASCIISpace(c) && c != '}' && c != ','
+}
+
+// classifyTarget tells the kind of a target from its shape without parsing
+// it, a kind per step until every shape is known.
+func classifyTarget(token string) (Target, ErrorKind) {
+	switch token {
+	case "any":
+		return Target{Kind: TargetAny}, 0
+	default:
+		return Target{}, ErrExpectedTarget
+	}
+}

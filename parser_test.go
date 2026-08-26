@@ -700,10 +700,13 @@ func Test_Parser_Next_ActionCheckState(t *testing.T) {
 		checkState(1, "add 10 check-state :x", "x", 10),
 	)
 
-	// TODO(070): the second line is `add pass ip from any to any` in the reference.
-	parser := ipfw.NewParser("add check-state :any\nadd check-state\n")
+	parser := ipfw.NewParser("add check-state :any\nadd pass ip from any to any\n")
 	next(t, parser, checkState(1, "add check-state :any", "any", 0))
-	next(t, parser, checkState(2, "add check-state", "", 0))
+	var state ipfw.CollectState
+	rec, err := parser.Next(&state)
+	require.Nil(t, err)
+	require.Equal(t, passAnyToAny(2, "add pass ip from any to any"), rec)
+	require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), state)
 	next(t, parser, eof)
 
 	cases := []struct {
@@ -787,9 +790,29 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 18, Text: "add allow tcp from"},
 		},
 		{
-			name:     "source expected",
+			name:     "nothing after the source",
 			input:    "add allow tcp from any",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedTarget, Line: 1, Column: 19, Text: "add allow tcp from any"},
+			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 22, Text: "add allow tcp from any"},
+		},
+		{
+			name:     "unknown source",
+			input:    "add allow tcp from anything to any",
+			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedTarget, Line: 1, Column: 19, Text: "add allow tcp from anything to any"},
+		},
+		{
+			name:     "to missing",
+			input:    "add allow ip from any x to any",
+			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedPrefix, Line: 1, Column: 22, Text: "add allow ip from any x to any"},
+		},
+		{
+			name:     "nothing after to",
+			input:    "add allow ip from any to\n",
+			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 24, Text: "add allow ip from any to"},
+		},
+		{
+			name:     "trailing content after the destination",
+			input:    "add allow ip from any to any extra\n",
+			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedNewlineOrEOF, Line: 1, Column: 29, Text: "add allow ip from any to any extra"},
 		},
 		{
 			name:     "no protocol",
@@ -802,9 +825,9 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 17, Text: "add allow ip from"},
 		},
 		{
-			name:     "group then source expected",
+			name:     "group then nothing after the source",
 			input:    "add allow { tcp or udp } from any",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedTarget, Line: 1, Column: 30, Text: "add allow { tcp or udp } from any"},
+			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 33, Text: "add allow { tcp or udp } from any"},
 		},
 		{
 			name:     "group without separator",
@@ -831,4 +854,79 @@ func Test_Parser_Next_BodyProtocolEmittedBeforeFailure(t *testing.T) {
 	_, err = ipfw.NewParser("add allow ip x").Next(&state)
 	require.NotNil(t, err)
 	require.Equal(t, ipfw.CollectState{IPProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}}}, state)
+}
+
+// passAnyToAny is the record of a bare `add pass … from any to any` line.
+func passAnyToAny(line int, text string) ipfw.Record {
+	return ipfw.Record{
+		Line:        line,
+		Text:        text,
+		Kind:        ipfw.RecordInstruction,
+		Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
+	}
+}
+
+// anyToAnyState is the state of a `VERSION from any to any` body.
+func anyToAnyState(version ipfw.ProtoIP) ipfw.CollectState {
+	return ipfw.CollectState{
+		IPProtos:     []ipfw.ProtoIPMatch{{Proto: version}},
+		Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+		Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+	}
+}
+
+// verifies the simplest complete rule end to end: the record and every
+// token of the body in the state.
+func Test_Parser_Next_AnyToAny(t *testing.T) {
+	var state ipfw.CollectState
+	rec, err := ipfw.NewParser("add pass ip from any to any\n").Next(&state)
+	require.Nil(t, err)
+	require.Equal(t, passAnyToAny(1, "add pass ip from any to any"), rec)
+	require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), state)
+}
+
+// verifies that a braced single target and trailing whitespace parse, the
+// text being trimmed.
+func Test_Parser_Next_TrailingWhitespace(t *testing.T) {
+	var state ipfw.CollectState
+	rec, err := ipfw.NewParser("add allow tcp from any to { any } \n").Next(&state)
+	require.Nil(t, err)
+	require.Equal(t, passAnyToAny(1, "add allow tcp from any to { any }"), rec)
+	require.Equal(t, ipfw.CollectState{
+		Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+		Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+		Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+	}, state)
+}
+
+// verifies that an inline comment after the body is kept raw and is part
+// of the line text.
+func Test_Parser_Next_InlineComment(t *testing.T) {
+	var state ipfw.CollectState
+	input := "add pass ip from any to any // {\"id\": \"PUNCHER-123\", \"log\": true}\n"
+	rec, err := ipfw.NewParser(input).Next(&state)
+	require.Nil(t, err)
+	expected := passAnyToAny(1, "add pass ip from any to any // {\"id\": \"PUNCHER-123\", \"log\": true}")
+	expected.Instruction.InlineComment = " {\"id\": \"PUNCHER-123\", \"log\": true}"
+	require.Equal(t, expected, rec)
+	require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), state)
+}
+
+// verifies that parsing a complete rule into a warmed-up state allocates
+// nothing.
+func Test_Parser_Body_NoAllocs(t *testing.T) {
+	src := "add pass ip from any to any\n"
+	parser := ipfw.NewParser(src)
+	var state ipfw.CollectState
+	_, _ = parser.Next(&state)
+	ok := true
+	allocs := testing.AllocsPerRun(100, func() {
+		parser.Reset(src)
+		state.Reset()
+		if _, err := parser.Next(&state); err != nil {
+			ok = false
+		}
+	})
+	require.True(t, ok)
+	require.Zero(t, allocs)
 }
