@@ -384,3 +384,10 @@ func Test_Parser_Next_ActionPass(t *testing.T) {
 		})
 	}
 }
+
+// verifies that a deny action hands over to the body and that a keyword
+// glued to a longer word fails at the whitespace check after it.
+func Test_Parser_Next_ActionDeny(t *testing.T) {
+	nextError(t, ipfw.NewParser("add drop ip"), ipfw.ParseError{Kind: ipfw.ErrExpectedEitherIPOrProto, Line: 1, Column: 9, Text: "add drop ip"})
+	nextError(t, ipfw.NewParser("add denyall ip"), ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 8, Text: "add denyall ip"})
+}

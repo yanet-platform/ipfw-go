@@ -30,6 +30,8 @@ func (m Action) String() string {
 	switch m.Kind {
 	case ActionPass:
 		return "pass"
+	case ActionDeny:
+		return "deny"
 	default:
 		return ""
 	}
@@ -56,12 +58,25 @@ type SkipTo struct {
 	Number uint32
 }
 
-// parseAction recognizes the action keyword by prefix, the most frequent
+// The keyword-only actions in the order they are tried, the most frequent
 // spellings first.
+var actionKeywords = [...]struct {
+	keyword string
+	kind    ActionKind
+}{
+	{"allow", ActionPass},
+	{"pass", ActionPass},
+	{"accept", ActionPass},
+	{"permit", ActionPass},
+	{"deny", ActionDeny},
+	{"drop", ActionDeny},
+}
+
+// parseAction recognizes the action keyword by prefix.
 func parseAction(s string) (Action, string, fail) {
-	for _, keyword := range [...]string{"allow", "pass", "accept", "permit"} {
-		if rest, ok := prefix(s, keyword); ok {
-			return Action{Kind: ActionPass}, rest, fail{}
+	for _, entry := range actionKeywords {
+		if rest, ok := prefix(s, entry.keyword); ok {
+			return Action{Kind: entry.kind}, rest, fail{}
 		}
 	}
 	return Action{}, s, fail{Kind: ErrExpectedAction, At: s}

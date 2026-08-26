@@ -42,3 +42,29 @@ func Test_ParseAction_Pass(t *testing.T) {
 func Test_Action_String_Pass(t *testing.T) {
 	require.Equal(t, "pass", Action{Kind: ActionPass}.String())
 }
+
+// verifies that both spellings of the deny action are recognized by prefix
+// and print as deny.
+func Test_ParseAction_Deny(t *testing.T) {
+	cases := []struct {
+		name   string
+		input  string
+		action Action
+		kind   ErrorKind
+		rest   string
+	}{
+		{name: "deny", input: "deny ip from any to any", action: Action{Kind: ActionDeny}, rest: " ip from any to any"},
+		{name: "drop", input: "drop ip", action: Action{Kind: ActionDeny}, rest: " ip"},
+		{name: "prefix match leaves the tail", input: "denyall ip", action: Action{Kind: ActionDeny}, rest: "all ip"},
+		{name: "denied is not deny", input: "denied ip", kind: ErrExpectedAction, rest: "denied ip"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			action, rest, err := parseAction(tc.input)
+			require.Equal(t, tc.kind, err.Kind)
+			require.Equal(t, tc.action, action)
+			require.Equal(t, tc.rest, rest)
+		})
+	}
+	require.Equal(t, "deny", Action{Kind: ActionDeny}.String())
+}
