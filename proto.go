@@ -71,8 +71,12 @@ func ParseProtocols(s string, state State) (int, error) {
 	return len(s) - len(rest), nil
 }
 
+// parseProtocols parses one protocol or a `{ a or b … }` group of them, the
+// list being an alternative by nature so no grouping is conveyed.
 func parseProtocols(s string, state State) (string, fail) {
-	return parseProtocolElement(s, state)
+	return orDelimited(s, func(element string) (string, fail) {
+		return parseProtocolElement(element, state)
+	})
 }
 
 // parseProtocolElement parses one protocol, a failure pointing at the

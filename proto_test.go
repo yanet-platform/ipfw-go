@@ -106,6 +106,60 @@ func Test_ParseProtocols_Table(t *testing.T) {
 		},
 		{name: "invalid", input: "_ from any to any", n: 0, err: ErrExpectedEitherIPOrProto},
 		{name: "negation without a protocol", input: "not _", n: 0, err: ErrExpectedEitherIPOrProto},
+		{
+			name:  "group",
+			input: "{ tcp or udp } from any to any",
+			n:     14,
+			state: CollectState{Protos: []ProtoMatch{{Proto: Proto{Name: "tcp"}}, {Proto: Proto{Name: "udp"}}}},
+		},
+		{
+			name:  "group without inner spaces",
+			input: "{tcp or udp} x",
+			n:     12,
+			state: CollectState{Protos: []ProtoMatch{{Proto: Proto{Name: "tcp"}}, {Proto: Proto{Name: "udp"}}}},
+		},
+		{
+			name:  "group across a newline",
+			input: "{ tcp or\nudp } x",
+			n:     14,
+			state: CollectState{Protos: []ProtoMatch{{Proto: Proto{Name: "tcp"}}, {Proto: Proto{Name: "udp"}}}},
+		},
+		{
+			name:  "group mixing an IP keyword and a transport name",
+			input: "{ ip or tcp } x",
+			n:     13,
+			state: CollectState{
+				IPProtos: []ProtoIPMatch{{Proto: ProtoIPAny}},
+				Protos:   []ProtoMatch{{Proto: Proto{Name: "tcp"}}},
+			},
+		},
+		{
+			name:  "negation inside a group",
+			input: "{ not tcp or udp }",
+			n:     18,
+			state: CollectState{Protos: []ProtoMatch{{Neg: true, Proto: Proto{Name: "tcp"}}, {Proto: Proto{Name: "udp"}}}},
+		},
+		{
+			name:  "missing separator",
+			input: "{ tcp udp } from any to any",
+			n:     6,
+			err:   ErrExpectedOr,
+			state: CollectState{Protos: []ProtoMatch{{Proto: Proto{Name: "tcp"}}}},
+		},
+		{
+			name:  "unclosed group",
+			input: "{ tcp",
+			n:     5,
+			err:   ErrExpectedOr,
+			state: CollectState{Protos: []ProtoMatch{{Proto: Proto{Name: "tcp"}}}},
+		},
+		{
+			name:  "invalid element inside a group",
+			input: "{ tcp or _ }",
+			n:     9,
+			err:   ErrExpectedEitherIPOrProto,
+			state: CollectState{Protos: []ProtoMatch{{Proto: Proto{Name: "tcp"}}}},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -200,17 +254,20 @@ func Test_ParseProto_NameRoundTrip(t *testing.T) {
 	})
 }
 
-// verifies that protocol parsing into a warmed-up state allocates nothing.
+// verifies that protocol parsing into a warmed-up state allocates nothing,
+// groups included.
 func Test_ParseProtocols_NoAllocs(t *testing.T) {
-	var state CollectState
-	_, _ = ParseProtocols("not tcp from", &state)
-	ok := true
-	allocs := testing.AllocsPerRun(100, func() {
-		state.Reset()
-		if n, err := ParseProtocols("not tcp from", &state); err != nil || n != 7 {
-			ok = false
-		}
-	})
-	require.True(t, ok)
-	require.Zero(t, allocs)
+	for _, input := range []string{"not tcp from", "{ not ip or tcp or 17 } from"} {
+		var state CollectState
+		_, _ = ParseProtocols(input, &state)
+		ok := true
+		allocs := testing.AllocsPerRun(100, func() {
+			state.Reset()
+			if _, err := ParseProtocols(input, &state); err != nil {
+				ok = false
+			}
+		})
+		require.True(t, ok, input)
+		require.Zero(t, allocs, input)
+	}
 }

@@ -801,6 +801,16 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 			input:    "add allow ip from",
 			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 17, Text: "add allow ip from"},
 		},
+		{
+			name:     "group then source expected",
+			input:    "add allow { tcp or udp } from any",
+			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedTarget, Line: 1, Column: 30, Text: "add allow { tcp or udp } from any"},
+		},
+		{
+			name:     "group without separator",
+			input:    "add allow { tcp udp } from any",
+			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedOr, Line: 1, Column: 16, Text: "add allow { tcp udp } from any"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
