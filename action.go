@@ -1,5 +1,7 @@
 package ipfw
 
+import "strconv"
+
 // ActionKind is what a rule does with a matching packet.
 type ActionKind uint8
 
@@ -37,6 +39,8 @@ func (m Action) String() string {
 		return "deny"
 	case ActionCount:
 		return "count"
+	case ActionSkipTo:
+		return "skipto " + m.SkipTo.String()
 	default:
 		return ""
 	}
@@ -63,6 +67,21 @@ type SkipTo struct {
 	Number uint32
 }
 
+// String returns the target the way it is written after skipto, empty for
+// a kind without one.
+func (m SkipTo) String() string {
+	switch m.Kind {
+	case SkipToLabel:
+		return ":" + m.Label
+	case SkipToNumber:
+		return strconv.FormatUint(uint64(m.Number), 10)
+	case SkipToTableArg:
+		return "tablearg"
+	default:
+		return ""
+	}
+}
+
 // The keyword-only actions in the order they are tried, the most frequent
 // spellings first.
 var actionKeywords = [...]struct {
@@ -85,5 +104,37 @@ func parseAction(s string) (Action, string, fail) {
 			return Action{Kind: entry.kind}, rest, fail{}
 		}
 	}
+	if rest, ok := prefix(s, "skipto"); ok {
+		rest, ok = ws1(rest)
+		if !ok {
+			return Action{}, s, fail{Kind: ErrExpectedWhitespace, At: rest}
+		}
+		var target SkipTo
+		var err fail
+		target, rest, err = parseSkipTo(rest)
+		if err.Failed() {
+			return Action{}, s, err
+		}
+		return Action{Kind: ActionSkipTo, SkipTo: target}, rest, fail{}
+	}
 	return Action{}, s, fail{Kind: ErrExpectedAction, At: s}
+}
+
+// parseSkipTo reads a `:label`, a rule number or `tablearg`.
+func parseSkipTo(s string) (SkipTo, string, fail) {
+	if rest, ok := prefix(s, ":"); ok {
+		var label string
+		label, rest = token(rest)
+		if label == "" {
+			return SkipTo{}, s, fail{Kind: ErrExpectedToken, At: rest}
+		}
+		return SkipTo{Kind: SkipToLabel, Label: label}, rest, fail{}
+	}
+	if number, rest, kind := parseU32(s); kind == 0 {
+		return SkipTo{Kind: SkipToNumber, Number: number}, rest, fail{}
+	}
+	if rest, ok := prefix(s, "tablearg"); ok {
+		return SkipTo{Kind: SkipToTableArg}, rest, fail{}
+	}
+	return SkipTo{}, s, fail{Kind: ErrExpectedSkipTo, At: s}
 }

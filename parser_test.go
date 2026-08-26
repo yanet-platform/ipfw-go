@@ -396,3 +396,24 @@ func Test_Parser_Next_ActionDeny(t *testing.T) {
 func Test_Parser_Next_ActionCount(t *testing.T) {
 	nextError(t, ipfw.NewParser("add count ip"), ipfw.ParseError{Kind: ipfw.ErrExpectedEitherIPOrProto, Line: 1, Column: 10, Text: "add count ip"})
 }
+
+// verifies that a skipto action with each target kind hands over to the
+// body and that a missing or unknown target is positioned after the keyword.
+func Test_Parser_Next_ActionSkipTo(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		expected ipfw.ParseError
+	}{
+		{name: "number target", input: "add skipto 1500 ip", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedEitherIPOrProto, Line: 1, Column: 16, Text: "add skipto 1500 ip"}},
+		{name: "label target", input: "add skipto :X ip", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedEitherIPOrProto, Line: 1, Column: 14, Text: "add skipto :X ip"}},
+		{name: "tablearg target", input: "add skipto tablearg ip", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedEitherIPOrProto, Line: 1, Column: 20, Text: "add skipto tablearg ip"}},
+		{name: "missing target", input: "add skipto", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 10, Text: "add skipto"}},
+		{name: "unknown target", input: "add skipto x", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedSkipTo, Line: 1, Column: 11, Text: "add skipto x"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			nextError(t, ipfw.NewParser(tc.input), tc.expected)
+		})
+	}
+}
