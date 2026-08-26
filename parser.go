@@ -5,14 +5,6 @@ import (
 	"strings"
 )
 
-// Parser reads a ruleset line by line.
-type Parser struct {
-	rest   string
-	line   int
-	opts   parserOptions
-	record Record
-}
-
 // parserOptions is what a ParserOption configures. Hooks will be its fields.
 type parserOptions struct{}
 
@@ -22,6 +14,14 @@ func newParserOptions() parserOptions {
 
 // ParserOption configures a Parser, see the With functions.
 type ParserOption func(*parserOptions)
+
+// Parser reads a ruleset line by line.
+type Parser struct {
+	rest   string
+	line   int
+	opts   parserOptions
+	record Record
+}
 
 // NewParser returns a parser over src.
 func NewParser(src string, options ...ParserOption) *Parser {
