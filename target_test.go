@@ -12,8 +12,8 @@ import (
 // report the consumed length, and position a failure at the token.
 //
 // A token runs up to whitespace, a closing brace or a comma. The keywords
-// `any`, `me` and `me6` and IPv4 and IPv6 network text are the shapes known
-// so far.
+// `any`, `me` and `me6`, IPv4 and IPv6 network text and hostnames are the
+// shapes known so far.
 func Test_ParseTargets_Table(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -190,6 +190,78 @@ func Test_ParseTargets_Table(t *testing.T) {
 			n:     0,
 			err:   ipfw.ErrExpectedTarget,
 		},
+		{
+			name:  "hostname",
+			input: "host.example.com to any",
+			n:     16,
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetHostname, Text: "host.example.com"}},
+			},
+		},
+		{
+			name:  "hostname starting with a keyword",
+			input: "any.example.com to any",
+			n:     15,
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetHostname, Text: "any.example.com"}},
+			},
+		},
+		{
+			name:  "hostname with a dash and an underscore",
+			input: "foo-bar_1.example.com to any",
+			n:     21,
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetHostname, Text: "foo-bar_1.example.com"}},
+			},
+		},
+		{
+			name:  "digits with a letter suffix are a hostname",
+			input: "192.0.2.1abc to any",
+			n:     12,
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetHostname, Text: "192.0.2.1abc"}},
+			},
+		},
+		{
+			name:  "negated hostname",
+			input: "not host.example.com x",
+			n:     20,
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Neg: true, Kind: ipfw.TargetHostname, Text: "host.example.com"}},
+			},
+		},
+		{
+			name:  "quoted hostname",
+			input: "`node-1.example.net' to any",
+			n:     20,
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetHostname, Text: "node-1.example.net"}},
+			},
+		},
+		{
+			name:  "quoted hostname without the closing quote",
+			input: "`x.y to any",
+			n:     0,
+			err:   ipfw.ErrExpectedHostnameEscapeClose,
+		},
+		{
+			name:  "quoted hostname of the wrong shape",
+			input: "`123' to any",
+			n:     0,
+			err:   ipfw.ErrExpectedHostname,
+		},
+		{
+			name:  "empty quoted hostname",
+			input: "`' to any",
+			n:     0,
+			err:   ipfw.ErrExpectedHostname,
+		},
+		{
+			name:  "name without a dot",
+			input: "localhost to any",
+			n:     0,
+			err:   ipfw.ErrExpectedTarget,
+		},
 		{name: "braced single", input: "{ any } x", n: 7, state: ipfw.CollectState{Sources: []ipfw.Target{{Kind: ipfw.TargetAny}}}},
 		{name: "empty input", input: "", n: 0, err: ipfw.ErrExpectedTarget},
 		{name: "unknown target", input: "anything to", n: 0, err: ipfw.ErrExpectedTarget},
@@ -227,14 +299,14 @@ func Test_ParseTargets_StateError(t *testing.T) {
 
 // verifies that classifying network text allocates nothing.
 func Test_ParseTargets_NoAllocs(t *testing.T) {
-	input := "{ 192.0.2.0/24 or not 2001:db8::/32 } to any"
+	input := "{ 192.0.2.0/24 or not 2001:db8::/32 or `host.example.com' } to any"
 	var state ipfw.CollectState
 	_, _ = ipfw.ParseSourceTargets(input, &state)
 	ok := true
 	allocs := testing.AllocsPerRun(100, func() {
 		state.Reset()
 		n, err := ipfw.ParseSourceTargets(input, &state)
-		if err != nil || n != 37 {
+		if err != nil || n != 59 {
 			ok = false
 		}
 	})

@@ -589,6 +589,26 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 			},
 		},
 		{
+			name:  "quoted hostname left open",
+			input: "add allow ip from `x.y to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedHostnameEscapeClose,
+				Line:   1,
+				Column: 18,
+				Text:   "add allow ip from `x.y to any",
+			},
+		},
+		{
+			name:  "name without a dot is not a target",
+			input: "add allow ip from localhost to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedTarget,
+				Line:   1,
+				Column: 18,
+				Text:   "add allow ip from localhost to any",
+			},
+		},
+		{
 			name:     "to missing",
 			input:    "add allow ip from any x to any",
 			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedPrefix, Line: 1, Column: 22, Text: "add allow ip from any x to any"},
@@ -745,6 +765,27 @@ func Test_Parser_Next_Network6MappedIPv4(t *testing.T) {
 		IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
 		Sources:      []ipfw.Target{{Kind: ipfw.TargetNetwork6, Text: "::ffff:192.0.2.1"}},
 		Destinations: []ipfw.Target{{Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"}},
+	}, state)
+}
+
+// verifies that a plain and a quoted hostname reach the state by name,
+// the quotes stripped.
+func Test_Parser_Next_Hostname(t *testing.T) {
+	var state ipfw.CollectState
+	rec, err := ipfw.NewParser(
+		"add allow tcp from { host.example.com } to `node-1.example.net'\n",
+	).Next(&state)
+	require.Nil(t, err)
+	require.Equal(t, ipfw.Record{
+		Line:        1,
+		Text:        "add allow tcp from { host.example.com } to `node-1.example.net'",
+		Kind:        ipfw.RecordInstruction,
+		Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
+	}, *rec)
+	require.Equal(t, ipfw.CollectState{
+		Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+		Sources:      []ipfw.Target{{Kind: ipfw.TargetHostname, Text: "host.example.com"}},
+		Destinations: []ipfw.Target{{Kind: ipfw.TargetHostname, Text: "node-1.example.net"}},
 	}, state)
 }
 

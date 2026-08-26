@@ -112,7 +112,29 @@ func classifyTarget(token string) (Target, ErrorKind) {
 	if isNetwork4Text(token) {
 		return Target{Kind: TargetNetwork4, Text: token}, 0
 	}
+	if token != "" && token[0] == '`' {
+		return classifyQuotedHostname(token)
+	}
+	if isHostnameText(token) {
+		return Target{Kind: TargetHostname, Text: token}, 0
+	}
 	return Target{}, ErrExpectedTarget
+}
+
+// classifyQuotedHostname strips the backtick and the closing quote of a
+// “ `name' “ token, the name inside having to be a hostname.
+//
+// Unlike a plain token of the wrong shape, a quoted one cannot be anything
+// else, so it is an error rather than a fallthrough.
+func classifyQuotedHostname(token string) (Target, ErrorKind) {
+	if len(token) < 2 || token[len(token)-1] != '\'' {
+		return Target{}, ErrExpectedHostnameEscapeClose
+	}
+	name := token[1 : len(token)-1]
+	if !isHostnameText(name) {
+		return Target{}, ErrExpectedHostname
+	}
+	return Target{Kind: TargetHostname, Text: name}, 0
 }
 
 // isNetwork6Text reports whether the token is made of hex digits, colons,
@@ -139,4 +161,29 @@ func isNetwork4Text(token string) bool {
 
 func isNetwork4Byte(c byte) bool {
 	return c >= '0' && c <= '9' || c == '.' || c == '/'
+}
+
+// isHostnameText reports whether the token is letters, digits, dots, dashes
+// and underscores with at least one dot and one letter.
+//
+// The letter tells a hostname from IPv4 text and the dot from a keyword,
+// both checked before.
+func isHostnameText(token string) bool {
+	hasDot, hasLetter := false, false
+	for idx := range len(token) {
+		switch c := token[idx]; {
+		case c == '.':
+			hasDot = true
+		case isASCIILetter(c):
+			hasLetter = true
+		case c >= '0' && c <= '9', c == '-', c == '_':
+		default:
+			return false
+		}
+	}
+	return hasDot && hasLetter
+}
+
+func isASCIILetter(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }
