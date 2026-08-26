@@ -95,7 +95,7 @@ func (m *Parser) parseLine(text string, state State) (string, fail) {
 		if !ok {
 			return text, fail{Kind: ErrExpectedWhitespace, At: rest}
 		}
-		record.Table, rest, err = m.parseTable(rest)
+		record.Table, rest, err = parseTable(rest)
 		if err.Failed() {
 			return text, err
 		}
@@ -299,8 +299,74 @@ func parseInlineComment(s string) (string, string) {
 	return takeWhile(rest, isNotNewline)
 }
 
-func (m *Parser) parseTable(s string) (Table, string, fail) {
-	return Table{}, s, fail{Kind: ErrExpectedTableCommand, At: s}
+// parseTable parses `NAME create|add …` after `table `.
+func parseTable(s string) (Table, string, fail) {
+	name, rest := token(s)
+	if name == "" {
+		return Table{}, s, fail{Kind: ErrExpectedToken, At: s}
+	}
+	rest, ok := ws1(rest)
+	if !ok {
+		return Table{}, s, fail{Kind: ErrExpectedWhitespace, At: rest}
+	}
+	table := Table{Name: name}
+	var err fail
+	switch {
+	case strings.HasPrefix(rest, "create"):
+		table.Kind = TableCreate
+		table.Type, rest, err = parseTableCreate(rest[len("create"):])
+	default:
+		return Table{}, s, fail{Kind: ErrExpectedTableCommand, At: rest}
+	}
+	if err.Failed() {
+		return Table{}, s, err
+	}
+	return table, rest, fail{}
+}
+
+// parseTableCreate parses the options after `create`, the whitespace after
+// the keyword being required even with none, and the last `type` winning.
+func parseTableCreate(s string) (TableType, string, fail) {
+	rest, ok := ws1(s)
+	if !ok {
+		return TableTypeUnset, s, fail{Kind: ErrExpectedWhitespace, At: rest}
+	}
+	tableType := TableTypeUnset
+	buf, ok := prefix(rest, "type")
+	for ok {
+		var kind ErrorKind
+		if buf, ok = ws1(buf); !ok {
+			return TableTypeUnset, s, fail{Kind: ErrExpectedWhitespace, At: buf}
+		}
+		if tableType, buf, kind = parseTableType(buf); kind != 0 {
+			return TableTypeUnset, s, fail{Kind: kind, At: buf}
+		}
+		rest = buf
+		buf, ok = ws1Keyword(rest, "type")
+	}
+	return tableType, rest, fail{}
+}
+
+// tableTypeNames are the table types by keyword, in the order tried.
+var tableTypeNames = [...]struct {
+	name      string
+	tableType TableType
+}{
+	{"addr", TableTypeAddr},
+	{"iface", TableTypeIface},
+	{"number", TableTypeNumber},
+	{"flow", TableTypeFlow},
+	{"mac", TableTypeMAC},
+}
+
+// parseTableType tells a table type by its keyword, matching by prefix.
+func parseTableType(s string) (TableType, string, ErrorKind) {
+	for idx := range tableTypeNames {
+		if rest, ok := prefix(s, tableTypeNames[idx].name); ok {
+			return tableTypeNames[idx].tableType, rest, 0
+		}
+	}
+	return TableTypeUnset, s, ErrExpectedTableType
 }
 
 func isNotNewline(c byte) bool {

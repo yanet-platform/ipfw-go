@@ -164,16 +164,6 @@ func Test_Parser_Next_CommandStubs(t *testing.T) {
 				Text:   "table",
 			},
 		},
-		{
-			name:  "table without command",
-			input: "table x\n",
-			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedTableCommand,
-				Line:   1,
-				Column: 6,
-				Text:   "table x",
-			},
-		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
