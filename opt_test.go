@@ -155,6 +155,36 @@ func Test_ParseOptions_Table(t *testing.T) {
 			options: []ipfw.Opt{established},
 		},
 		{name: "empty group", input: "{ }", n: 2, err: ipfw.ErrUnknownOption},
+		{
+			name:    "in",
+			input:   "in",
+			n:       2,
+			options: []ipfw.Opt{{Kind: ipfw.OptIn}},
+		},
+		{
+			name:    "out",
+			input:   "out",
+			n:       3,
+			options: []ipfw.Opt{{Kind: ipfw.OptOut}},
+		},
+		{
+			name:    "in then out",
+			input:   "in out",
+			n:       6,
+			options: []ipfw.Opt{{Kind: ipfw.OptIn}, {Kind: ipfw.OptOut}},
+		},
+		{
+			name:    "group of in and out",
+			input:   "{ in or out }",
+			n:       13,
+			options: []ipfw.Opt{{Kind: ipfw.OptIn}, {Or: true, Kind: ipfw.OptOut}},
+		},
+		{
+			name:    "in with a suffix is in",
+			input:   "inet",
+			n:       2,
+			options: []ipfw.Opt{{Kind: ipfw.OptIn}},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -1538,6 +1538,58 @@ func Test_Parser_Next_Options(t *testing.T) {
 			},
 		},
 		{
+			name:  "in",
+			input: "add allow tcp from any to me in\n",
+			state: ipfw.ReduceState{
+				Protos:       tcp,
+				Sources:      anyToAny,
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetMe}},
+				Options:      []ipfw.Opt{{Kind: ipfw.OptIn}},
+			},
+		},
+		{
+			name:  "out",
+			input: "add allow udp from me domain to any out\n",
+			state: ipfw.ReduceState{
+				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "udp"}}},
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetMe}},
+				Destinations: anyToAny,
+				SourcePorts:  []ipfw.PortMatch{portService("domain")},
+				Options:      []ipfw.Opt{{Kind: ipfw.OptOut}},
+			},
+		},
+		{
+			name:  "in and out are not exclusive",
+			input: "add allow tcp from any to any in out\n",
+			state: ipfw.ReduceState{
+				Protos:       tcp,
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      []ipfw.Opt{{Kind: ipfw.OptIn}, {Kind: ipfw.OptOut}},
+			},
+		},
+		{
+			name:  "group of in and out",
+			input: "add allow tcp from any to any { in or out }\n",
+			state: ipfw.ReduceState{
+				Protos:       tcp,
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      []ipfw.Opt{{Kind: ipfw.OptIn}, {Or: true, Kind: ipfw.OptOut}},
+			},
+		},
+		{
+			name:    "in before an inline comment",
+			input:   "add allow tcp from any to any in // c\n",
+			comment: " c",
+			state: ipfw.ReduceState{
+				Protos:       tcp,
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      []ipfw.Opt{{Kind: ipfw.OptIn}},
+			},
+		},
+		{
 			name:    "option before an inline comment",
 			input:   "add allow tcp from any to any established // c\n",
 			comment: " c",
@@ -1637,6 +1689,16 @@ func Test_Parser_Next_OptionErrors(t *testing.T) {
 				Line:   1,
 				Column: 43,
 				Text:   "add allow tcp from any to any { established",
+			},
+		},
+		{
+			name:  "in with a suffix is in then trailing content",
+			input: "add allow ip from any to any inet",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedNewlineOrEOF,
+				Line:   1,
+				Column: 31,
+				Text:   "add allow ip from any to any inet",
 			},
 		},
 		{

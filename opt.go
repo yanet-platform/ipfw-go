@@ -122,15 +122,36 @@ func parseOptionGroup(s string, state State, hook OptionHook) (string, fail) {
 // by prefix and a failure pointing at the keyword.
 func parseOption(s string, state State, hook OptionHook, or bool) (string, fail) {
 	rest, neg := notWS1(s)
-	buf, ok := prefix(rest, "established")
+	kind, buf, ok := keywordOption(rest)
 	if !ok {
 		return s, fail{Kind: ErrUnknownOption, At: rest}
 	}
-	opt := Opt{Neg: neg, Or: or, Kind: OptEstablished}
+	opt := Opt{Neg: neg, Or: or, Kind: kind}
 	if err := failFrom(state.OnOption(opt), rest); err.Failed() {
 		return s, err
 	}
 	return buf, fail{}
+}
+
+// keywordOptions are the options without an argument, in the order they
+// are tried.
+var keywordOptions = [...]struct {
+	keyword string
+	kind    OptKind
+}{
+	{"established", OptEstablished},
+	{"in", OptIn},
+	{"out", OptOut},
+}
+
+// keywordOption tells an option without an argument by its keyword.
+func keywordOption(s string) (OptKind, string, bool) {
+	for idx := range keywordOptions {
+		if rest, ok := prefix(s, keywordOptions[idx].keyword); ok {
+			return keywordOptions[idx].kind, rest, true
+		}
+	}
+	return 0, s, false
 }
 
 // Opt is one rule option with the argument of its kind.
