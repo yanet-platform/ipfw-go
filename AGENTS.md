@@ -107,6 +107,9 @@ has every dependency: use `GOPROXY=off go get …` / `GOPROXY=off go mod tidy`.
   is what catches silent token drops.
 - `rapid.Check` for properties with simple oracles; native fuzzing for the
   parser entry points and `MatchIfMask`; seed corpora are checked in.
+- Benchmarks and fuzz targets live in the same `_test.go` file as the unit
+  tests of the code they exercise — no separate `*_bench_test.go` or
+  `fuzz_test.go` files.
 
 ## Session protocol (TDD, one feature per session)
 
