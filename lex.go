@@ -102,10 +102,13 @@ func isTokenByte(c byte) bool {
 	return !isASCIISpace(c)
 }
 
-// notWS1 consumes `not` only when whitespace follows, so a token that merely
-// starts with the keyword, such as a protocol named `nottcp`, is left alone.
-func notWS1(s string) (string, bool) {
-	rest, ok := prefix(s, "not")
+// keywordWS1 consumes the keyword only when whitespace follows, so a token
+// that merely starts with it is left alone.
+//
+// That is what tells a port named `topx` from the keyword `to` and a
+// protocol named `nottcp` from the negation.
+func keywordWS1(s, keyword string) (string, bool) {
+	rest, ok := prefix(s, keyword)
 	if !ok {
 		return s, false
 	}
@@ -114,6 +117,10 @@ func notWS1(s string) (string, bool) {
 		return s, false
 	}
 	return rest, true
+}
+
+func notWS1(s string) (string, bool) {
+	return keywordWS1(s, "not")
 }
 
 // parseU8 stops at the first non-digit. A missing or overflowing number is an

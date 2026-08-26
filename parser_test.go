@@ -546,6 +546,26 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 			},
 		},
 		{
+			name:  "to missing after the source port",
+			input: "add allow tcp from any 22 80 to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedPrefix,
+				Line:   1,
+				Column: 26,
+				Text:   "add allow tcp from any 22 80 to any",
+			},
+		},
+		{
+			name:  "nothing after the source port",
+			input: "add allow tcp from any 22",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 25,
+				Text:   "add allow tcp from any 22",
+			},
+		},
+		{
 			name:  "quoted hostname left open",
 			input: "add allow ip from `x.y to any",
 			expected: ipfw.ParseError{
@@ -559,20 +579,10 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 			name:  "table name cut at a space breaks the body",
 			input: "add allow ip from table(a b) to any",
 			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedPrefix,
+				Kind:   ipfw.ErrExpectedWhitespace,
 				Line:   1,
-				Column: 26,
+				Column: 27,
 				Text:   "add allow ip from table(a b) to any",
-			},
-		},
-		{
-			name:  "to missing",
-			input: "add allow ip from any x to any",
-			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedPrefix,
-				Line:   1,
-				Column: 22,
-				Text:   "add allow ip from any x to any",
 			},
 		},
 		{
@@ -587,12 +597,12 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 		},
 		{
 			name:  "trailing content after the destination",
-			input: "add allow ip from any to any extra\n",
+			input: "add allow ip from any to any 80 extra\n",
 			expected: ipfw.ParseError{
 				Kind:   ipfw.ErrExpectedNewlineOrEOF,
 				Line:   1,
-				Column: 29,
-				Text:   "add allow ip from any to any extra",
+				Column: 32,
+				Text:   "add allow ip from any to any 80 extra",
 			},
 		},
 		{
@@ -851,6 +861,101 @@ func Test_Parser_Next_TargetGroups(t *testing.T) {
 				Text:        strings.TrimSuffix(tc.input, "\n"),
 				Kind:        ipfw.RecordInstruction,
 				Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
+			}, *rec)
+			require.Equal(t, tc.state, state)
+		})
+	}
+}
+
+// verifies that a port after the source or the destination reaches the
+// state on its side.
+//
+// Only `to` followed by whitespace ends the source part, anything else in
+// that position is a source port.
+func Test_Parser_Next_Ports(t *testing.T) {
+	anyToAny := []ipfw.Target{{Kind: ipfw.TargetAny}}
+	cases := []struct {
+		name    string
+		input   string
+		comment string
+		state   ipfw.CollectState
+	}{
+		{
+			name:  "source port starting with to",
+			input: "add pass ip from any topx to any\n",
+			state: ipfw.CollectState{
+				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				SourcePorts:  []ipfw.PortMatch{portService("topx")},
+			},
+		},
+		{
+			name:  "source port starting with not",
+			input: "add pass ip from any notify to any\n",
+			state: ipfw.CollectState{
+				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				SourcePorts:  []ipfw.PortMatch{portService("notify")},
+			},
+		},
+		{
+			name:  "numbers on both sides",
+			input: "add allow tcp from any 22 to any 80\n",
+			state: ipfw.CollectState{
+				Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+				Sources:          anyToAny,
+				Destinations:     anyToAny,
+				SourcePorts:      []ipfw.PortMatch{portNumber(22)},
+				DestinationPorts: []ipfw.PortMatch{portNumber(80)},
+			},
+		},
+		{
+			name:  "destination service",
+			input: "add allow tcp from any to any domain\n",
+			state: ipfw.CollectState{
+				Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+				Sources:          anyToAny,
+				Destinations:     anyToAny,
+				DestinationPorts: []ipfw.PortMatch{portService("domain")},
+			},
+		},
+		{
+			name:  "source service",
+			input: "add allow tcp from any http to any\n",
+			state: ipfw.CollectState{
+				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				SourcePorts:  []ipfw.PortMatch{portService("http")},
+			},
+		},
+		{
+			name:    "destination port before an inline comment",
+			input:   "add allow tcp from any to any 80 // web\n",
+			comment: " web",
+			state: ipfw.CollectState{
+				Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+				Sources:          anyToAny,
+				Destinations:     anyToAny,
+				DestinationPorts: []ipfw.PortMatch{portNumber(80)},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var state ipfw.CollectState
+			rec, err := ipfw.NewParser(tc.input).Next(&state)
+			require.Nil(t, err)
+			require.Equal(t, ipfw.Record{
+				Line: 1,
+				Text: strings.TrimSuffix(tc.input, "\n"),
+				Kind: ipfw.RecordInstruction,
+				Instruction: ipfw.Instruction{
+					Action:        ipfw.Action{Kind: ipfw.ActionPass},
+					InlineComment: tc.comment,
+				},
 			}, *rec)
 			require.Equal(t, tc.state, state)
 		})

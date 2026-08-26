@@ -157,7 +157,8 @@ func (m *Parser) parseInstruction(s string, state State, instruction *Instructio
 	return rest, fail{}
 }
 
-// parseBody parses `PROTO from SRC to DST`, ports and options still to come.
+// parseBody parses `PROTO from SRC [PORT] to DST [PORT]`, options still to
+// come.
 func (m *Parser) parseBody(s string, state State) (string, fail) {
 	rest, err := parseProtocols(s, state)
 	if err.Failed() {
@@ -183,17 +184,38 @@ func (m *Parser) parseBody(s string, state State) (string, fail) {
 	if !ok {
 		return s, fail{Kind: ErrExpectedWhitespace, At: rest}
 	}
-	rest, ok = prefix(rest, "to")
-	if !ok {
-		return s, fail{Kind: ErrExpectedPrefix, At: rest}
-	}
-	rest, ok = ws1(rest)
-	if !ok {
-		return s, fail{Kind: ErrExpectedWhitespace, At: rest}
+	// Only `to` followed by whitespace ends the source part, so a port such
+	// as `topx` or `notify` is not mistaken for a keyword.
+	if afterTo, ok := keywordWS1(rest, "to"); ok {
+		rest = afterTo
+	} else {
+		rest, err = parsePorts(rest, state, false)
+		if err.Failed() {
+			return s, err
+		}
+		rest, ok = ws1(rest)
+		if !ok {
+			return s, fail{Kind: ErrExpectedWhitespace, At: rest}
+		}
+		rest, ok = prefix(rest, "to")
+		if !ok {
+			return s, fail{Kind: ErrExpectedPrefix, At: rest}
+		}
+		rest, ok = ws1(rest)
+		if !ok {
+			return s, fail{Kind: ErrExpectedWhitespace, At: rest}
+		}
 	}
 	rest, err = parseTargets(rest, state, true)
 	if err.Failed() {
 		return s, err
+	}
+	// Destination ports are optional, a failed attempt leaving the input
+	// where the destination ended.
+	if afterWS, ok := ws1(rest); ok {
+		if afterPorts, err := parsePorts(afterWS, state, true); !err.Failed() {
+			rest = afterPorts
+		}
 	}
 	return rest, fail{}
 }

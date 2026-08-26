@@ -28,3 +28,68 @@ type PortMatch struct {
 	// Range is the port range.
 	Range PortRange
 }
+
+// ParseSourcePorts parses the source port part of a rule body into state.
+//
+// It returns the number of bytes consumed, or on failure its offset together
+// with the error, an ErrorKind unless the state returned something else.
+func ParseSourcePorts(s string, state State) (int, error) {
+	rest, err := parsePorts(s, state, false)
+	return consumed(s, rest, err)
+}
+
+// ParseDestinationPorts is ParseSourcePorts for the destination part.
+func ParseDestinationPorts(s string, state State) (int, error) {
+	rest, err := parsePorts(s, state, true)
+	return consumed(s, rest, err)
+}
+
+// parsePorts parses one port range into the source or the destination side
+// of the state, a failure pointing at the port.
+func parsePorts(s string, state State, destination bool) (string, fail) {
+	portRange, rest, kind := parsePortRange(s)
+	if kind != 0 {
+		return s, fail{Kind: kind, At: s}
+	}
+	match := PortMatch{Range: portRange}
+	var err error
+	if destination {
+		err = state.DestinationPort(match)
+	} else {
+		err = state.SourcePort(match)
+	}
+	if failure := failFrom(err, s); failure.Failed() {
+		return s, failure
+	}
+	return rest, fail{}
+}
+
+// parsePortRange parses a single port for now, the range running from the
+// port to itself.
+func parsePortRange(s string) (PortRange, string, ErrorKind) {
+	port, rest, kind := parsePort(s)
+	if kind != 0 {
+		return PortRange{}, s, kind
+	}
+	return PortRange{Lo: port, Hi: port}, rest, 0
+}
+
+// parsePort reads a run of letters and digits, a number when every byte is
+// a digit and the value fits sixteen bits, a name otherwise.
+//
+// An overflowing number is a name like any other, since custom services may
+// be named by digits. An empty run is ErrExpectedPort.
+func parsePort(s string) (Port, string, ErrorKind) {
+	name, rest := takeWhile(s, isPortByte)
+	if name == "" {
+		return Port{}, s, ErrExpectedPort
+	}
+	if number, afterNumber, kind := parseU16(name); kind == 0 && afterNumber == "" {
+		return Port{Number: number}, rest, 0
+	}
+	return Port{Name: name}, rest, 0
+}
+
+func isPortByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+}
