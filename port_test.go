@@ -50,7 +50,8 @@ func (m rejectingState) DestinationPort(ipfw.PortMatch) error {
 // A port is a run of letters and digits up to a dash, a number when every
 // byte is a digit and the value fits sixteen bits, a name otherwise. A dash
 // makes a range of two ports and commas a list of ranges, each one emitted
-// as it is read. A `not` before the list negates every element.
+// as it is read. A `not` before the list negates every element. A backslash
+// escapes a dash so it does not end the port, the name keeping the escape.
 func Test_ParsePorts_Table(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -213,6 +214,48 @@ func Test_ParsePorts_Table(t *testing.T) {
 			err:   ipfw.ErrExpectedPort,
 		},
 		{
+			name:  "escaped dash in a name",
+			input: "ftp\\-data to any",
+			n:     9,
+			ports: []ipfw.PortMatch{portService("ftp\\-data")},
+		},
+		{
+			name:  "range of escaped names",
+			input: "ftp\\-data-ftp to any",
+			n:     13,
+			ports: []ipfw.PortMatch{portSpan(ipfw.Port{Name: "ftp\\-data"}, ipfw.Port{Name: "ftp"})},
+		},
+		{
+			name:  "escape at the second port",
+			input: "20-ftp\\-data",
+			n:     12,
+			ports: []ipfw.PortMatch{portSpan(ipfw.Port{Number: 20}, ipfw.Port{Name: "ftp\\-data"})},
+		},
+		{
+			name:  "escaped dash makes digits a name",
+			input: "2\\-2 x",
+			n:     4,
+			ports: []ipfw.PortMatch{portService("2\\-2")},
+		},
+		{
+			name:  "escape of anything but a dash",
+			input: "ftp\\x",
+			n:     3,
+			err:   ipfw.ErrUnexpectedEscape,
+		},
+		{
+			name:  "trailing backslash is part of the name",
+			input: "ftp\\ x",
+			n:     4,
+			ports: []ipfw.PortMatch{portService("ftp\\")},
+		},
+		{
+			name:  "backslash alone is a name",
+			input: "\\",
+			n:     1,
+			ports: []ipfw.PortMatch{portService("\\")},
+		},
+		{
 			name:  "empty input",
 			input: "",
 			n:     0,
@@ -293,14 +336,14 @@ func Test_ParsePorts_OverflowIsName(t *testing.T) {
 
 // verifies that parsing a port into a warmed-up state allocates nothing.
 func Test_ParsePorts_NoAllocs(t *testing.T) {
-	input := "not 22,1024-65535,http to any"
+	input := "not 22,1024-65535,ftp\\-data to any"
 	var state ipfw.CollectState
 	_, _ = ipfw.ParseSourcePorts(input, &state)
 	ok := true
 	allocs := testing.AllocsPerRun(100, func() {
 		state.Reset()
 		n, err := ipfw.ParseSourcePorts(input, &state)
-		if err != nil || n != 22 {
+		if err != nil || n != 27 {
 			ok = false
 		}
 	})

@@ -78,17 +78,17 @@ func parsePorts(s string, state State, destination bool) (string, fail) {
 // parsePortRange parses a port or a `lo-hi` range, a single port running
 // from itself to itself, the failure pointing at the missing port.
 func parsePortRange(s string) (PortRange, string, fail) {
-	lo, rest, kind := parsePort(s)
-	if kind != 0 {
-		return PortRange{}, s, fail{Kind: kind, At: s}
+	lo, rest, failure := parsePort(s)
+	if failure.Failed() {
+		return PortRange{}, s, failure
 	}
 	afterDash, ok := prefix(rest, "-")
 	if !ok {
 		return PortRange{Lo: lo, Hi: lo}, rest, fail{}
 	}
-	hi, rest, kind := parsePort(afterDash)
-	if kind != 0 {
-		return PortRange{}, s, fail{Kind: kind, At: afterDash}
+	hi, rest, failure := parsePort(afterDash)
+	if failure.Failed() {
+		return PortRange{}, s, failure
 	}
 	return PortRange{Lo: lo, Hi: hi}, rest, fail{}
 }
@@ -96,17 +96,39 @@ func parsePortRange(s string) (PortRange, string, fail) {
 // parsePort reads a run of letters and digits up to a dash, a number when
 // every byte is a digit and the value fits sixteen bits, a name otherwise.
 //
-// An overflowing number is a name like any other, since custom services may
-// be named by digits. An empty run is ErrExpectedPort.
-func parsePort(s string) (Port, string, ErrorKind) {
-	name, rest := takeWhile(s, isPortByte)
+// A backslash escapes a following dash so it does not end the port, the
+// name keeping both bytes for the resolver to see. A backslash before
+// anything else is ErrUnexpectedEscape at the backslash, and one at the end
+// of the run is part of the name, as in the Rust crate. An overflowing
+// number is a name like any other, since custom services may be named by
+// digits. An empty run is ErrExpectedPort.
+func parsePort(s string) (Port, string, fail) {
+	idx, escaped := 0, false
+	for idx < len(s) {
+		c := s[idx]
+		if !isPortByte(c) && c != '-' && c != '\\' {
+			break
+		}
+		if escaped {
+			if c != '-' {
+				return Port{}, s, fail{Kind: ErrUnexpectedEscape, At: s[idx-1:]}
+			}
+			escaped = false
+		} else if c == '\\' {
+			escaped = true
+		} else if c == '-' {
+			break
+		}
+		idx++
+	}
+	name, rest := s[:idx], s[idx:]
 	if name == "" {
-		return Port{}, s, ErrExpectedPort
+		return Port{}, s, fail{Kind: ErrExpectedPort, At: s}
 	}
 	if number, afterNumber, kind := parseU16(name); kind == 0 && afterNumber == "" {
-		return Port{Number: number}, rest, 0
+		return Port{Number: number}, rest, fail{}
 	}
-	return Port{Name: name}, rest, 0
+	return Port{Name: name}, rest, fail{}
 }
 
 func isPortByte(c byte) bool {

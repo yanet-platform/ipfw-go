@@ -566,6 +566,16 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 			},
 		},
 		{
+			name:  "escape of anything but a dash in a port",
+			input: "add pass tcp from any ftp\\x to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrUnexpectedEscape,
+				Line:   1,
+				Column: 25,
+				Text:   "add pass tcp from any ftp\\x to any",
+			},
+		},
+		{
 			name:  "nothing after the source port",
 			input: "add allow tcp from any 22",
 			expected: ipfw.ParseError{
@@ -1042,6 +1052,16 @@ func Test_Parser_Next_Ports(t *testing.T) {
 					negated(portSpan(ipfw.Port{Number: 22}, ipfw.Port{Number: 23})),
 					negated(portNumber(80)),
 				},
+			},
+		},
+		{
+			name:  "escaped service name",
+			input: "add pass tcp from any ftp\\-data to any\n",
+			state: ipfw.CollectState{
+				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				SourcePorts:  []ipfw.PortMatch{portService("ftp\\-data")},
 			},
 		},
 		{
