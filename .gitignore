@@ -1,1 +1,12 @@
+# Local planning and tooling.
 /.roadmap
+/.githooks
+
+# Test and profiling artifacts.
+*.test
+*.prof
+*.out
+testdata/rapid/
+
+# Production rulesets used by the optional corpus tests.
+/.assets/
