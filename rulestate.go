@@ -83,7 +83,10 @@ type TargetMatch[V4, V6 any] struct {
 	Net6 V6
 }
 
-// CustomTargetFunc turns a target of unknown shape into a typed one.
+// CustomTargetFunc turns a target of unknown shape into a typed one, the
+// negation being its to copy.
+//
+// An error rejects the target, an ErrorKind keeping its kind.
 type CustomTargetFunc[V4, V6 any] func(t Target) (TargetMatch[V4, V6], error)
 
 // RuleStateConfig is what a RuleState does beyond parsing networks.
@@ -206,7 +209,10 @@ func (m *RuleState[V4, V6]) typedTarget(target Target) (TargetMatch[V4, V6], err
 	case TargetHostname, TargetTable:
 		match.Name = target.Text
 	case TargetCustom:
-		return TargetMatch[V4, V6]{}, ErrExpectedTarget
+		if m.cfg.CustomTarget == nil {
+			return TargetMatch[V4, V6]{}, ErrExpectedTarget
+		}
+		return m.cfg.CustomTarget(target)
 	}
 	return match, nil
 }
