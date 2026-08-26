@@ -1,0 +1,215 @@
+package ipfw_test
+
+import (
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/yanet-platform/ipfw"
+)
+
+// lines joins the lines of an expected rendering, the trailing newline
+// included, so trailing spaces stay visible in the source.
+func lines(s ...string) string {
+	return strings.Join(s, "\n") + "\n"
+}
+
+// unknownAction is the error the step's example is rendered from.
+var unknownAction = &ipfw.ParseError{
+	Kind:   ipfw.ErrExpectedAction,
+	Line:   3,
+	Column: 4,
+	Text:   "add foobar :any # WOW",
+}
+
+// verifies the rustc layout with a path: header, position with a 1-based
+// column, gutter, source line and carets under the whole token.
+func Test_Diagnostic_WithPath(t *testing.T) {
+	require.Equal(t, lines(
+		"error: expected action",
+		"  --> fw.conf:3:5",
+		"   |",
+		" 3 | add foobar :any # WOW",
+		"   |     ^^^^^^",
+	), ipfw.NewDiagnostic(unknownAction, ipfw.WithPath("fw.conf")).String())
+}
+
+// verifies that without a path the position line holds line and column
+// only.
+func Test_Diagnostic_WithoutPath(t *testing.T) {
+	require.Equal(t, lines(
+		"error: expected action",
+		"  --> 3:5",
+		"   |",
+		" 3 | add foobar :any # WOW",
+		"   |     ^^^^^^",
+	), ipfw.NewDiagnostic(unknownAction).String())
+}
+
+// verifies that an error straight from the parser renders with the carets
+// under the token the parser stopped at.
+func Test_Diagnostic_FromParser(t *testing.T) {
+	_, err := ipfw.NewParser("add foobar :any # WOW\n").Next(ipfw.DiscardState{})
+	require.NotNil(t, err)
+	require.Equal(t, lines(
+		"error: expected action",
+		"  --> 1:5",
+		"   |",
+		" 1 | add foobar :any # WOW",
+		"   |     ^^^^^^",
+	), ipfw.NewDiagnostic(err).String())
+}
+
+// verifies that an error at the end of the line puts one caret under the
+// last byte.
+func Test_Diagnostic_EndOfLine(t *testing.T) {
+	err := &ipfw.ParseError{
+		Kind:   ipfw.ErrExpectedWhitespace,
+		Line:   1,
+		Column: 12,
+		Text:   "add deny log",
+	}
+	require.Equal(t, lines(
+		"error: expected whitespace",
+		"  --> 1:13",
+		"   |",
+		" 1 | add deny log",
+		"   |            ^",
+	), ipfw.NewDiagnostic(err).String())
+}
+
+// verifies that an empty line gets a single caret at the first column.
+func Test_Diagnostic_EmptyText(t *testing.T) {
+	err := &ipfw.ParseError{Kind: ipfw.ErrExpectedTarget, Line: 2, Column: 0, Text: ""}
+	require.Equal(t, lines(
+		"error: expected target",
+		"  --> 2:1",
+		"   |",
+		" 2 | ",
+		"   | ^",
+	), ipfw.NewDiagnostic(err).String())
+}
+
+// verifies that the error a state returned follows the kind in the header.
+func Test_Diagnostic_StateError(t *testing.T) {
+	err := &ipfw.ParseError{
+		Kind:   ipfw.ErrState,
+		Err:    errors.New("boom"),
+		Line:   1,
+		Column: 9,
+		Text:   "add pass ip from any to any",
+	}
+	require.Equal(t, lines(
+		"error: state error: boom",
+		"  --> 1:10",
+		"   |",
+		" 1 | add pass ip from any to any",
+		"   |          ^^",
+	), ipfw.NewDiagnostic(err).String())
+}
+
+// verifies that the gutter grows with the line number and the arrow moves
+// with it.
+func Test_Diagnostic_WideGutter(t *testing.T) {
+	err := &ipfw.ParseError{
+		Kind:   ipfw.ErrExpectedAction,
+		Line:   12345,
+		Column: 4,
+		Text:   "add foobar :any",
+	}
+	require.Equal(t, lines(
+		"error: expected action",
+		"      --> 12345:5",
+		"       |",
+		" 12345 | add foobar :any",
+		"       |     ^^^^^^",
+	), ipfw.NewDiagnostic(err).String())
+}
+
+// verifies the four width cases of the reference, the cut sides marked
+// and the carets staying under their token.
+//
+// A fitting line is left alone, a long one is cut on the right, the left
+// or both sides around the caret. Width 40 leaves 35 columns next to a
+// one-digit gutter.
+func Test_Diagnostic_WithWidth(t *testing.T) {
+	cases := []struct {
+		name     string
+		column   int
+		text     string
+		expected string
+	}{
+		{
+			name:   "fits",
+			column: 4,
+			text:   "add psss tcp from any to any",
+			expected: lines(
+				"error: unexpected token",
+				"  --> 1:5",
+				"   |",
+				" 1 | add psss tcp from any to any",
+				"   |     ^^^^",
+			),
+		},
+		{
+			name:   "cut on the right",
+			column: 4,
+			text:   "add psss tcp from { _LARGER_TABLE_NAME_ } to any",
+			expected: lines(
+				"error: unexpected token",
+				"  --> 1:5",
+				"   |",
+				" 1 | add psss tcp from { _LARGER_TAB ...",
+				"   |     ^^^^",
+			),
+		},
+		{
+			name:   "cut on the left",
+			column: 42,
+			text:   "add pass tcp from { _LARGER_TABLE_NAME_ } t2o any",
+			expected: lines(
+				"error: unexpected token",
+				"  --> 1:43",
+				"   |",
+				" 1 | ... { _LARGER_TABLE_NAME_ } t2o any",
+				"   |                             ^^^",
+			),
+		},
+		{
+			name:   "cut on both sides",
+			column: 42,
+			text:   "add pass tcp from { _LARGER_TABLE_NAME_ } t2o { _LARGER_TABLE_NAME_ } to any",
+			expected: lines(
+				"error: unexpected token",
+				"  --> 1:43",
+				"   |",
+				" 1 | ... ABLE_NAME_ } t2o { _LARGER_ ...",
+				"   |                  ^^^",
+			),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := &ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedPrefix,
+				Line:   1,
+				Column: tc.column,
+				Text:   tc.text,
+			}
+			require.Equal(t, tc.expected, ipfw.NewDiagnostic(err, ipfw.WithWidth(40)).String())
+		})
+	}
+}
+
+// verifies that WriteTo writes exactly the rendering and reports its
+// length.
+func Test_Diagnostic_WriteTo(t *testing.T) {
+	diagnostic := ipfw.NewDiagnostic(unknownAction, ipfw.WithPath("fw.conf"))
+	var buf strings.Builder
+	n, err := diagnostic.WriteTo(&buf)
+	require.NoError(t, err)
+	require.Equal(t, diagnostic.String(), buf.String())
+	require.Equal(t, int64(len(diagnostic.String())), n)
+}
