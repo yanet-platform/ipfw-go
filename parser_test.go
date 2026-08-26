@@ -1495,6 +1495,36 @@ func Test_Parser_Next_Options(t *testing.T) {
 			},
 		},
 		{
+			name:  "negated option",
+			input: "add allow tcp from any to any not established\n",
+			state: ipfw.ReduceState{
+				Protos:       tcp,
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      []ipfw.Opt{{Neg: true, Kind: ipfw.OptEstablished}},
+			},
+		},
+		{
+			name:  "negated token that is not an option is a negated port",
+			input: "add allow tcp from any to any not foo\n",
+			state: ipfw.ReduceState{
+				Protos:           tcp,
+				Sources:          anyToAny,
+				Destinations:     anyToAny,
+				DestinationPorts: []ipfw.PortMatch{negated(portService("foo"))},
+			},
+		},
+		{
+			name:  "not glued to a keyword is a port",
+			input: "add allow tcp from any to any notestablished\n",
+			state: ipfw.ReduceState{
+				Protos:           tcp,
+				Sources:          anyToAny,
+				Destinations:     anyToAny,
+				DestinationPorts: []ipfw.PortMatch{portService("notestablished")},
+			},
+		},
+		{
 			name:    "option before an inline comment",
 			input:   "add allow tcp from any to any established // c\n",
 			comment: " c",
@@ -1564,6 +1594,16 @@ func Test_Parser_Next_OptionErrors(t *testing.T) {
 				Line:   1,
 				Column: 34,
 				Text:   "add allow tcp from any to any foo bar",
+			},
+		},
+		{
+			name:  "negated unknown option",
+			input: "add allow tcp from any to any established not foo",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrUnknownOption,
+				Line:   1,
+				Column: 46,
+				Text:   "add allow tcp from any to any established not foo",
 			},
 		},
 		{

@@ -102,6 +102,22 @@ func Test_ParseOptions_Table(t *testing.T) {
 			err:     ipfw.ErrUnknownOption,
 			options: []ipfw.Opt{established},
 		},
+		{
+			name:    "negated option",
+			input:   "not established",
+			n:       15,
+			options: []ipfw.Opt{{Neg: true, Kind: ipfw.OptEstablished}},
+		},
+		{
+			name:    "negation applies to its option only",
+			input:   "not established established",
+			n:       27,
+			options: []ipfw.Opt{{Neg: true, Kind: ipfw.OptEstablished}, established},
+		},
+		{name: "negated unknown option", input: "not foo", n: 4, err: ipfw.ErrUnknownOption},
+		{name: "not glued to a keyword", input: "notestablished", n: 0, err: ipfw.ErrUnknownOption},
+		{name: "not alone", input: "not", n: 0, err: ipfw.ErrUnknownOption},
+		{name: "nothing after not", input: "not ", n: 4, err: ipfw.ErrUnknownOption},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -126,14 +142,14 @@ func Test_ParseOptions_StateError(t *testing.T) {
 // verifies that parsing an option list into a warmed-up state allocates
 // nothing.
 func Test_ParseOptions_NoAllocs(t *testing.T) {
-	input := "established established\n"
+	input := "not established established\n"
 	var state ipfw.ReduceState
 	_, _ = ipfw.ParseOptions(input, &state, nil)
 	ok := true
 	allocs := testing.AllocsPerRun(100, func() {
 		state.Reset()
 		n, err := ipfw.ParseOptions(input, &state, nil)
-		if err != nil || n != 23 {
+		if err != nil || n != 27 {
 			ok = false
 		}
 	})

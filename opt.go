@@ -97,16 +97,18 @@ func parseOptions(s string, state State, hook OptionHook) (string, fail) {
 	return rest, fail{}
 }
 
-// parseOption parses one option, the keyword matching by prefix.
+// parseOption parses one optionally negated option, the keyword matching
+// by prefix and a failure pointing at the keyword.
 func parseOption(s string, state State, hook OptionHook) (string, fail) {
-	rest, ok := prefix(s, "established")
+	rest, neg := notWS1(s)
+	buf, ok := prefix(rest, "established")
 	if !ok {
-		return s, fail{Kind: ErrUnknownOption, At: s}
+		return s, fail{Kind: ErrUnknownOption, At: rest}
 	}
-	if err := failFrom(state.OnOption(Opt{Kind: OptEstablished}), s); err.Failed() {
+	if err := failFrom(state.OnOption(Opt{Neg: neg, Kind: OptEstablished}), rest); err.Failed() {
 		return s, err
 	}
-	return rest, fail{}
+	return buf, fail{}
 }
 
 // Opt is one rule option with the argument of its kind.
