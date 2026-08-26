@@ -10,7 +10,7 @@ import (
 )
 
 // verifies that a prefix is consumed only when the input starts with it and
-// the cursor is untouched otherwise.
+// the input is returned unchanged otherwise.
 func Test_Prefix_Table(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -20,22 +20,22 @@ func Test_Prefix_Table(t *testing.T) {
 		rest   string
 	}{
 		{name: "match consumes the prefix", input: "add pass", prefix: "add", ok: true, rest: " pass"},
-		{name: "mismatch keeps the cursor", input: "table x", prefix: "add", ok: false, rest: "table x"},
+		{name: "mismatch returns the input", input: "table x", prefix: "add", ok: false, rest: "table x"},
 		{name: "empty prefix always matches", input: "abc", prefix: "", ok: true, rest: "abc"},
 		{name: "prefix longer than the input", input: "ad", prefix: "add", ok: false, rest: "ad"},
 		{name: "empty input", input: "", prefix: "add", ok: false, rest: ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cursor := tc.input
-			require.Equal(t, tc.ok, prefix(&cursor, tc.prefix))
-			require.Equal(t, tc.rest, cursor)
+			rest, ok := prefix(tc.input, tc.prefix)
+			require.Equal(t, tc.ok, ok)
+			require.Equal(t, tc.rest, rest)
 		})
 	}
 }
 
 // verifies that only spaces and tabs count as inline whitespace and that
-// ws1 reports whether anything was skipped without moving on failure.
+// ws1 reports whether anything was skipped.
 func Test_WS_Table(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -52,13 +52,11 @@ func Test_WS_Table(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cursor := tc.input
-			ws0(&cursor)
-			require.Equal(t, tc.rest, cursor)
+			require.Equal(t, tc.rest, ws0(tc.input))
 
-			cursor = tc.input
-			require.Equal(t, tc.skipped, ws1(&cursor))
-			require.Equal(t, tc.rest, cursor)
+			rest, ok := ws1(tc.input)
+			require.Equal(t, tc.skipped, ok)
+			require.Equal(t, tc.rest, rest)
 		})
 	}
 }
@@ -84,9 +82,9 @@ func Test_Token_Table(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cursor := tc.input
-			require.Equal(t, tc.token, token(&cursor))
-			require.Equal(t, tc.rest, cursor)
+			tok, rest := token(tc.input)
+			require.Equal(t, tc.token, tok)
+			require.Equal(t, tc.rest, rest)
 		})
 	}
 }
@@ -109,15 +107,15 @@ func Test_NotWS1_Table(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cursor := tc.input
-			require.Equal(t, tc.neg, notWS1(&cursor))
-			require.Equal(t, tc.rest, cursor)
+			rest, neg := notWS1(tc.input)
+			require.Equal(t, tc.neg, neg)
+			require.Equal(t, tc.rest, rest)
 		})
 	}
 }
 
 // A number case shared by the three widths: the expected value when kind is
-// zero, the expected kind otherwise, and the cursor afterwards.
+// zero, the expected kind otherwise, and the rest afterwards.
 type numberCase struct {
 	name  string
 	input string
@@ -127,7 +125,7 @@ type numberCase struct {
 }
 
 // verifies that 8-bit numbers parse up to the first non-digit and that a
-// missing or overflowing number is an error that leaves the cursor alone.
+// missing or overflowing number is an error that returns the input unchanged.
 func Test_ParseU8_Table(t *testing.T) {
 	cases := []numberCase{
 		{name: "zero", input: "0", value: 0, rest: ""},
@@ -141,17 +139,16 @@ func Test_ParseU8_Table(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cursor := tc.input
-			value, kind := parseU8(&cursor)
+			value, rest, kind := parseU8(tc.input)
 			require.Equal(t, tc.kind, kind)
 			require.Equal(t, uint8(tc.value), value)
-			require.Equal(t, tc.rest, cursor)
+			require.Equal(t, tc.rest, rest)
 		})
 	}
 }
 
 // verifies that 16-bit numbers parse up to the first non-digit and that a
-// missing or overflowing number is an error that leaves the cursor alone.
+// missing or overflowing number is an error that returns the input unchanged.
 func Test_ParseU16_Table(t *testing.T) {
 	cases := []numberCase{
 		{name: "zero", input: "0", value: 0, rest: ""},
@@ -164,17 +161,16 @@ func Test_ParseU16_Table(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cursor := tc.input
-			value, kind := parseU16(&cursor)
+			value, rest, kind := parseU16(tc.input)
 			require.Equal(t, tc.kind, kind)
 			require.Equal(t, uint16(tc.value), value)
-			require.Equal(t, tc.rest, cursor)
+			require.Equal(t, tc.rest, rest)
 		})
 	}
 }
 
 // verifies that 32-bit numbers parse up to the first non-digit and that a
-// missing or overflowing number is an error that leaves the cursor alone.
+// missing or overflowing number is an error that returns the input unchanged.
 func Test_ParseU32_Table(t *testing.T) {
 	cases := []numberCase{
 		{name: "zero", input: "0", value: 0, rest: ""},
@@ -187,17 +183,16 @@ func Test_ParseU32_Table(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cursor := tc.input
-			value, kind := parseU32(&cursor)
+			value, rest, kind := parseU32(tc.input)
 			require.Equal(t, tc.kind, kind)
 			require.Equal(t, uint32(tc.value), value)
-			require.Equal(t, tc.rest, cursor)
+			require.Equal(t, tc.rest, rest)
 		})
 	}
 }
 
 // verifies that or-delimited groups call the element parser once per element
-// and report a missing separator or closing brace where it is detected.
+// and, on failure, return the whole input and point at the detection site.
 //
 // Any ASCII whitespace inside the braces is skipped. The element parser here
 // consumes a run of letters, and an empty run is the element error whose
@@ -208,6 +203,7 @@ func Test_OrDelimited_Table(t *testing.T) {
 		input    string
 		elements []string
 		kind     ErrorKind
+		at       string
 		rest     string
 	}{
 		{name: "single element without braces", input: "a rest", elements: []string{"a"}, rest: " rest"},
@@ -215,27 +211,28 @@ func Test_OrDelimited_Table(t *testing.T) {
 		{name: "tight group", input: "{a or b}", elements: []string{"a", "b"}, rest: ""},
 		{name: "three elements", input: "{ a or b or c }", elements: []string{"a", "b", "c"}, rest: ""},
 		{name: "newline inside the group", input: "{ a or\nb }", elements: []string{"a", "b"}, rest: ""},
-		{name: "missing separator", input: "{ a b }", elements: []string{"a"}, kind: ErrExpectedOr, rest: "b }"},
-		{name: "missing closing brace", input: "{ a", elements: []string{"a"}, kind: ErrExpectedOr, rest: ""},
-		{name: "separator at end of input", input: "{ a or", elements: []string{"a"}, kind: ErrExpectedToken, rest: ""},
-		{name: "element error propagates", input: "{ a or } x", elements: []string{"a"}, kind: ErrExpectedToken, rest: "} x"},
-		{name: "empty group", input: "{ }", kind: ErrExpectedToken, rest: "}"},
+		{name: "missing separator", input: "{ a b }", elements: []string{"a"}, kind: ErrExpectedOr, at: "b }", rest: "{ a b }"},
+		{name: "missing closing brace", input: "{ a", elements: []string{"a"}, kind: ErrExpectedOr, at: "", rest: "{ a"},
+		{name: "separator at end of input", input: "{ a or", elements: []string{"a"}, kind: ErrExpectedToken, at: "", rest: "{ a or"},
+		{name: "element error propagates", input: "{ a or } x", elements: []string{"a"}, kind: ErrExpectedToken, at: "} x", rest: "{ a or } x"},
+		{name: "empty group", input: "{ }", kind: ErrExpectedToken, at: "}", rest: "{ }"},
+		{name: "single element error", input: "1", kind: ErrExpectedToken, at: "1", rest: "1"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cursor := tc.input
 			var elements []string
-			kind := orDelimited(&cursor, func(s string) (string, ErrorKind) {
-				element := takeWhile(&s, isLetter)
+			rest, err := orDelimited(tc.input, func(s string) (string, fail) {
+				element, rest := takeWhile(s, isLetter)
 				if element == "" {
-					return s, ErrExpectedToken
+					return s, fail{kind: ErrExpectedToken, at: s}
 				}
 				elements = append(elements, element)
-				return s, 0
+				return rest, fail{}
 			})
-			require.Equal(t, tc.kind, kind)
+			require.Equal(t, tc.kind, err.kind)
+			require.Equal(t, tc.at, err.at)
 			require.Equal(t, tc.elements, elements)
-			require.Equal(t, tc.rest, cursor)
+			require.Equal(t, tc.rest, rest)
 		})
 	}
 }
@@ -250,11 +247,10 @@ func isLetter(c byte) bool {
 func Test_ParseU32_RoundTrip(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		number := rapid.Uint32().Draw(t, "number")
-		cursor := strconv.FormatUint(uint64(number), 10)
-		value, kind := parseU32(&cursor)
+		value, rest, kind := parseU32(strconv.FormatUint(uint64(number), 10))
 		require.Equal(t, ErrorKind(0), kind)
 		require.Equal(t, number, value)
-		require.Empty(t, cursor)
+		require.Empty(t, rest)
 	})
 }
 
@@ -264,40 +260,37 @@ func Test_ParseU8_RoundTrip(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		number := rapid.Uint8().Draw(t, "number")
 		suffix := rapid.StringMatching(`[^0-9]*`).Draw(t, "suffix")
-		cursor := strconv.FormatUint(uint64(number), 10) + suffix
-		value, kind := parseU8(&cursor)
+		value, rest, kind := parseU8(strconv.FormatUint(uint64(number), 10) + suffix)
 		require.Equal(t, ErrorKind(0), kind)
 		require.Equal(t, number, value)
-		require.Equal(t, suffix, cursor)
+		require.Equal(t, suffix, rest)
 	})
 }
 
-// verifies that a decimal above the 16-bit range is rejected without moving
-// the cursor.
+// verifies that a decimal above the 16-bit range is rejected and the input
+// comes back unchanged.
 func Test_ParseU16_RejectsOverflow(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		number := rapid.Uint64Range(math.MaxUint16+1, math.MaxUint64).Draw(t, "number")
 		input := strconv.FormatUint(number, 10)
-		cursor := input
-		_, kind := parseU16(&cursor)
+		_, rest, kind := parseU16(input)
 		require.Equal(t, ErrExpectedU16, kind)
-		require.Equal(t, input, cursor)
+		require.Equal(t, input, rest)
 	})
 }
 
-// verifies that the taken prefix and the remaining cursor partition the
-// input, with the split at the first byte failing the predicate.
+// verifies that the taken prefix and the rest partition the input, with the
+// split at the first byte failing the predicate.
 func Test_TakeWhile_SplitsInput(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		input := rapid.String().Draw(t, "input")
-		cursor := input
-		taken := takeWhile(&cursor, isASCIISpace)
-		require.Equal(t, input, taken+cursor)
+		taken, rest := takeWhile(input, isASCIISpace)
+		require.Equal(t, input, taken+rest)
 		for idx := range len(taken) {
 			require.True(t, isASCIISpace(taken[idx]))
 		}
-		if cursor != "" {
-			require.False(t, isASCIISpace(cursor[0]))
+		if rest != "" {
+			require.False(t, isASCIISpace(rest[0]))
 		}
 	})
 }
@@ -308,20 +301,20 @@ func Test_Lex_NoAllocs(t *testing.T) {
 	input := "{ not tcp or 42 } rest"
 	parsed := true
 	allocs := testing.AllocsPerRun(100, func() {
-		cursor := input
 		count := 0
-		kind := orDelimited(&cursor, func(s string) (string, ErrorKind) {
-			notWS1(&s)
+		rest, err := orDelimited(input, func(s string) (string, fail) {
+			s, _ = notWS1(s)
 			count++
-			if _, kind := parseU8(&s); kind == 0 {
-				return s, 0
+			if _, rest, kind := parseU8(s); kind == 0 {
+				return rest, fail{}
 			}
-			if token(&s) == "" {
-				return s, ErrExpectedToken
+			tok, rest := token(s)
+			if tok == "" {
+				return s, fail{kind: ErrExpectedToken, at: s}
 			}
-			return s, 0
+			return rest, fail{}
 		})
-		if kind != 0 || count != 2 || !prefix(&cursor, " rest") {
+		if err.failed() || count != 2 || rest != " rest" {
 			parsed = false
 		}
 	})

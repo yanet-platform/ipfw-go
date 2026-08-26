@@ -12,3 +12,7 @@ linters:
     - staticcheck
     - testifylint
     - unused
+  settings:
+    govet:
+      enable:
+        - shadow

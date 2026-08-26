@@ -79,12 +79,13 @@ has every dependency: use `GOPROXY=off go get …` / `GOPROXY=off go mod tidy`.
 
 - `gofumpt` formatting; receiver names are short and consistent per type;
   loop index `idx`; no abbreviated identifiers beyond `ok`, `err`, `idx`.
-- Parsing primitives take a `*string` cursor and return `ErrorKind` (`0` =
-  success); public functions return `error`.
-- Never pass a `*string` cursor through a function value (a callback or a
-  hook): the compiler cannot see through an indirect call, treats the
-  pointer as escaping and moves the caller's cursor to the heap. Callbacks
-  take the cursor by value and return what they left unconsumed.
+- Parsing functions take the input `string` and return the rest. Failure is
+  atomic: the function returns its input unchanged together with the error
+  (`fail{kind, at}` internally, `at` being the input at the detection
+  point). Never a `*string` cursor — a pointer crossing a function value or
+  an interface call is treated as escaping and heap-allocates the caller's
+  cursor. Public functions return `error`.
+- No named result parameters.
 - Function ordering: top-down, exported entry points first, helpers below
   their first caller.
 - Dead code is deleted, never commented out.
