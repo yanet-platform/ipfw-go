@@ -1726,6 +1726,16 @@ func Test_Parser_Next_Options(t *testing.T) {
 			},
 		},
 		{
+			name:  "icmptypes",
+			input: "add allow icmp from any to any icmptypes 3,8,11,12\n",
+			state: ipfw.ReduceState{
+				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "icmp"}}},
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      []ipfw.Opt{icmpTypes(3, 8, 11, 12)},
+			},
+		},
+		{
 			name:    "option before an inline comment",
 			input:   "add allow tcp from any to any established // c\n",
 			comment: " c",
@@ -1875,6 +1885,16 @@ func Test_Parser_Next_OptionErrors(t *testing.T) {
 				Line:   1,
 				Column: 41,
 				Text:   "add allow tcp from any to any keep-state :",
+			},
+		},
+		{
+			name:  "unknown icmp type",
+			input: "add allow icmp from any to any established icmptypes 7",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrUnknownICMPType,
+				Line:   1,
+				Column: 53,
+				Text:   "add allow icmp from any to any established icmptypes 7",
 			},
 		},
 		{

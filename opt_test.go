@@ -20,6 +20,20 @@ func srcPort(number uint16) ipfw.Opt {
 	return ipfw.Opt{Kind: ipfw.OptSourcePort, Ports: ipfw.PortRange{Lo: port, Hi: port}}
 }
 
+// typeSet is the set of the given ICMP or ICMPv6 type numbers.
+func typeSet(types ...uint8) ipfw.TypeSet {
+	var set ipfw.TypeSet
+	for _, ty := range types {
+		set.Add(ty)
+	}
+	return set
+}
+
+// icmpTypes is an icmptypes option for the given type numbers.
+func icmpTypes(types ...uint8) ipfw.Opt {
+	return ipfw.Opt{Kind: ipfw.OptICMPTypes, Types: typeSet(types...)}
+}
+
 // notOpt is the option with its negation set.
 func notOpt(opt ipfw.Opt) ipfw.Opt {
 	opt.Neg = true
@@ -363,6 +377,48 @@ func Test_ParseOptions_Table(t *testing.T) {
 			options: []ipfw.Opt{{Kind: ipfw.OptKeepState}},
 		},
 		{
+			name:    "icmptypes list",
+			input:   "icmptypes 3,8,11,12",
+			n:       19,
+			options: []ipfw.Opt{icmpTypes(3, 8, 11, 12)},
+		},
+		{
+			name:    "icmptype single",
+			input:   "icmptype 8",
+			n:       10,
+			options: []ipfw.Opt{icmpTypes(8)},
+		},
+		{
+			name:    "icmptypes with the zero type",
+			input:   "icmptypes 0,8",
+			n:       13,
+			options: []ipfw.Opt{icmpTypes(0, 8)},
+		},
+		{
+			name:  "unknown icmp type",
+			input: "icmptypes 7",
+			n:     10,
+			err:   ipfw.ErrUnknownICMPType,
+		},
+		{
+			name:  "icmptypes with a trailing comma",
+			input: "icmptypes 8,",
+			n:     12,
+			err:   ipfw.ErrExpectedU8,
+		},
+		{
+			name:  "icmptypes overflow",
+			input: "icmptypes 256",
+			n:     10,
+			err:   ipfw.ErrExpectedU8,
+		},
+		{
+			name:  "icmptypes without whitespace",
+			input: "icmptypes",
+			n:     9,
+			err:   ipfw.ErrExpectedWhitespace,
+		},
+		{
 			name:    "in with a suffix is in",
 			input:   "inet",
 			n:       2,
@@ -377,6 +433,26 @@ func Test_ParseOptions_Table(t *testing.T) {
 			require.Equal(t, tc.n, n)
 			require.Equal(t, ipfw.ReduceState{Options: tc.options}, state)
 		})
+	}
+}
+
+// verifies that the type set holds any of the 256 type numbers on its
+// own: adding one sets exactly that one and empties the empty flag.
+func Test_TypeSet_AllValues(t *testing.T) {
+	for ty := range 256 {
+		var set ipfw.TypeSet
+		require.True(t, set.IsEmpty())
+		require.False(t, set.Has(uint8(ty)))
+		set.Add(uint8(ty))
+		require.False(t, set.IsEmpty())
+		members := 0
+		for other := range 256 {
+			if set.Has(uint8(other)) {
+				members++
+				require.Equal(t, ty, other)
+			}
+		}
+		require.Equal(t, 1, members)
 	}
 }
 

@@ -142,6 +142,10 @@ func parseOption(s string, state State, hook OptionHook, place optionPlace) (str
 		buf, err = parsePortsOption(rest[len("src-port"):], state, OptSourcePort, neg, place)
 	case strings.HasPrefix(rest, "dst-port"):
 		buf, err = parsePortsOption(rest[len("dst-port"):], state, OptDestinationPort, neg, place)
+	case strings.HasPrefix(rest, "icmptypes"):
+		buf, err = parseTypesOption(rest[len("icmptypes"):], state, OptICMPTypes, neg, place)
+	case strings.HasPrefix(rest, "icmptype"):
+		buf, err = parseTypesOption(rest[len("icmptype"):], state, OptICMPTypes, neg, place)
 	case strings.HasPrefix(rest, "keep-state"):
 		buf, err = parseKeepStateOption(rest[len("keep-state"):], state, neg, place)
 	case strings.HasPrefix(rest, "proto"):
@@ -166,6 +170,61 @@ func parseKeywordOption(s string, state State, neg bool, place optionPlace) (str
 		return s, err
 	}
 	return rest, fail{}
+}
+
+// parseTypesOption parses the comma list of type numbers after `icmptypes`
+// or `icmp6types` into one option holding them as a set.
+//
+// A number outside the known types of the kind is an error at that number.
+func parseTypesOption(s string, state State, kind OptKind, neg bool, place optionPlace) (string, fail) {
+	rest, ok := ws1(s)
+	if !ok {
+		return s, fail{Kind: ErrExpectedWhitespace, At: rest}
+	}
+	var types TypeSet
+	buf := rest
+	for {
+		ty, afterType, numberKind := parseU8(buf)
+		if numberKind != 0 {
+			return s, fail{Kind: numberKind, At: buf}
+		}
+		if !knownType(kind, ty) {
+			return s, fail{Kind: unknownTypeKind(kind), At: buf}
+		}
+		types.Add(ty)
+		if buf, ok = prefix(afterType, ","); !ok {
+			break
+		}
+	}
+	opt := Opt{Neg: neg, Or: place == groupNext, Kind: kind, Types: types}
+	if err := failFrom(state.OnOption(opt), rest); err.Failed() {
+		return s, err
+	}
+	return buf, fail{}
+}
+
+// knownType reports whether ty is a type number ipfw(8) accepts for the
+// option kind.
+func knownType(kind OptKind, ty uint8) bool {
+	switch kind {
+	case OptICMPTypes:
+		switch ty {
+		case 0, 3, 4, 5, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18:
+			return true
+		}
+	case OptICMP6Types:
+		return ty >= 1 && ty <= 4 || ty >= 128 && ty <= 149 || ty >= 151 && ty <= 161
+	}
+	return false
+}
+
+// unknownTypeKind is the error of a type number the option kind does not
+// accept.
+func unknownTypeKind(kind OptKind) ErrorKind {
+	if kind == OptICMP6Types {
+		return ErrUnknownICMP6Type
+	}
+	return ErrUnknownICMPType
 }
 
 // parseKeepStateOption parses the optional ` :flow` after `keep-state`.
@@ -282,14 +341,14 @@ type Opt struct {
 // TypeSet is a set of ICMP or ICMPv6 type numbers.
 type TypeSet [4]uint64
 
-// Add puts t into the set.
-func (m *TypeSet) Add(t uint8) {
-	m[t>>6] |= 1 << (t & 63)
+// Add puts ty into the set.
+func (m *TypeSet) Add(ty uint8) {
+	m[ty>>6] |= 1 << (ty & 63)
 }
 
-// Has reports whether t is in the set.
-func (m TypeSet) Has(t uint8) bool {
-	return m[t>>6]&(1<<(t&63)) != 0
+// Has reports whether ty is in the set.
+func (m TypeSet) Has(ty uint8) bool {
+	return m[ty>>6]&(1<<(ty&63)) != 0
 }
 
 // IsEmpty reports whether the set has no types.
