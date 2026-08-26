@@ -1211,6 +1211,145 @@ func Test_Parser_Next_Log(t *testing.T) {
 	}
 }
 
+// verifies that `tag N` after the log part lands in the record, for
+// check-state too, a zero tag being indistinguishable from none.
+func Test_Parser_Next_Tag(t *testing.T) {
+	cases := []struct {
+		name        string
+		input       string
+		instruction ipfw.Instruction
+		state       ipfw.CollectState
+	}{
+		{
+			name:  "tag",
+			input: "add allow tag 653 ip4 from any to any\n",
+			instruction: ipfw.Instruction{
+				Action: ipfw.Action{Kind: ipfw.ActionPass},
+				Tag:    653,
+			},
+			state: anyToAnyState(ipfw.ProtoIPv4),
+		},
+		{
+			name:  "log then tag",
+			input: "add allow log tag 5 ip from any to any\n",
+			instruction: ipfw.Instruction{
+				Action: ipfw.Action{Kind: ipfw.ActionPass},
+				Log:    ipfw.Log{Enabled: true},
+				Tag:    5,
+			},
+			state: anyToAnyState(ipfw.ProtoIPAny),
+		},
+		{
+			name:  "logamount then tag",
+			input: "add deny log logamount 7 tag 5 ip from any to any\n",
+			instruction: ipfw.Instruction{
+				Action: ipfw.Action{Kind: ipfw.ActionDeny},
+				Log:    ipfw.Log{Enabled: true, HasAmount: true, Amount: 7},
+				Tag:    5,
+			},
+			state: anyToAnyState(ipfw.ProtoIPAny),
+		},
+		{
+			name:  "check-state with tag",
+			input: "add check-state tag 3\n",
+			instruction: ipfw.Instruction{
+				Action: ipfw.Action{Kind: ipfw.ActionCheckState},
+				Tag:    3,
+			},
+		},
+		{
+			name:  "tag zero reads as none",
+			input: "add allow tag 0 ip from any to any\n",
+			instruction: ipfw.Instruction{
+				Action: ipfw.Action{Kind: ipfw.ActionPass},
+			},
+			state: anyToAnyState(ipfw.ProtoIPAny),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var state ipfw.CollectState
+			rec, err := ipfw.NewParser(tc.input).Next(&state)
+			require.Nil(t, err)
+			require.Equal(t, ipfw.Record{
+				Line:        1,
+				Text:        strings.TrimSuffix(tc.input, "\n"),
+				Kind:        ipfw.RecordInstruction,
+				Instruction: tc.instruction,
+			}, *rec)
+			require.Equal(t, tc.state, state)
+		})
+	}
+}
+
+// verifies that the tag keyword matches by prefix, needs its number, and
+// comes after the log part.
+//
+// Each failure is positioned where the next piece was due.
+func Test_Parser_Next_TagErrors(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		expected ipfw.ParseError
+	}{
+		{
+			name:  "nothing after tag",
+			input: "add allow tag\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 13,
+				Text:   "add allow tag",
+			},
+		},
+		{
+			name:  "tag without a number",
+			input: "add allow tag x ip from any to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedU32,
+				Line:   1,
+				Column: 14,
+				Text:   "add allow tag x ip from any to any",
+			},
+		},
+		{
+			name:  "tag overflow",
+			input: "add allow tag 4294967296 ip from any to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedU32,
+				Line:   1,
+				Column: 14,
+				Text:   "add allow tag 4294967296 ip from any to any",
+			},
+		},
+		{
+			name:  "tag with a suffix",
+			input: "add allow tagx 5 ip from any to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 13,
+				Text:   "add allow tagx 5 ip from any to any",
+			},
+		},
+		{
+			name:  "log after tag is a protocol",
+			input: "add allow tag 5 log ip from any to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedFrom,
+				Line:   1,
+				Column: 20,
+				Text:   "add allow tag 5 log ip from any to any",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			nextError(t, ipfw.NewParser(tc.input), tc.expected)
+		})
+	}
+}
+
 // verifies that the log keywords match by prefix and that a logamount
 // needs its number, each failure positioned where the next piece was due.
 func Test_Parser_Next_LogErrors(t *testing.T) {

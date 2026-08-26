@@ -146,6 +146,10 @@ func (m *Parser) parseInstruction(s string, state State, instruction *Instructio
 	if err.Failed() {
 		return input, err
 	}
+	instruction.Tag, rest, err = parseTag(rest)
+	if err.Failed() {
+		return input, err
+	}
 	if instruction.Action.Kind == ActionCheckState {
 		return rest, fail{}
 	}
@@ -184,6 +188,26 @@ func parseLog(s string) (Log, string, fail) {
 		return Log{}, s, fail{Kind: kind, At: buf}
 	}
 	return Log{Enabled: true, HasAmount: true, Amount: amount}, buf, fail{}
+}
+
+// parseTag parses the optional ` tag N` after the log part, the input
+// coming back untouched when the keyword is absent.
+//
+// The keyword matches by prefix and the number is mandatory once the
+// keyword is there.
+func parseTag(s string) (uint32, string, fail) {
+	buf, ok := ws1Keyword(s, "tag")
+	if !ok {
+		return 0, s, fail{}
+	}
+	if buf, ok = ws1(buf); !ok {
+		return 0, s, fail{Kind: ErrExpectedWhitespace, At: buf}
+	}
+	tag, buf, kind := parseU32(buf)
+	if kind != 0 {
+		return 0, s, fail{Kind: kind, At: buf}
+	}
+	return tag, buf, fail{}
 }
 
 // parseBody parses `PROTO from SRC [PORT] to DST [PORT]`, options still to
@@ -341,7 +365,7 @@ type Instruction struct {
 	Action Action
 	// Log is the logging part.
 	Log Log
-	// Tag is the `tag` number, 0 when absent.
+	// Tag is the `tag` number, 0 when absent, so a `tag 0` reads as none.
 	Tag uint32
 	// InlineComment is the raw text after `//`, empty when absent.
 	InlineComment string
