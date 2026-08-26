@@ -6,7 +6,10 @@ import "strings"
 type TargetKind uint8
 
 // The target kinds. The parser classifies by shape and never validates a
-// network, and anything of an unknown shape is TargetCustom.
+// network.
+//
+// A token of no known shape is TargetCustom, its raw text left for the
+// state to interpret or reject.
 const (
 	_ TargetKind = iota
 	TargetAny
@@ -96,8 +99,11 @@ func isTargetByte(c byte) bool {
 }
 
 // classifyTarget tells the kind of a target from its shape without parsing
-// it, a kind per step until every shape is known.
+// it, an empty token being the only error.
 func classifyTarget(token string) (Target, ErrorKind) {
+	if token == "" {
+		return Target{}, ErrExpectedTarget
+	}
 	switch token {
 	case "any":
 		return Target{Kind: TargetAny}, 0
@@ -115,13 +121,13 @@ func classifyTarget(token string) (Target, ErrorKind) {
 	if isNetwork4Text(token) {
 		return Target{Kind: TargetNetwork4, Text: token}, 0
 	}
-	if token != "" && token[0] == '`' {
+	if token[0] == '`' {
 		return classifyQuotedHostname(token)
 	}
 	if isHostnameText(token) {
 		return Target{Kind: TargetHostname, Text: token}, 0
 	}
-	return Target{}, ErrExpectedTarget
+	return Target{Kind: TargetCustom, Text: token}, 0
 }
 
 // tableName returns the name inside a `table(NAME)` token, an empty name

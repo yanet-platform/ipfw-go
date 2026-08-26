@@ -13,7 +13,8 @@ import (
 //
 // A token runs up to whitespace, a closing brace or a comma. The keywords
 // `any`, `me` and `me6`, IPv4 and IPv6 network text, hostnames and
-// `table(NAME)` are the shapes known so far.
+// `table(NAME)` are the known shapes, any other token is custom and only an
+// empty one is an error.
 func Test_ParseTargets_Table(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -46,9 +47,30 @@ func Test_ParseTargets_Table(t *testing.T) {
 			n:     7,
 			state: ipfw.CollectState{Sources: []ipfw.Target{{Neg: true, Kind: ipfw.TargetMe6}}},
 		},
-		{name: "me with a suffix", input: "mex to any", n: 0, err: ipfw.ErrExpectedTarget},
-		{name: "me6 with a suffix", input: "me6x to any", n: 0, err: ipfw.ErrExpectedTarget},
-		{name: "me is case-sensitive", input: "ME to any", n: 0, err: ipfw.ErrExpectedTarget},
+		{
+			name:  "me with a suffix is custom",
+			input: "mex to any",
+			n:     3,
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "mex"}},
+			},
+		},
+		{
+			name:  "me6 with a suffix is custom",
+			input: "me6x to any",
+			n:     4,
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "me6x"}},
+			},
+		},
+		{
+			name:  "keyword is case-sensitive",
+			input: "ME to any",
+			n:     2,
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "ME"}},
+			},
+		},
 		{
 			name:  "IPv4 address",
 			input: "192.0.2.1 to any",
@@ -106,10 +128,12 @@ func Test_ParseTargets_Table(t *testing.T) {
 			},
 		},
 		{
-			name:  "IPv4 network with a suffix",
+			name:  "IPv4 network with a suffix is custom",
 			input: "192.0.2.0/24abc to any",
-			n:     0,
-			err:   ipfw.ErrExpectedTarget,
+			n:     15,
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "192.0.2.0/24abc"}},
+			},
 		},
 		{
 			name:  "IPv6 address",
@@ -179,16 +203,20 @@ func Test_ParseTargets_Table(t *testing.T) {
 			},
 		},
 		{
-			name:  "IPv6 address with a suffix",
+			name:  "IPv6 address with a suffix is custom",
 			input: "::1zz to any",
-			n:     0,
-			err:   ipfw.ErrExpectedTarget,
+			n:     5,
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "::1zz"}},
+			},
 		},
 		{
-			name:  "at sign is not IPv6 text",
+			name:  "at sign makes IPv6 text custom",
 			input: "2001:db8::1@2 to any",
-			n:     0,
-			err:   ipfw.ErrExpectedTarget,
+			n:     13,
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "2001:db8::1@2"}},
+			},
 		},
 		{
 			name:  "hostname",
@@ -257,10 +285,12 @@ func Test_ParseTargets_Table(t *testing.T) {
 			err:   ipfw.ErrExpectedHostname,
 		},
 		{
-			name:  "name without a dot",
+			name:  "name without a dot is custom",
 			input: "localhost to any",
-			n:     0,
-			err:   ipfw.ErrExpectedTarget,
+			n:     9,
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "localhost"}},
+			},
 		},
 		{
 			name:  "table",
@@ -297,26 +327,71 @@ func Test_ParseTargets_Table(t *testing.T) {
 		{
 			name:  "table name stops at whitespace",
 			input: "table(a b) to any",
-			n:     0,
-			err:   ipfw.ErrExpectedTarget,
+			n:     7,
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "table(a"}},
+			},
 		},
 		{
 			name:  "table name stops at a comma",
 			input: "table(a,b) to any",
-			n:     0,
-			err:   ipfw.ErrExpectedTarget,
+			n:     7,
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "table(a"}},
+			},
 		},
 		{
-			name:  "table without the closing parenthesis",
+			name:  "table without the closing parenthesis is custom",
 			input: "table(t to any",
-			n:     0,
-			err:   ipfw.ErrExpectedTarget,
+			n:     7,
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "table(t"}},
+			},
 		},
 		{name: "braced single", input: "{ any } x", n: 7, state: ipfw.CollectState{Sources: []ipfw.Target{{Kind: ipfw.TargetAny}}}},
+		{
+			name:  "macro name is custom",
+			input: "_VIRTUAL_SERVERS_ to any",
+			n:     17,
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "_VIRTUAL_SERVERS_"}},
+			},
+		},
+		{
+			name:  "inet is custom",
+			input: "inet to any",
+			n:     4,
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "inet"}},
+			},
+		},
+		{
+			name:  "unknown shape is custom",
+			input: "anything to",
+			n:     8,
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "anything"}},
+			},
+		},
+		{
+			name:  "uppercase keyword is custom",
+			input: "ANY to",
+			n:     3,
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "ANY"}},
+			},
+		},
+		{
+			name:  "negated custom token",
+			input: "not foo",
+			n:     7,
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Neg: true, Kind: ipfw.TargetCustom, Text: "foo"}},
+			},
+		},
 		{name: "empty input", input: "", n: 0, err: ipfw.ErrExpectedTarget},
-		{name: "unknown target", input: "anything to", n: 0, err: ipfw.ErrExpectedTarget},
-		{name: "keyword is case-sensitive", input: "ANY to", n: 0, err: ipfw.ErrExpectedTarget},
-		{name: "unknown negated target", input: "not foo", n: 4, err: ipfw.ErrExpectedTarget},
+		{name: "empty group", input: "{ } x", n: 2, err: ipfw.ErrExpectedTarget},
+		{name: "closing brace alone", input: "} x", n: 0, err: ipfw.ErrExpectedTarget},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -349,14 +424,14 @@ func Test_ParseTargets_StateError(t *testing.T) {
 
 // verifies that classifying network text allocates nothing.
 func Test_ParseTargets_NoAllocs(t *testing.T) {
-	input := "{ 192.0.2.0/24 or not 2001:db8::/32 or `host.example.com' or table(t) } to any"
+	input := "{ 192.0.2.0/24 or not 2001:db8::/32 or `host.example.com' or table(t) or _M_ } to any"
 	var state ipfw.CollectState
 	_, _ = ipfw.ParseSourceTargets(input, &state)
 	ok := true
 	allocs := testing.AllocsPerRun(100, func() {
 		state.Reset()
 		n, err := ipfw.ParseSourceTargets(input, &state)
-		if err != nil || n != 71 {
+		if err != nil || n != 78 {
 			ok = false
 		}
 	})

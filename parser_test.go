@@ -506,41 +506,6 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 22, Text: "add allow tcp from any"},
 		},
 		{
-			name:     "unknown source",
-			input:    "add allow tcp from anything to any",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedTarget, Line: 1, Column: 19, Text: "add allow tcp from anything to any"},
-		},
-		{
-			name:  "me with a suffix is not a target",
-			input: "add allow tcp from mex to any",
-			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedTarget,
-				Line:   1,
-				Column: 19,
-				Text:   "add allow tcp from mex to any",
-			},
-		},
-		{
-			name:  "IPv4 network with a suffix is not a target",
-			input: "add allow ip from 192.0.2.0/24abc to any",
-			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedTarget,
-				Line:   1,
-				Column: 18,
-				Text:   "add allow ip from 192.0.2.0/24abc to any",
-			},
-		},
-		{
-			name:  "IPv6 address with a suffix is not a target",
-			input: "add allow ip from ::1zz to any",
-			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedTarget,
-				Line:   1,
-				Column: 18,
-				Text:   "add allow ip from ::1zz to any",
-			},
-		},
-		{
 			name:  "quoted hostname left open",
 			input: "add allow ip from `x.y to any",
 			expected: ipfw.ParseError{
@@ -551,22 +516,12 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 			},
 		},
 		{
-			name:  "name without a dot is not a target",
-			input: "add allow ip from localhost to any",
-			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedTarget,
-				Line:   1,
-				Column: 18,
-				Text:   "add allow ip from localhost to any",
-			},
-		},
-		{
-			name:  "table name with a space is not a target",
+			name:  "table name cut at a space breaks the body",
 			input: "add allow ip from table(a b) to any",
 			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedTarget,
+				Kind:   ipfw.ErrExpectedPrefix,
 				Line:   1,
-				Column: 18,
+				Column: 26,
 				Text:   "add allow ip from table(a b) to any",
 			},
 		},
@@ -767,6 +722,58 @@ func Test_Parser_Next_Table(t *testing.T) {
 		Sources:      []ipfw.Target{{Kind: ipfw.TargetTable, Text: "_SRV_"}},
 		Destinations: []ipfw.Target{{Kind: ipfw.TargetTable, Text: "_DST_"}},
 	}, state)
+}
+
+// verifies that a token of no known shape reaches the state as a custom
+// target with its raw text, the line parsing as a whole.
+func Test_Parser_Next_CustomTarget(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		state ipfw.CollectState
+	}{
+		{
+			name:  "inet keyword of the extra syntax",
+			input: "add allow tcp from any to inet\n",
+			state: ipfw.CollectState{
+				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "inet"}},
+			},
+		},
+		{
+			name:  "macro name in a braced group",
+			input: "add allow tcp from { host.example.com } to { _TEST_SERVERS_ }\n",
+			state: ipfw.CollectState{
+				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetHostname, Text: "host.example.com"}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "_TEST_SERVERS_"}},
+			},
+		},
+		{
+			name:  "keyword with a suffix",
+			input: "add allow ip from mex to any\n",
+			state: ipfw.CollectState{
+				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "mex"}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var state ipfw.CollectState
+			rec, err := ipfw.NewParser(tc.input).Next(&state)
+			require.Nil(t, err)
+			require.Equal(t, ipfw.Record{
+				Line:        1,
+				Text:        strings.TrimSuffix(tc.input, "\n"),
+				Kind:        ipfw.RecordInstruction,
+				Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
+			}, *rec)
+			require.Equal(t, tc.state, state)
+		})
+	}
 }
 
 // verifies that the parser does not validate a network: text of the right
