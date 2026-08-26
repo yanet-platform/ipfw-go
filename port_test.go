@@ -334,6 +334,43 @@ func Test_ParsePorts_OverflowIsName(t *testing.T) {
 	})
 }
 
+// isPortLetterOrDigit is the port alphabet the tests pin, the dash and the
+// backslash being separators handled on top of it.
+func isPortLetterOrDigit(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+}
+
+// verifies the port alphabet byte by byte, non-ASCII bytes included.
+//
+// Every byte that is not a letter, a digit, the range dash, the escape
+// backslash or the list comma ends the port.
+func Test_ParsePorts_Alphabet(t *testing.T) {
+	for c := range 256 {
+		b := byte(c)
+		if isPortLetterOrDigit(b) || b == '-' || b == '\\' || b == ',' {
+			continue
+		}
+		var state ipfw.ReduceState
+		n, err := ipfw.ParseSourcePorts("ab"+string([]byte{b}), &state)
+		require.NoError(t, err, "byte %#x", b)
+		require.Equal(t, 2, n, "byte %#x", b)
+		require.Equal(t, ipfw.ReduceState{SourcePorts: []ipfw.PortMatch{portService("ab")}}, state)
+	}
+}
+
+// verifies that any run of letters and digits holding a letter is a whole
+// service name, consumed entirely.
+func Test_ParsePorts_NameRoundTrip(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		name := rapid.StringMatching(`[A-Za-z0-9]*[A-Za-z][A-Za-z0-9]*`).Draw(t, "name")
+		var state ipfw.ReduceState
+		n, err := ipfw.ParseSourcePorts(name, &state)
+		require.NoError(t, err)
+		require.Equal(t, len(name), n)
+		require.Equal(t, ipfw.ReduceState{SourcePorts: []ipfw.PortMatch{portService(name)}}, state)
+	})
+}
+
 // verifies that parsing a port into a warmed-up state allocates nothing.
 func Test_ParsePorts_NoAllocs(t *testing.T) {
 	input := "not 22,1024-65535,ftp\\-data to any"
