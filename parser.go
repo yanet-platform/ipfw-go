@@ -168,23 +168,22 @@ func (m *Parser) parseInstruction(s string, state State, instruction *Instructio
 // `log` before it is read as `log` and the caller fails at `amount`, and so
 // does `logx` at `x`. A logamount without its number is an error.
 func parseLog(s string) (Log, string, fail) {
-	afterLog, ok := ws1Keyword(s, "log")
+	buf, ok := ws1Keyword(s, "log")
 	if !ok {
 		return Log{}, s, fail{}
 	}
-	afterKeyword, ok := ws1Keyword(afterLog, "logamount")
-	if !ok {
-		return Log{Enabled: true}, afterLog, fail{}
+	rest := buf
+	if buf, ok = ws1Keyword(buf, "logamount"); !ok {
+		return Log{Enabled: true}, rest, fail{}
 	}
-	afterWS, ok := ws1(afterKeyword)
-	if !ok {
-		return Log{}, s, fail{Kind: ErrExpectedWhitespace, At: afterKeyword}
+	if buf, ok = ws1(buf); !ok {
+		return Log{}, s, fail{Kind: ErrExpectedWhitespace, At: buf}
 	}
-	amount, rest, kind := parseU32(afterWS)
+	amount, buf, kind := parseU32(buf)
 	if kind != 0 {
-		return Log{}, s, fail{Kind: kind, At: afterWS}
+		return Log{}, s, fail{Kind: kind, At: buf}
 	}
-	return Log{Enabled: true, HasAmount: true, Amount: amount}, rest, fail{}
+	return Log{Enabled: true, HasAmount: true, Amount: amount}, buf, fail{}
 }
 
 // parseBody parses `PROTO from SRC [PORT] to DST [PORT]`, options still to
@@ -216,8 +215,8 @@ func (m *Parser) parseBody(s string, state State) (string, fail) {
 	}
 	// Only `to` followed by whitespace ends the source part, so a port such
 	// as `topx` or `notify` is not mistaken for a keyword.
-	if afterTo, ok := keywordWS1(rest, "to"); ok {
-		rest = afterTo
+	if buf, ok := keywordWS1(rest, "to"); ok {
+		rest = buf
 	} else {
 		rest, err = parsePorts(rest, state, false)
 		if err.Failed() {
@@ -242,9 +241,9 @@ func (m *Parser) parseBody(s string, state State) (string, fail) {
 	}
 	// Destination ports are optional, a failed attempt leaving the input
 	// where the destination ended.
-	if afterWS, ok := ws1(rest); ok {
-		if afterPorts, err := parsePorts(afterWS, state, true); !err.Failed() {
-			rest = afterPorts
+	if buf, ok := ws1(rest); ok {
+		if buf, err = parsePorts(buf, state, true); !err.Failed() {
+			rest = buf
 		}
 	}
 	return rest, fail{}
