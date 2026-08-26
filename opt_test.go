@@ -314,6 +314,30 @@ func Test_ParseOptions_Table(t *testing.T) {
 			options: []ipfw.Opt{srcPort(22)},
 		},
 		{
+			name:    "proto by name",
+			input:   "proto tcp",
+			n:       9,
+			options: []ipfw.Opt{{Kind: ipfw.OptProto, Proto: ipfw.Proto{Name: "tcp"}}},
+		},
+		{
+			name:    "proto by number",
+			input:   "proto 6",
+			n:       7,
+			options: []ipfw.Opt{{Kind: ipfw.OptProto, Proto: ipfw.Proto{Number: 6}}},
+		},
+		{
+			name:  "proto without whitespace",
+			input: "proto",
+			n:     5,
+			err:   ipfw.ErrExpectedWhitespace,
+		},
+		{
+			name:  "proto without a protocol",
+			input: "proto _",
+			n:     6,
+			err:   ipfw.ErrExpectedProto,
+		},
+		{
 			name:    "in with a suffix is in",
 			input:   "inet",
 			n:       2,

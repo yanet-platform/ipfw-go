@@ -1696,6 +1696,16 @@ func Test_Parser_Next_Options(t *testing.T) {
 			},
 		},
 		{
+			name:  "proto option",
+			input: "add allow ip from any to any proto ipv6\n",
+			state: ipfw.ReduceState{
+				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      []ipfw.Opt{{Kind: ipfw.OptProto, Proto: ipfw.Proto{Name: "ipv6"}}},
+			},
+		},
+		{
 			name:    "option before an inline comment",
 			input:   "add allow tcp from any to any established // c\n",
 			comment: " c",
@@ -1825,6 +1835,16 @@ func Test_Parser_Next_OptionErrors(t *testing.T) {
 				Line:   1,
 				Column: 50,
 				Text:   "add allow tcp from any to any established dst-port",
+			},
+		},
+		{
+			name:  "proto option without its argument",
+			input: "add allow ip from any to any established proto\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 46,
+				Text:   "add allow ip from any to any established proto",
 			},
 		},
 		{

@@ -142,6 +142,8 @@ func parseOption(s string, state State, hook OptionHook, place optionPlace) (str
 		buf, err = parsePortsOption(rest[len("src-port"):], state, OptSourcePort, neg, place)
 	case strings.HasPrefix(rest, "dst-port"):
 		buf, err = parsePortsOption(rest[len("dst-port"):], state, OptDestinationPort, neg, place)
+	case strings.HasPrefix(rest, "proto"):
+		buf, err = parseProtoOption(rest[len("proto"):], state, neg, place)
 	default:
 		buf, err = parseKeywordOption(rest, state, neg, place)
 	}
@@ -162,6 +164,23 @@ func parseKeywordOption(s string, state State, neg bool, place optionPlace) (str
 		return s, err
 	}
 	return rest, fail{}
+}
+
+// parseProtoOption parses the protocol after `proto`.
+func parseProtoOption(s string, state State, neg bool, place optionPlace) (string, fail) {
+	rest, ok := ws1(s)
+	if !ok {
+		return s, fail{Kind: ErrExpectedWhitespace, At: rest}
+	}
+	proto, buf, kind := parseProto(rest)
+	if kind != 0 {
+		return s, fail{Kind: kind, At: rest}
+	}
+	opt := Opt{Neg: neg, Or: place == groupNext, Kind: OptProto, Proto: proto}
+	if err := failFrom(state.OnOption(opt), rest); err.Failed() {
+		return s, err
+	}
+	return buf, fail{}
 }
 
 // parsePortsOption parses the port list after `src-port` or `dst-port`,
