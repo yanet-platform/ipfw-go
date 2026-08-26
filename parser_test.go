@@ -1640,6 +1640,62 @@ func Test_Parser_Next_Options(t *testing.T) {
 			},
 		},
 		{
+			name:  "destination port option after a target group",
+			input: "add allow udp from 2001:db8::/64 to { ff02::/112 or ff05::/112 } dst-port 11995\n",
+			state: ipfw.ReduceState{
+				Protos:  []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "udp"}}},
+				Sources: []ipfw.Target{{Kind: ipfw.TargetNetwork6, Text: "2001:db8::/64"}},
+				Destinations: []ipfw.Target{
+					{Kind: ipfw.TargetNetwork6, Text: "ff02::/112"},
+					{Kind: ipfw.TargetNetwork6, Text: "ff05::/112"},
+				},
+				Options: []ipfw.Opt{dstPort(11995)},
+			},
+		},
+		{
+			name:  "source port option",
+			input: "add allow udp from any to any src-port 179\n",
+			state: ipfw.ReduceState{
+				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "udp"}}},
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      []ipfw.Opt{srcPort(179)},
+			},
+		},
+		{
+			name:  "destination port then a port option",
+			input: "add allow tcp from any to any 22 dst-port 80\n",
+			state: ipfw.ReduceState{
+				Protos:           tcp,
+				Sources:          anyToAny,
+				Destinations:     anyToAny,
+				DestinationPorts: []ipfw.PortMatch{portNumber(22)},
+				Options:          []ipfw.Opt{dstPort(80)},
+			},
+		},
+		{
+			name:  "port option without its argument is a port range",
+			input: "add allow tcp from any to any dst-port\n",
+			state: ipfw.ReduceState{
+				Protos:       tcp,
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				DestinationPorts: []ipfw.PortMatch{
+					portSpan(ipfw.Port{Name: "dst"}, ipfw.Port{Name: "port"}),
+				},
+			},
+		},
+		{
+			name:  "negated port list is two and terms",
+			input: "add allow tcp from any to any not dst-port 22,80\n",
+			state: ipfw.ReduceState{
+				Protos:       tcp,
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      []ipfw.Opt{notOpt(dstPort(22)), notOpt(dstPort(80))},
+			},
+		},
+		{
 			name:    "option before an inline comment",
 			input:   "add allow tcp from any to any established // c\n",
 			comment: " c",
@@ -1759,6 +1815,16 @@ func Test_Parser_Next_OptionErrors(t *testing.T) {
 				Line:   1,
 				Column: 34,
 				Text:   "add allow ip from any to any frag 22",
+			},
+		},
+		{
+			name:  "port option without its argument",
+			input: "add allow tcp from any to any established dst-port\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 50,
+				Text:   "add allow tcp from any to any established dst-port",
 			},
 		},
 		{

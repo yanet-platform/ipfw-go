@@ -8,6 +8,30 @@ import (
 	"github.com/yanet-platform/ipfw"
 )
 
+// dstPort is a dst-port option for one numeric port.
+func dstPort(number uint16) ipfw.Opt {
+	port := ipfw.Port{Number: number}
+	return ipfw.Opt{Kind: ipfw.OptDestinationPort, Ports: ipfw.PortRange{Lo: port, Hi: port}}
+}
+
+// srcPort is a src-port option for one numeric port.
+func srcPort(number uint16) ipfw.Opt {
+	port := ipfw.Port{Number: number}
+	return ipfw.Opt{Kind: ipfw.OptSourcePort, Ports: ipfw.PortRange{Lo: port, Hi: port}}
+}
+
+// notOpt is the option with its negation set.
+func notOpt(opt ipfw.Opt) ipfw.Opt {
+	opt.Neg = true
+	return opt
+}
+
+// orOpt is the option joined to the previous one.
+func orOpt(opt ipfw.Opt) ipfw.Opt {
+	opt.Or = true
+	return opt
+}
+
 // OnOption implements State.
 func (m rejectingState) OnOption(ipfw.Opt) error {
 	return m.err
@@ -208,6 +232,86 @@ func Test_ParseOptions_Table(t *testing.T) {
 			input:   "antispoof in",
 			n:       12,
 			options: []ipfw.Opt{{Kind: ipfw.OptAntiSpoof}, {Kind: ipfw.OptIn}},
+		},
+		{
+			name:    "destination port option",
+			input:   "dst-port 11995",
+			n:       14,
+			options: []ipfw.Opt{dstPort(11995)},
+		},
+		{
+			name:    "source port option",
+			input:   "src-port 179",
+			n:       12,
+			options: []ipfw.Opt{srcPort(179)},
+		},
+		{
+			name:    "port list",
+			input:   "dst-port 22,80",
+			n:       14,
+			options: []ipfw.Opt{dstPort(22), orOpt(dstPort(80))},
+		},
+		{
+			name:  "port range in the list",
+			input: "dst-port 22,1024-65535",
+			n:     22,
+			options: []ipfw.Opt{
+				dstPort(22),
+				{
+					Or:    true,
+					Kind:  ipfw.OptDestinationPort,
+					Ports: ipfw.PortRange{Lo: ipfw.Port{Number: 1024}, Hi: ipfw.Port{Number: 65535}},
+				},
+			},
+		},
+		{
+			name:    "negated port list at top level is two and terms",
+			input:   "not dst-port 22,80",
+			n:       18,
+			options: []ipfw.Opt{notOpt(dstPort(22)), notOpt(dstPort(80))},
+		},
+		{
+			name:    "port list opening a group",
+			input:   "{ dst-port 22,80 or in }",
+			n:       24,
+			options: []ipfw.Opt{dstPort(22), orOpt(dstPort(80)), {Or: true, Kind: ipfw.OptIn}},
+		},
+		{
+			name:    "negated port list opening a group keeps the or",
+			input:   "{ not dst-port 22,80 or in }",
+			n:       28,
+			options: []ipfw.Opt{notOpt(dstPort(22)), notOpt(orOpt(dstPort(80))), {Or: true, Kind: ipfw.OptIn}},
+		},
+		{
+			name:    "port list inside a group",
+			input:   "{ in or dst-port 22,80 }",
+			n:       24,
+			options: []ipfw.Opt{{Kind: ipfw.OptIn}, orOpt(dstPort(22)), orOpt(dstPort(80))},
+		},
+		{
+			name:  "port option without whitespace",
+			input: "dst-port",
+			n:     8,
+			err:   ipfw.ErrExpectedWhitespace,
+		},
+		{
+			name:  "port option without a port",
+			input: "dst-port ",
+			n:     9,
+			err:   ipfw.ErrExpectedPort,
+		},
+		{
+			name:  "port option range without its second port",
+			input: "dst-port x-",
+			n:     11,
+			err:   ipfw.ErrExpectedPort,
+		},
+		{
+			name:    "port option with a trailing comma",
+			input:   "src-port 22,",
+			n:       12,
+			err:     ipfw.ErrExpectedPort,
+			options: []ipfw.Opt{srcPort(22)},
 		},
 		{
 			name:    "in with a suffix is in",

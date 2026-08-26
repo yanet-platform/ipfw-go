@@ -97,13 +97,26 @@ func parseOptions(s string, state State, hook OptionHook) (string, fail) {
 	return rest, fail{}
 }
 
+// optionPlace is where an option stands, which decides its Or flag and
+// how a negated port list is split.
+type optionPlace uint8
+
+const (
+	topLevel optionPlace = iota
+	groupFirst
+	groupNext
+)
+
 // parseOptionGroup parses one option or a `{ a or b … }` group of them,
 // every member after the first carrying the Or flag.
 func parseOptionGroup(s string, state State, hook OptionHook) (string, fail) {
 	g, rest := openGroup(s)
-	or := false
+	place := topLevel
+	if g.braced {
+		place = groupFirst
+	}
 	for {
-		buf, err := parseOption(rest, state, hook, or)
+		buf, err := parseOption(rest, state, hook, place)
 		if err.Failed() {
 			return s, err
 		}
@@ -114,23 +127,77 @@ func parseOptionGroup(s string, state State, hook OptionHook) (string, fail) {
 		if !more {
 			return rest, fail{}
 		}
-		or = true
+		place = groupNext
 	}
 }
 
 // parseOption parses one optionally negated option, the keyword matching
 // by prefix and a failure pointing at the keyword.
-func parseOption(s string, state State, hook OptionHook, or bool) (string, fail) {
+func parseOption(s string, state State, hook OptionHook, place optionPlace) (string, fail) {
 	rest, neg := notWS1(s)
-	kind, buf, ok := keywordOption(rest)
-	if !ok {
-		return s, fail{Kind: ErrUnknownOption, At: rest}
+	var buf string
+	var err fail
+	switch {
+	case strings.HasPrefix(rest, "src-port"):
+		buf, err = parsePortsOption(rest[len("src-port"):], state, OptSourcePort, neg, place)
+	case strings.HasPrefix(rest, "dst-port"):
+		buf, err = parsePortsOption(rest[len("dst-port"):], state, OptDestinationPort, neg, place)
+	default:
+		buf, err = parseKeywordOption(rest, state, neg, place)
 	}
-	opt := Opt{Neg: neg, Or: or, Kind: kind}
-	if err := failFrom(state.OnOption(opt), rest); err.Failed() {
+	if err.Failed() {
 		return s, err
 	}
 	return buf, fail{}
+}
+
+// parseKeywordOption parses an option without an argument.
+func parseKeywordOption(s string, state State, neg bool, place optionPlace) (string, fail) {
+	kind, rest, ok := keywordOption(s)
+	if !ok {
+		return s, fail{Kind: ErrUnknownOption, At: s}
+	}
+	opt := Opt{Neg: neg, Or: place == groupNext, Kind: kind}
+	if err := failFrom(state.OnOption(opt), s); err.Failed() {
+		return s, err
+	}
+	return rest, fail{}
+}
+
+// parsePortsOption parses the port list after `src-port` or `dst-port`,
+// one option per range.
+//
+// The list is an or-group of its own, every range after the first carrying
+// the Or flag. A negated list at the top level means none of the ports, so
+// its ranges are separate and-terms, each one negated. Inside a group the
+// negation stays on each range with the group's flags.
+func parsePortsOption(
+	s string,
+	state State,
+	kind OptKind,
+	neg bool,
+	place optionPlace,
+) (string, fail) {
+	rest, ok := ws1(s)
+	if !ok {
+		return s, fail{Kind: ErrExpectedWhitespace, At: rest}
+	}
+	or := place == groupNext
+	for {
+		portRange, buf, err := parsePortRange(rest)
+		if err.Failed() {
+			return s, err
+		}
+		opt := Opt{Neg: neg, Or: or, Kind: kind, Ports: portRange}
+		if err = failFrom(state.OnOption(opt), rest); err.Failed() {
+			return s, err
+		}
+		or = !neg || place != topLevel
+		if buf, ok = prefix(buf, ","); !ok {
+			return buf, fail{}
+		}
+		rest = buf
+	}
 }
 
 // keywordOptions are the options without an argument, in the order they
