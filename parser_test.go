@@ -1133,6 +1133,170 @@ func Test_Parser_Next_PortListTrailingComma(t *testing.T) {
 	}, state)
 }
 
+// verifies that `log [logamount N]` after the action lands in the record
+// and leaves the body to the state, check-state included.
+func Test_Parser_Next_Log(t *testing.T) {
+	cases := []struct {
+		name        string
+		input       string
+		instruction ipfw.Instruction
+		state       ipfw.CollectState
+	}{
+		{
+			name:  "log",
+			input: "add deny log ip from 192.0.2.0/24 to any\n",
+			instruction: ipfw.Instruction{
+				Action: ipfw.Action{Kind: ipfw.ActionDeny},
+				Log:    ipfw.Log{Enabled: true},
+			},
+			state: ipfw.CollectState{
+				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetNetwork4, Text: "192.0.2.0/24"}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+			},
+		},
+		{
+			name:  "log with an amount",
+			input: "add deny log logamount 500 ip from 192.0.2.0/24 to any\n",
+			instruction: ipfw.Instruction{
+				Action: ipfw.Action{Kind: ipfw.ActionDeny},
+				Log:    ipfw.Log{Enabled: true, HasAmount: true, Amount: 500},
+			},
+			state: ipfw.CollectState{
+				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetNetwork4, Text: "192.0.2.0/24"}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+			},
+		},
+		{
+			name:  "rule number then log",
+			input: "add 100 pass log ip from any to any\n",
+			instruction: ipfw.Instruction{
+				Num:    100,
+				Action: ipfw.Action{Kind: ipfw.ActionPass},
+				Log:    ipfw.Log{Enabled: true},
+			},
+			state: anyToAnyState(ipfw.ProtoIPAny),
+		},
+		{
+			name:  "check-state with log",
+			input: "add check-state log\n",
+			instruction: ipfw.Instruction{
+				Action: ipfw.Action{Kind: ipfw.ActionCheckState},
+				Log:    ipfw.Log{Enabled: true},
+			},
+		},
+		{
+			name:  "check-state with a flow and an amount",
+			input: "add check-state :flow log logamount 10\n",
+			instruction: ipfw.Instruction{
+				Action: ipfw.Action{Kind: ipfw.ActionCheckState, Flow: "flow"},
+				Log:    ipfw.Log{Enabled: true, HasAmount: true, Amount: 10},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var state ipfw.CollectState
+			rec, err := ipfw.NewParser(tc.input).Next(&state)
+			require.Nil(t, err)
+			require.Equal(t, ipfw.Record{
+				Line:        1,
+				Text:        strings.TrimSuffix(tc.input, "\n"),
+				Kind:        ipfw.RecordInstruction,
+				Instruction: tc.instruction,
+			}, *rec)
+			require.Equal(t, tc.state, state)
+		})
+	}
+}
+
+// verifies that the log keywords match by prefix and that a logamount
+// needs its number, each failure positioned where the next piece was due.
+func Test_Parser_Next_LogErrors(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		expected ipfw.ParseError
+	}{
+		{
+			name:  "nothing after log",
+			input: "add deny log\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 12,
+				Text:   "add deny log",
+			},
+		},
+		{
+			name:  "nothing after logamount",
+			input: "add deny log logamount\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 22,
+				Text:   "add deny log logamount",
+			},
+		},
+		{
+			name:  "logamount without a number",
+			input: "add deny log logamount x ip from any to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedU32,
+				Line:   1,
+				Column: 23,
+				Text:   "add deny log logamount x ip from any to any",
+			},
+		},
+		{
+			name:  "logamount overflow",
+			input: "add deny log logamount 4294967296 ip from any to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedU32,
+				Line:   1,
+				Column: 23,
+				Text:   "add deny log logamount 4294967296 ip from any to any",
+			},
+		},
+		{
+			name:  "nothing after the amount",
+			input: "add deny log logamount 500\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 26,
+				Text:   "add deny log logamount 500",
+			},
+		},
+		{
+			name:  "logamount without log is read as log",
+			input: "add deny logamount 5 ip from any to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 12,
+				Text:   "add deny logamount 5 ip from any to any",
+			},
+		},
+		{
+			name:  "log with a suffix",
+			input: "add deny logx ip from any to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 12,
+				Text:   "add deny logx ip from any to any",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			nextError(t, ipfw.NewParser(tc.input), tc.expected)
+		})
+	}
+}
+
 // verifies that a token of no known shape reaches the state as a custom
 // target with its raw text, the line parsing as a whole.
 func Test_Parser_Next_CustomTarget(t *testing.T) {

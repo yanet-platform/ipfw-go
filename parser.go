@@ -142,6 +142,10 @@ func (m *Parser) parseInstruction(s string, state State, instruction *Instructio
 	if err.Failed() {
 		return input, err
 	}
+	instruction.Log, rest, err = parseLog(rest)
+	if err.Failed() {
+		return input, err
+	}
 	if instruction.Action.Kind == ActionCheckState {
 		return rest, fail{}
 	}
@@ -155,6 +159,40 @@ func (m *Parser) parseInstruction(s string, state State, instruction *Instructio
 	}
 	instruction.InlineComment, rest = parseInlineComment(rest)
 	return rest, fail{}
+}
+
+// parseLog parses the optional ` log [logamount N]` after the action, the
+// input coming back untouched when the log keyword is absent.
+//
+// The keywords match by prefix as in the Rust crate: `logamount` without
+// `log` before it is read as `log` and the caller fails at `amount`, and so
+// does `logx` at `x`. A logamount without its number is an error.
+func parseLog(s string) (Log, string, fail) {
+	rest, ok := ws1(s)
+	if !ok {
+		return Log{}, s, fail{}
+	}
+	rest, ok = prefix(rest, "log")
+	if !ok {
+		return Log{}, s, fail{}
+	}
+	afterAmount, ok := ws1(rest)
+	if !ok {
+		return Log{Enabled: true}, rest, fail{}
+	}
+	afterAmount, ok = prefix(afterAmount, "logamount")
+	if !ok {
+		return Log{Enabled: true}, rest, fail{}
+	}
+	afterAmount, ok = ws1(afterAmount)
+	if !ok {
+		return Log{}, s, fail{Kind: ErrExpectedWhitespace, At: afterAmount}
+	}
+	amount, afterAmount, kind := parseU32(afterAmount)
+	if kind != 0 {
+		return Log{}, s, fail{Kind: kind, At: afterAmount}
+	}
+	return Log{Enabled: true, HasAmount: true, Amount: amount}, afterAmount, fail{}
 }
 
 // parseBody parses `PROTO from SRC [PORT] to DST [PORT]`, options still to
