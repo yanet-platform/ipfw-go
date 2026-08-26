@@ -609,6 +609,16 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 			},
 		},
 		{
+			name:  "table name with a space is not a target",
+			input: "add allow ip from table(a b) to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedTarget,
+				Line:   1,
+				Column: 18,
+				Text:   "add allow ip from table(a b) to any",
+			},
+		},
+		{
 			name:     "to missing",
 			input:    "add allow ip from any x to any",
 			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedPrefix, Line: 1, Column: 22, Text: "add allow ip from any x to any"},
@@ -786,6 +796,24 @@ func Test_Parser_Next_Hostname(t *testing.T) {
 		Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 		Sources:      []ipfw.Target{{Kind: ipfw.TargetHostname, Text: "host.example.com"}},
 		Destinations: []ipfw.Target{{Kind: ipfw.TargetHostname, Text: "node-1.example.net"}},
+	}, state)
+}
+
+// verifies that table targets reach the state by name on both sides.
+func Test_Parser_Next_Table(t *testing.T) {
+	var state ipfw.CollectState
+	rec, err := ipfw.NewParser("add allow tcp from { table(_SRV_) } to table(_DST_)\n").Next(&state)
+	require.Nil(t, err)
+	require.Equal(t, ipfw.Record{
+		Line:        1,
+		Text:        "add allow tcp from { table(_SRV_) } to table(_DST_)",
+		Kind:        ipfw.RecordInstruction,
+		Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
+	}, *rec)
+	require.Equal(t, ipfw.CollectState{
+		Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+		Sources:      []ipfw.Target{{Kind: ipfw.TargetTable, Text: "_SRV_"}},
+		Destinations: []ipfw.Target{{Kind: ipfw.TargetTable, Text: "_DST_"}},
 	}, state)
 }
 

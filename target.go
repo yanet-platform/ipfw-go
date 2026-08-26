@@ -106,6 +106,9 @@ func classifyTarget(token string) (Target, ErrorKind) {
 	case "me":
 		return Target{Kind: TargetMe}, 0
 	}
+	if name, ok := tableName(token); ok {
+		return Target{Kind: TargetTable, Text: name}, 0
+	}
 	if isNetwork6Text(token) {
 		return Target{Kind: TargetNetwork6, Text: token}, 0
 	}
@@ -119,6 +122,16 @@ func classifyTarget(token string) (Target, ErrorKind) {
 		return Target{Kind: TargetHostname, Text: token}, 0
 	}
 	return Target{}, ErrExpectedTarget
+}
+
+// tableName returns the name inside a `table(NAME)` token, an empty name
+// included, and false for any other token.
+func tableName(token string) (string, bool) {
+	inside, ok := prefix(token, "table(")
+	if !ok || !strings.HasSuffix(inside, ")") {
+		return "", false
+	}
+	return inside[:len(inside)-1], true
 }
 
 // classifyQuotedHostname strips the backtick and the closing quote of a

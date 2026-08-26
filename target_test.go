@@ -12,8 +12,8 @@ import (
 // report the consumed length, and position a failure at the token.
 //
 // A token runs up to whitespace, a closing brace or a comma. The keywords
-// `any`, `me` and `me6`, IPv4 and IPv6 network text and hostnames are the
-// shapes known so far.
+// `any`, `me` and `me6`, IPv4 and IPv6 network text, hostnames and
+// `table(NAME)` are the shapes known so far.
 func Test_ParseTargets_Table(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -262,6 +262,56 @@ func Test_ParseTargets_Table(t *testing.T) {
 			n:     0,
 			err:   ipfw.ErrExpectedTarget,
 		},
+		{
+			name:  "table",
+			input: "table(_X_) to any",
+			n:     10,
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetTable, Text: "_X_"}},
+			},
+		},
+		{
+			name:  "table with an empty name",
+			input: "table() to any",
+			n:     7,
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetTable, Text: ""}},
+			},
+		},
+		{
+			name:  "negated table",
+			input: "not table(t) x",
+			n:     12,
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Neg: true, Kind: ipfw.TargetTable, Text: "t"}},
+			},
+		},
+		{
+			name:  "table before a closing brace",
+			input: "table(t)}",
+			n:     8,
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetTable, Text: "t"}},
+			},
+		},
+		{
+			name:  "table name stops at whitespace",
+			input: "table(a b) to any",
+			n:     0,
+			err:   ipfw.ErrExpectedTarget,
+		},
+		{
+			name:  "table name stops at a comma",
+			input: "table(a,b) to any",
+			n:     0,
+			err:   ipfw.ErrExpectedTarget,
+		},
+		{
+			name:  "table without the closing parenthesis",
+			input: "table(t to any",
+			n:     0,
+			err:   ipfw.ErrExpectedTarget,
+		},
 		{name: "braced single", input: "{ any } x", n: 7, state: ipfw.CollectState{Sources: []ipfw.Target{{Kind: ipfw.TargetAny}}}},
 		{name: "empty input", input: "", n: 0, err: ipfw.ErrExpectedTarget},
 		{name: "unknown target", input: "anything to", n: 0, err: ipfw.ErrExpectedTarget},
@@ -299,14 +349,14 @@ func Test_ParseTargets_StateError(t *testing.T) {
 
 // verifies that classifying network text allocates nothing.
 func Test_ParseTargets_NoAllocs(t *testing.T) {
-	input := "{ 192.0.2.0/24 or not 2001:db8::/32 or `host.example.com' } to any"
+	input := "{ 192.0.2.0/24 or not 2001:db8::/32 or `host.example.com' or table(t) } to any"
 	var state ipfw.CollectState
 	_, _ = ipfw.ParseSourceTargets(input, &state)
 	ok := true
 	allocs := testing.AllocsPerRun(100, func() {
 		state.Reset()
 		n, err := ipfw.ParseSourceTargets(input, &state)
-		if err != nil || n != 59 {
+		if err != nil || n != 71 {
 			ok = false
 		}
 	})
