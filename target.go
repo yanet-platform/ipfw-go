@@ -38,22 +38,22 @@ type Target struct {
 // It returns the number of bytes consumed, or on failure its offset together
 // with the error, an ErrorKind unless the state returned something else.
 func ParseSourceTargets(s string, state State) (int, error) {
-	rest, err := parseTargets(s, state, false)
+	rest, err := parseTargets(s, state, sourceSide)
 	return consumed(s, rest, err)
 }
 
 // ParseDestinationTargets is ParseSourceTargets for the destination part.
 func ParseDestinationTargets(s string, state State) (int, error) {
-	rest, err := parseTargets(s, state, true)
+	rest, err := parseTargets(s, state, destinationSide)
 	return consumed(s, rest, err)
 }
 
 // parseTargets parses one target or a `{ a or b … }` group of them into the
 // source or the destination side of the state.
-func parseTargets(s string, state State, destination bool) (string, fail) {
+func parseTargets(s string, state State, side bodySide) (string, fail) {
 	g, rest := openGroup(s)
 	for {
-		afterElement, err := parseTargetElement(rest, state, destination)
+		afterElement, err := parseTargetElement(rest, state, side)
 		if err.Failed() {
 			return s, err
 		}
@@ -70,7 +70,7 @@ func parseTargets(s string, state State, destination bool) (string, fail) {
 
 // parseTargetElement parses one optionally negated target, a failure
 // pointing at the token after the negation.
-func parseTargetElement(s string, state State, destination bool) (string, fail) {
+func parseTargetElement(s string, state State, side bodySide) (string, fail) {
 	rest, neg := notWS1(s)
 	token, afterToken := scanTargetToken(rest)
 	target, kind := classifyTarget(token)
@@ -79,10 +79,11 @@ func parseTargetElement(s string, state State, destination bool) (string, fail) 
 	}
 	target.Neg = neg
 	var err error
-	if destination {
-		err = state.OnDestinationTarget(target)
-	} else {
+	switch side {
+	case sourceSide:
 		err = state.OnSourceTarget(target)
+	case destinationSide:
+		err = state.OnDestinationTarget(target)
 	}
 	if failure := failFrom(err, rest); failure.Failed() {
 		return s, failure

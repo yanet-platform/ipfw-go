@@ -34,13 +34,13 @@ type PortMatch struct {
 // It returns the number of bytes consumed, or on failure its offset together
 // with the error, an ErrorKind unless the state returned something else.
 func ParseSourcePorts(s string, state State) (int, error) {
-	rest, err := parsePorts(s, state, false)
+	rest, err := parsePorts(s, state, sourceSide)
 	return consumed(s, rest, err)
 }
 
 // ParseDestinationPorts is ParseSourcePorts for the destination part.
 func ParseDestinationPorts(s string, state State) (int, error) {
-	rest, err := parsePorts(s, state, true)
+	rest, err := parsePorts(s, state, destinationSide)
 	return consumed(s, rest, err)
 }
 
@@ -50,7 +50,7 @@ func ParseDestinationPorts(s string, state State) (int, error) {
 // A failure points at the port. The negation applies to every element, and
 // every range is emitted as soon as it is read, so the elements before a
 // failure stay in the state while the input comes back unchanged.
-func parsePorts(s string, state State, destination bool) (string, fail) {
+func parsePorts(s string, state State, side bodySide) (string, fail) {
 	rest, neg := notWS1(s)
 	for {
 		portRange, afterRange, failure := parsePortRange(rest)
@@ -59,10 +59,11 @@ func parsePorts(s string, state State, destination bool) (string, fail) {
 		}
 		match := PortMatch{Neg: neg, Range: portRange}
 		var err error
-		if destination {
-			err = state.OnDestinationPort(match)
-		} else {
+		switch side {
+		case sourceSide:
 			err = state.OnSourcePort(match)
+		case destinationSide:
+			err = state.OnDestinationPort(match)
 		}
 		if failure = failFrom(err, rest); failure.Failed() {
 			return s, failure

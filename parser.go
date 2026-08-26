@@ -210,6 +210,15 @@ func parseTag(s string) (uint32, string, fail) {
 	return tag, buf, fail{}
 }
 
+// bodySide is the end of the body a target or a port belongs to, which
+// decides the State callback it goes to.
+type bodySide uint8
+
+const (
+	sourceSide bodySide = iota
+	destinationSide
+)
+
 // parseBody parses `PROTO from SRC [PORT] to DST [PORT] [OPTIONS]`.
 func (m *Parser) parseBody(s string, state State) (string, fail) {
 	rest, err := parseProtocols(s, state)
@@ -228,7 +237,7 @@ func (m *Parser) parseBody(s string, state State) (string, fail) {
 	if !ok {
 		return s, fail{Kind: ErrExpectedWhitespace, At: rest}
 	}
-	rest, err = parseTargets(rest, state, false)
+	rest, err = parseTargets(rest, state, sourceSide)
 	if err.Failed() {
 		return s, err
 	}
@@ -241,7 +250,7 @@ func (m *Parser) parseBody(s string, state State) (string, fail) {
 	if buf, ok := keywordWS1(rest, "to"); ok {
 		rest = buf
 	} else {
-		rest, err = parsePorts(rest, state, false)
+		rest, err = parsePorts(rest, state, sourceSide)
 		if err.Failed() {
 			return s, err
 		}
@@ -258,7 +267,7 @@ func (m *Parser) parseBody(s string, state State) (string, fail) {
 			return s, fail{Kind: ErrExpectedWhitespace, At: rest}
 		}
 	}
-	rest, err = parseTargets(rest, state, true)
+	rest, err = parseTargets(rest, state, destinationSide)
 	if err.Failed() {
 		return s, err
 	}
@@ -272,7 +281,7 @@ func (m *Parser) parseBody(s string, state State) (string, fail) {
 		if _, err = parseOptions(buf, DiscardState{}, nil); !err.Failed() {
 			return parseOptions(buf, state, nil)
 		}
-		if buf, err = parsePorts(buf, state, true); !err.Failed() {
+		if buf, err = parsePorts(buf, state, destinationSide); !err.Failed() {
 			rest = buf
 		}
 	}
