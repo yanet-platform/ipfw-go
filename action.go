@@ -24,6 +24,17 @@ type Action struct {
 	Flow string
 }
 
+// String returns the canonical keyword of the action, empty for a kind
+// without one.
+func (m Action) String() string {
+	switch m.Kind {
+	case ActionPass:
+		return "pass"
+	default:
+		return ""
+	}
+}
+
 // SkipToKind is how a skipto names its target.
 type SkipToKind uint8
 
@@ -45,8 +56,13 @@ type SkipTo struct {
 	Number uint32
 }
 
-// parseAction recognizes the action keyword, each action adding itself to
-// the chain.
+// parseAction recognizes the action keyword by prefix, the most frequent
+// spellings first.
 func parseAction(s string) (Action, string, fail) {
+	for _, keyword := range [...]string{"allow", "pass", "accept", "permit"} {
+		if rest, ok := prefix(s, keyword); ok {
+			return Action{Kind: ActionPass}, rest, fail{}
+		}
+	}
 	return Action{}, s, fail{Kind: ErrExpectedAction, At: s}
 }

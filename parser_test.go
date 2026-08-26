@@ -365,3 +365,22 @@ func Test_Parser_Next_InstructionNumber(t *testing.T) {
 		})
 	}
 }
+
+// verifies that a pass action must be followed by whitespace and a body,
+// which is not parsed yet.
+func Test_Parser_Next_ActionPass(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		expected ipfw.ParseError
+	}{
+		{name: "body expected", input: "add allow ip", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedEitherIPOrProto, Line: 1, Column: 10, Text: "add allow ip"}},
+		{name: "numbered rule", input: "add 100 permit x", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedEitherIPOrProto, Line: 1, Column: 15, Text: "add 100 permit x"}},
+		{name: "no whitespace after the action", input: "add allow\n", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 9, Text: "add allow"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			nextError(t, ipfw.NewParser(tc.input), tc.expected)
+		})
+	}
+}
