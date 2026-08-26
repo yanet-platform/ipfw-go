@@ -44,3 +44,9 @@ type SkipTo struct {
 	// Number is the target rule number.
 	Number uint32
 }
+
+// parseAction recognizes the action keyword, each action adding itself to
+// the chain.
+func parseAction(s string) (Action, string, fail) {
+	return Action{}, s, fail{Kind: ErrExpectedAction, At: s}
+}

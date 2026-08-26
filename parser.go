@@ -118,8 +118,44 @@ func (m *Parser) parseLine(text string, state State) (Record, string, fail) {
 	return record, text, fail{Kind: ErrExpectedNewlineOrEOF, At: s}
 }
 
+// parseInstruction parses `[NUM] ACTION … [// comment]` after `add `.
 func (m *Parser) parseInstruction(s string, state State) (Instruction, string, fail) {
-	return Instruction{}, s, fail{Kind: ErrExpectedAction, At: s}
+	var instruction Instruction
+	input := s
+	if num, afterNum, kind := parseU32(s); kind == 0 {
+		if afterWS, ok := ws1(afterNum); ok {
+			instruction.Num, s = num, afterWS
+		}
+	}
+	action, rest, err := parseAction(s)
+	if err.Failed() {
+		return instruction, input, err
+	}
+	instruction.Action = action
+	rest, ok := ws1(rest)
+	if !ok {
+		return instruction, input, fail{Kind: ErrExpectedWhitespace, At: rest}
+	}
+	rest, err = m.parseBody(rest, state)
+	if err.Failed() {
+		return instruction, input, err
+	}
+	instruction.InlineComment, rest = parseInlineComment(rest)
+	return instruction, rest, fail{}
+}
+
+func (m *Parser) parseBody(s string, state State) (string, fail) {
+	return s, fail{Kind: ErrExpectedEitherIPOrProto, At: s}
+}
+
+// parseInlineComment returns the raw text after `//`, leading whitespace
+// before the slashes skipped, or the untouched input when there is none.
+func parseInlineComment(s string) (string, string) {
+	rest, ok := prefix(ws0(s), "//")
+	if !ok {
+		return "", s
+	}
+	return takeWhile(rest, isNotNewline)
 }
 
 func (m *Parser) parseTable(s string) (Table, string, fail) {

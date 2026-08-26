@@ -349,3 +349,24 @@ func Fuzz_Parser_Next(f *testing.F) {
 		}
 	})
 }
+
+// verifies that an optional rule number is consumed only when whitespace
+// follows it, and that the action is then expected right after.
+func Test_Parser_Next_InstructionNumber(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		expected ipfw.ParseError
+	}{
+		{name: "number then unknown action", input: "add 100 x", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedAction, Line: 1, Column: 8, Text: "add 100 x"}},
+		{name: "number then tab then unknown action", input: "add 50\tx\n", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedAction, Line: 1, Column: 7, Text: "add 50\tx"}},
+		{name: "number at end of input is not a number", input: "add 100", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedAction, Line: 1, Column: 4, Text: "add 100"}},
+		{name: "overflowing number is not a number", input: "add 4294967296 allow", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedAction, Line: 1, Column: 4, Text: "add 4294967296 allow"}},
+		{name: "no number", input: "add x", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedAction, Line: 1, Column: 4, Text: "add x"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			nextError(t, ipfw.NewParser(tc.input), tc.expected)
+		})
+	}
+}
