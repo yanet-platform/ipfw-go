@@ -721,3 +721,49 @@ func Test_Parser_Next_LongLabel(t *testing.T) {
 		Label: "LONG_LABEL_NAME_42",
 	})
 }
+
+// The benchmark results are sunk here so the compiler keeps the work.
+var (
+	benchRecord ipfw.Record
+	benchErr    *ipfw.ParseError
+)
+
+// benchmarkNext measures parsing one line over and over with a reused
+// parser and a warmed-up state.
+func benchmarkNext(b *testing.B, line string) {
+	b.Helper()
+	parser := ipfw.NewParser(line)
+	var state ipfw.CollectState
+	_, _ = parser.Next(&state)
+	b.SetBytes(int64(len(line)))
+	b.ReportAllocs()
+	for b.Loop() {
+		parser.Reset(line)
+		state.Reset()
+		benchRecord, benchErr = parser.Next(&state)
+	}
+}
+
+func Benchmark_Parser_Next_AnyToAny(b *testing.B) {
+	benchmarkNext(b, "add pass ip from any to any\n")
+}
+
+func Benchmark_Parser_Next_Comment(b *testing.B) {
+	benchmarkNext(b, "# a comment line of an ordinary length\n")
+}
+
+func Benchmark_Parser_Next_Label(b *testing.B) {
+	benchmarkNext(b, ":LONG_LABEL_NAME_42\n")
+}
+
+func Benchmark_ParseLine_AnyToAny(b *testing.B) {
+	line := "add pass ip from any to any"
+	var state ipfw.CollectState
+	_, _ = ipfw.ParseLine(line, &state)
+	b.SetBytes(int64(len(line)))
+	b.ReportAllocs()
+	for b.Loop() {
+		state.Reset()
+		benchRecord, benchErr = ipfw.ParseLine(line, &state)
+	}
+}
