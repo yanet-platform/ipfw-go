@@ -62,6 +62,7 @@ Run, in order, and fix everything they report:
 ```bash
 gofumpt -w .
 make test        # go test -race ./...
+git add -A       # gocommentlint inspects the STAGED diff: stage before linting
 make lint        # gofumpt check, go vet, golangci-lint, gocommentlint
 ```
 

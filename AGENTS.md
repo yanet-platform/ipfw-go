@@ -35,7 +35,9 @@ make hooks                                      # once per clone: git config cor
 
 `make lint` = gofumpt check, `go vet`, `golangci-lint` (`errcheck`, `govet`,
 `modernize`, `staticcheck`, `testifylint`, `unused`, see `.golangci.yml`),
-`gocommentlint` (a local tool; `make lint` skips it when it is not installed).
+`gocommentlint` (a local tool; `make lint` skips it when it is not installed;
+it inspects the **staged** diff, so `git add -A` before `make lint` — the
+pre-commit hook sees the staged files anyway).
 All binaries are installed in `$GOPATH/bin`. The module cache
 has every dependency: use `GOPROXY=off go get …` / `GOPROXY=off go mod tidy`.
 
