@@ -75,6 +75,10 @@ has every dependency: use `GOPROXY=off go get …` / `GOPROXY=off go mod tidy`.
   loop index `idx`; no abbreviated identifiers beyond `ok`, `err`, `idx`.
 - Parsing primitives take a `*string` cursor and return `ErrorKind` (`0` =
   success); public functions return `error`.
+- Never pass a `*string` cursor through a function value (a callback or a
+  hook): the compiler cannot see through an indirect call, treats the
+  pointer as escaping and moves the caller's cursor to the heap. Callbacks
+  take the cursor by value and return what they left unconsumed.
 - Function ordering: top-down, exported entry points first, helpers below
   their first caller.
 - Dead code is deleted, never commented out.
