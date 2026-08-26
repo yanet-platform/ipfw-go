@@ -3,17 +3,19 @@ package ipfw
 import "strings"
 
 // fail is a parse failure inside a line, the zero value being success.
-//
-// The at field is the input left at the point of detection, from which the
-// line parser derives the column.
 type fail struct {
-	kind ErrorKind
-	at   string
+	// Kind is what went wrong.
+	Kind ErrorKind
+	// At is the input left at the point of detection, from which the line
+	// parser derives the column.
+	At string
+	// Err is the error a State or a hook returned, set with ErrState.
+	Err error
 }
 
 // Failed reports whether the value describes a failure.
 func (m fail) Failed() bool {
-	return m.kind != 0
+	return m.Kind != 0
 }
 
 func isWS(c byte) bool {
@@ -149,7 +151,7 @@ func orDelimited(s string, each func(string) (string, fail)) (string, fail) {
 		}
 		rest, ok = prefix(rest, "or")
 		if !ok {
-			return s, fail{kind: ErrExpectedOr, at: rest}
+			return s, fail{Kind: ErrExpectedOr, At: rest}
 		}
 		rest, err = orElement(skipSpace(rest), each)
 		if err.Failed() {

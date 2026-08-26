@@ -224,13 +224,13 @@ func Test_OrDelimited_Table(t *testing.T) {
 			rest, err := orDelimited(tc.input, func(s string) (string, fail) {
 				element, rest := takeWhile(s, isLetter)
 				if element == "" {
-					return s, fail{kind: ErrExpectedToken, at: s}
+					return s, fail{Kind: ErrExpectedToken, At: s}
 				}
 				elements = append(elements, element)
 				return rest, fail{}
 			})
-			require.Equal(t, tc.kind, err.kind)
-			require.Equal(t, tc.at, err.at)
+			require.Equal(t, tc.kind, err.Kind)
+			require.Equal(t, tc.at, err.At)
 			require.Equal(t, tc.elements, elements)
 			require.Equal(t, tc.rest, rest)
 		})
@@ -310,7 +310,7 @@ func Test_Lex_NoAllocs(t *testing.T) {
 			}
 			tok, rest := token(s)
 			if tok == "" {
-				return s, fail{kind: ErrExpectedToken, at: s}
+				return s, fail{Kind: ErrExpectedToken, At: s}
 			}
 			return rest, fail{}
 		})
@@ -338,7 +338,7 @@ func benchElement(s string) (string, fail) {
 	}
 	tok, rest := token(s)
 	if tok == "" {
-		return s, fail{kind: ErrExpectedToken, at: s}
+		return s, fail{Kind: ErrExpectedToken, At: s}
 	}
 	return rest, fail{}
 }
@@ -348,7 +348,7 @@ func Benchmark_OrDelimited_Group(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		rest, err := orDelimited(input, benchElement)
-		benchRest, benchKind = rest, err.kind
+		benchRest, benchKind = rest, err.Kind
 	}
 }
 
@@ -357,7 +357,7 @@ func Benchmark_OrDelimited_Single(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		rest, err := orDelimited(input, benchElement)
-		benchRest, benchKind = rest, err.kind
+		benchRest, benchKind = rest, err.Kind
 	}
 }
 

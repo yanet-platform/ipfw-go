@@ -82,7 +82,9 @@ has every dependency: use `GOPROXY=off go get …` / `GOPROXY=off go mod tidy`.
 - Receivers are **always** named `m`.
 - Encapsulation: a method that is called from outside its own type is
   exported, even on an unexported type. Unexported methods are called only
-  from inside the type's own methods.
+  from inside the type's own methods. The same holds for fields: unexported
+  fields are read and written only by the type's own methods, anything
+  needed from outside is an exported field or a getter.
 - Parsing functions take the input `string` and return the rest. Failure is
   atomic: the function returns its input unchanged together with the error
   (`fail{kind, at}` internally, `at` being the input at the detection
@@ -90,6 +92,8 @@ has every dependency: use `GOPROXY=off go get …` / `GOPROXY=off go mod tidy`.
   an interface call is treated as escaping and heap-allocates the caller's
   cursor. Public functions return `error`.
 - No named result parameters.
+- A variadic option parameter is named `options`. `opts` is only the local
+  variable a constructor accumulates options into.
 - Function ordering: top-down, exported entry points first, helpers below
   their first caller.
 - Dead code is deleted, never commented out.
