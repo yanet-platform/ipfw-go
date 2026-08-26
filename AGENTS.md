@@ -64,7 +64,11 @@ has every dependency: use `GOPROXY=off go get …` / `GOPROXY=off go mod tidy`.
   then, only when needed, one blank line and a short detailed block
   (preconditions, failure modes, the correctness argument).
 - Comment the *why* and the invariant, not the code. Delete comments that
-  restate the line below. No references to Rust files or line numbers in
+  restate the line below, describe the obvious, or paraphrase the function
+  body. A type's doc never repeats what its field docs say. Unexported
+  helpers get a comment only when they carry a non-obvious contract.
+  Constants in a documented block need their own line only when the name
+  does not say it all. No references to Rust files or line numbers in
   shipped code (they belong in `.roadmap/`). Sentences start with a capital
   letter.
 - No semicolons in comment prose: use separate sentences, commas or
