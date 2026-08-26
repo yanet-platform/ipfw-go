@@ -122,7 +122,7 @@ has every dependency: use `GOPROXY=off go get …` / `GOPROXY=off go mod tidy`.
   tests of the code they exercise — no separate `*_bench_test.go` or
   `fuzz_test.go` files.
 - One style per unit. The parser is tested as a black box (`package
-  ipfw_test`) through `Next`, `ParseLine` and the exported sub-parsers,
+  ipfw_test`) through `Next` and the exported sub-parsers,
   unexported helpers are covered indirectly. Only the lexer (`lex_test.go`)
   is white-box, having no exported surface.
 - Test data is made up: documentation networks (`192.0.2.0/24`,

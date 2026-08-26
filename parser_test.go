@@ -265,54 +265,6 @@ func Test_Parser_All_EOFAndBreak(t *testing.T) {
 	require.Equal(t, 1, count)
 }
 
-// verifies that a single line parses with or without its newline and that a
-// second line is rejected at the end of the first.
-//
-// An empty input is an empty line rather than an end of input.
-func Test_ParseLine_Table(t *testing.T) {
-	label := ipfw.Record{Line: 1, Text: ":A", Kind: ipfw.RecordLabel, Label: "A"}
-	cases := []struct {
-		name     string
-		input    string
-		expected ipfw.Record
-		err      *ipfw.ParseError
-	}{
-		{name: "with newline", input: ":A\n", expected: label},
-		{name: "without newline", input: ":A", expected: label},
-		{
-			name:     "empty input is an empty line",
-			input:    "",
-			expected: ipfw.Record{Line: 1, Kind: ipfw.RecordEmpty},
-		},
-		{
-			name:  "second line is rejected",
-			input: ":A\n:B",
-			err: &ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedNewlineOrEOF,
-				Line:   1,
-				Column: 2,
-				Text:   ":A",
-			},
-		},
-		{
-			name:  "unknown line",
-			input: "x",
-			err:   &ipfw.ParseError{Kind: ipfw.ErrExpectedLine, Line: 1, Column: 0, Text: "x"},
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			rec, err := ipfw.ParseLine(tc.input, ipfw.DiscardState{})
-			if tc.err != nil {
-				require.Equal(t, tc.err, err)
-				return
-			}
-			require.Nil(t, err)
-			require.Equal(t, tc.expected, rec)
-		})
-	}
-}
-
 // verifies that the collecting state keeps tokens in order and that a reset
 // empties it without giving up the capacity.
 func Test_CollectState_Reset(t *testing.T) {
@@ -936,7 +888,6 @@ func Test_Parser_Next_LongLabel(t *testing.T) {
 // The benchmark results are sunk here so the compiler keeps the work.
 var (
 	benchRecord *ipfw.Record
-	benchLine   ipfw.Record
 	benchErr    *ipfw.ParseError
 )
 
@@ -966,16 +917,4 @@ func Benchmark_Parser_Next_Comment(b *testing.B) {
 
 func Benchmark_Parser_Next_Label(b *testing.B) {
 	benchmarkNext(b, ":LONG_LABEL_NAME_42\n")
-}
-
-func Benchmark_ParseLine_AnyToAny(b *testing.B) {
-	line := "add pass ip from any to any"
-	var state ipfw.CollectState
-	_, _ = ipfw.ParseLine(line, &state)
-	b.SetBytes(int64(len(line)))
-	b.ReportAllocs()
-	for b.Loop() {
-		state.Reset()
-		benchLine, benchErr = ipfw.ParseLine(line, &state)
-	}
 }

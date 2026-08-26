@@ -251,35 +251,6 @@ func (m *Parser) All(state State) iter.Seq2[*Record, *ParseError] {
 	}
 }
 
-// ParseLine parses exactly one line, with or without its trailing newline,
-// into a record of its own. An empty input is an empty line.
-func ParseLine(line string, state State, options ...ParserOption) (Record, *ParseError) {
-	if len(options) > 0 {
-		return parseSingleLine(NewParser(line, options...), state)
-	}
-	parser := Parser{rest: line, opts: newParserOptions()}
-	return parseSingleLine(&parser, state)
-}
-
-func parseSingleLine(parser *Parser, state State) (Record, *ParseError) {
-	record, err := parser.Next(state)
-	if err != nil {
-		return Record{}, err
-	}
-	if record.Kind == RecordEOF {
-		return Record{Line: 1, Kind: RecordEmpty}, nil
-	}
-	if parser.rest != "" {
-		return Record{}, &ParseError{
-			Kind:   ErrExpectedNewlineOrEOF,
-			Line:   1,
-			Column: len(record.Text),
-			Text:   record.Text,
-		}
-	}
-	return *record, nil
-}
-
 // RecordKind is what a line holds.
 type RecordKind uint8
 
