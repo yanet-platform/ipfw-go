@@ -3,6 +3,7 @@ package vm
 import (
 	"errors"
 	"net/netip"
+	"slices"
 	"strconv"
 
 	"github.com/yanet-platform/ipfw"
@@ -107,32 +108,26 @@ func (m *BuildError) Unwrap() error {
 
 // VM evaluates packets against a built ruleset. Check is safe for
 // concurrent use.
-//
-// The tokens of every rule live in one arena per kind, a rule holding the
-// runs of them, so a check walks flat slices.
 type VM[V4, V6 Network] struct {
-	ops          []op
-	ipProtos     []ipfw.ProtoIPMatch
-	protos       []ipfw.ProtoMatch
-	sources      []ipfw.TargetMatch[V4, V6]
-	destinations []ipfw.TargetMatch[V4, V6]
-	verdict      ipfw.Action
+	ops     []op[V4, V6]
+	verdict ipfw.Action
 }
 
-// span is the run of an arena holding the tokens of one rule.
-type span struct {
-	lo, hi int
-}
-
-// op is one rule: the record for tracing, the action, and where its
-// tokens are.
-type op struct {
-	record       ipfw.Record
-	action       ipfw.Action
-	ipProtos     span
-	protos       span
-	sources      span
-	destinations span
+// op is one rule: the record for tracing, the action and the tokens of
+// the body, copied out of the state that collected the line.
+type op[V4, V6 Network] struct {
+	// Record is the line the rule came from.
+	Record ipfw.Record
+	// Action is what a match does.
+	Action ipfw.Action
+	// IPProtos are the IP version sets, none meaning any version.
+	IPProtos []ipfw.ProtoIPMatch
+	// Protos are the transport protocols, none meaning any protocol.
+	Protos []ipfw.ProtoMatch
+	// Sources are the sources, none matching nothing.
+	Sources []ipfw.TargetMatch[V4, V6]
+	// Destinations are the destinations, none matching nothing.
+	Destinations []ipfw.TargetMatch[V4, V6]
 }
 
 // Build reads the whole ruleset from p into a VM, networks parsed with
@@ -159,59 +154,55 @@ func Build[V4, V6 Network](
 		case ipfw.RecordEmpty, ipfw.RecordComment:
 			continue
 		case ipfw.RecordInstruction:
-			if err := machine.addRule(rec, state, &cfg); err != nil {
+			rule, err := newOp(rec, state, &cfg)
+			if err != nil {
 				return nil, &BuildError{Line: rec.Line, Text: rec.Text, Err: err}
 			}
+			machine.ops = append(machine.ops, rule)
 		default:
 			return nil, &BuildError{Line: rec.Line, Text: rec.Text, Err: ErrUnsupportedRecord}
 		}
 	}
 }
 
-// addRule validates one rule and copies its tokens into the arenas.
-func (m *VM[V4, V6]) addRule(rec *ipfw.Record, state *ipfw.RuleState[V4, V6], cfg *Config[V4, V6]) error {
-	rule := op{record: *rec, action: rec.Instruction.Action}
-	if rule.action.Kind != ipfw.ActionPass && rule.action.Kind != ipfw.ActionDeny {
-		return ErrUnsupportedAction
+// newOp validates one rule and copies its tokens out of the state.
+func newOp[V4, V6 Network](
+	rec *ipfw.Record,
+	state *ipfw.RuleState[V4, V6],
+	cfg *Config[V4, V6],
+) (op[V4, V6], error) {
+	rule := op[V4, V6]{Record: *rec, Action: rec.Instruction.Action}
+	if rule.Action.Kind != ipfw.ActionPass && rule.Action.Kind != ipfw.ActionDeny {
+		return op[V4, V6]{}, ErrUnsupportedAction
 	}
 	if len(state.SourcePorts) > 0 || len(state.DestinationPorts) > 0 {
-		return ErrUnsupportedPort
+		return op[V4, V6]{}, ErrUnsupportedPort
 	}
 	if len(state.Options) > 0 {
-		return ErrUnsupportedOption
+		return op[V4, V6]{}, ErrUnsupportedOption
 	}
 	for _, target := range state.Sources {
 		if err := checkTarget(target); err != nil {
-			return err
+			return op[V4, V6]{}, err
 		}
 	}
 	for _, target := range state.Destinations {
 		if err := checkTarget(target); err != nil {
-			return err
+			return op[V4, V6]{}, err
 		}
 	}
-	rule.protos.lo = len(m.protos)
+	rule.Protos = make([]ipfw.ProtoMatch, 0, len(state.Protos))
 	for _, match := range state.Protos {
 		resolved, err := resolveProto(match, cfg.Protos)
 		if err != nil {
-			return err
+			return op[V4, V6]{}, err
 		}
-		m.protos = append(m.protos, resolved)
+		rule.Protos = append(rule.Protos, resolved)
 	}
-	rule.protos.hi = len(m.protos)
-	m.ipProtos, rule.ipProtos = appendRun(m.ipProtos, state.IPProtos)
-	m.sources, rule.sources = appendRun(m.sources, state.Sources)
-	m.destinations, rule.destinations = appendRun(m.destinations, state.Destinations)
-	m.ops = append(m.ops, rule)
-	return nil
-}
-
-// appendRun appends the tokens of one rule to an arena and reports where
-// they went.
-func appendRun[T any](arena, tokens []T) ([]T, span) {
-	lo := len(arena)
-	arena = append(arena, tokens...)
-	return arena, span{lo: lo, hi: len(arena)}
+	rule.IPProtos = slices.Clone(state.IPProtos)
+	rule.Sources = slices.Clone(state.Sources)
+	rule.Destinations = slices.Clone(state.Destinations)
+	return rule, nil
 }
 
 // checkTarget rejects the target kinds a check cannot match.
@@ -260,10 +251,10 @@ func (m *VM[V4, V6]) Check(ctx *Context, pkt Packet) ipfw.Action {
 func (m *VM[V4, V6]) CheckTrace(ctx *Context, pkt Packet, tracer Tracer) (ipfw.Action, bool) {
 	for pc := 0; pc < len(m.ops); pc++ {
 		rule := &m.ops[pc]
-		matched := m.matches(rule, pkt)
-		tracer.Trace(&rule.record, rule.action, matched)
+		matched := rule.matches(pkt)
+		tracer.Trace(&rule.Record, rule.Action, matched)
 		if matched {
-			return rule.action, true
+			return rule.Action, true
 		}
 	}
 	return ipfw.Action{}, false
@@ -277,17 +268,17 @@ func (nopTracer) Trace(*ipfw.Record, ipfw.Action, bool) {}
 
 // matches reports whether the packet satisfies the body of the rule: the
 // IP versions, the protocols, the sources and the destinations.
-func (m *VM[V4, V6]) matches(rule *op, pkt Packet) bool {
-	if !matchIPProtos(m.ipProtos[rule.ipProtos.lo:rule.ipProtos.hi], pkt.Version()) {
+func (m *op[V4, V6]) matches(pkt Packet) bool {
+	if !matchIPProtos(m.IPProtos, pkt.Version()) {
 		return false
 	}
-	if !matchProtos(m.protos[rule.protos.lo:rule.protos.hi], pkt.Protocol()) {
+	if !matchProtos(m.Protos, pkt.Protocol()) {
 		return false
 	}
-	if !matchTargets(m.sources[rule.sources.lo:rule.sources.hi], pkt.SourceAddr()) {
+	if !matchTargets(m.Sources, pkt.SourceAddr()) {
 		return false
 	}
-	return matchTargets(m.destinations[rule.destinations.lo:rule.destinations.hi], pkt.DestinationAddr())
+	return matchTargets(m.Destinations, pkt.DestinationAddr())
 }
 
 // matchIPProtos reports whether the version is in one of the version
