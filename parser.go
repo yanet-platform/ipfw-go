@@ -168,9 +168,8 @@ func (m *Parser) parseInstruction(s string, state State, instruction *Instructio
 // parseLog parses the optional ` log [logamount N]` after the action, the
 // input coming back untouched when the log keyword is absent.
 //
-// The keywords match by prefix as in the Rust crate: `logamount` without
-// `log` before it is read as `log` and the caller fails at `amount`, and so
-// does `logx` at `x`. A logamount without its number is an error.
+// The keywords match by prefix, so `logamount` without `log` before it is
+// read as `log`.
 func parseLog(s string) (Log, string, fail) {
 	buf, ok := ws1Keyword(s, "log")
 	if !ok {
@@ -192,9 +191,6 @@ func parseLog(s string) (Log, string, fail) {
 
 // parseTag parses the optional ` tag N` after the log part, the input
 // coming back untouched when the keyword is absent.
-//
-// The keyword matches by prefix and the number is mandatory once the
-// keyword is there.
 func parseTag(s string) (uint32, string, fail) {
 	buf, ok := ws1Keyword(s, "tag")
 	if !ok {

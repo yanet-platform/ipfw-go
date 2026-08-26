@@ -101,12 +101,9 @@ func parsePortRange(s string) (PortRange, string, fail) {
 // parsePort reads a run of letters and digits up to a dash, a number when
 // every byte is a digit and the value fits sixteen bits, a name otherwise.
 //
-// A backslash escapes a following dash so it does not end the port, the
-// name keeping both bytes for the resolver to see. A backslash before
-// anything else is ErrUnexpectedEscape at the backslash, and one at the end
-// of the run is part of the name, as in the Rust crate. An overflowing
-// number is a name like any other, since custom services may be named by
-// digits. An empty run is ErrExpectedPort.
+// A backslash escapes a following dash and stays in the name for the
+// resolver to see, a trailing one included. An overflowing number is a
+// name like any other, since custom services may be named by digits.
 func parsePort(s string) (Port, string, fail) {
 	idx, escaped := 0, false
 	for idx < len(s) {

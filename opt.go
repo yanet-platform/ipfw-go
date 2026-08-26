@@ -98,12 +98,6 @@ func parseOptions(s string, state State, hook OptionHook) (string, fail) {
 }
 
 // parseOption parses one option, the keyword matching by prefix.
-//
-// The keywords are tried in the order of the Rust crate: `//`, `diverted`,
-// `src-port`, `dst-port`, `frag`, `icmptypes`, `icmp6types`, `established`,
-// `in`, `out`, `keep-state`, `proto`, `tcpflags`, `via`, `antispoof`. Only
-// `established` is known so far, anything else is ErrUnknownOption at the
-// token.
 func parseOption(s string, state State, hook OptionHook) (string, fail) {
 	rest, ok := prefix(s, "established")
 	if !ok {
