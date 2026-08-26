@@ -338,6 +338,31 @@ func Test_ParseOptions_Table(t *testing.T) {
 			err:   ipfw.ErrExpectedProto,
 		},
 		{
+			name:    "keep-state",
+			input:   "keep-state",
+			n:       10,
+			options: []ipfw.Opt{{Kind: ipfw.OptKeepState}},
+		},
+		{
+			name:    "keep-state with a flow",
+			input:   "keep-state :flow",
+			n:       16,
+			options: []ipfw.Opt{{Kind: ipfw.OptKeepState, Text: "flow"}},
+		},
+		{
+			name:    "keep-state then in",
+			input:   "keep-state in",
+			n:       13,
+			options: []ipfw.Opt{{Kind: ipfw.OptKeepState}, {Kind: ipfw.OptIn}},
+		},
+		{
+			name:    "keep-state with an empty flow",
+			input:   "keep-state :",
+			n:       11,
+			err:     ipfw.ErrUnknownOption,
+			options: []ipfw.Opt{{Kind: ipfw.OptKeepState}},
+		},
+		{
 			name:    "in with a suffix is in",
 			input:   "inet",
 			n:       2,

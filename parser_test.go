@@ -1706,6 +1706,26 @@ func Test_Parser_Next_Options(t *testing.T) {
 			},
 		},
 		{
+			name:  "keep-state",
+			input: "add allow icmp from any to any keep-state\n",
+			state: ipfw.ReduceState{
+				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "icmp"}}},
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      []ipfw.Opt{{Kind: ipfw.OptKeepState}},
+			},
+		},
+		{
+			name:  "keep-state with a flow",
+			input: "add allow tcp from any to any keep-state :flow\n",
+			state: ipfw.ReduceState{
+				Protos:       tcp,
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      []ipfw.Opt{{Kind: ipfw.OptKeepState, Text: "flow"}},
+			},
+		},
+		{
 			name:    "option before an inline comment",
 			input:   "add allow tcp from any to any established // c\n",
 			comment: " c",
@@ -1845,6 +1865,16 @@ func Test_Parser_Next_OptionErrors(t *testing.T) {
 				Line:   1,
 				Column: 46,
 				Text:   "add allow ip from any to any established proto",
+			},
+		},
+		{
+			name:  "keep-state with an empty flow",
+			input: "add allow tcp from any to any keep-state :",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrUnknownOption,
+				Line:   1,
+				Column: 41,
+				Text:   "add allow tcp from any to any keep-state :",
 			},
 		},
 		{

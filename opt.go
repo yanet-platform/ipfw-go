@@ -142,6 +142,8 @@ func parseOption(s string, state State, hook OptionHook, place optionPlace) (str
 		buf, err = parsePortsOption(rest[len("src-port"):], state, OptSourcePort, neg, place)
 	case strings.HasPrefix(rest, "dst-port"):
 		buf, err = parsePortsOption(rest[len("dst-port"):], state, OptDestinationPort, neg, place)
+	case strings.HasPrefix(rest, "keep-state"):
+		buf, err = parseKeepStateOption(rest[len("keep-state"):], state, neg, place)
 	case strings.HasPrefix(rest, "proto"):
 		buf, err = parseProtoOption(rest[len("proto"):], state, neg, place)
 	default:
@@ -160,6 +162,16 @@ func parseKeywordOption(s string, state State, neg bool, place optionPlace) (str
 		return s, fail{Kind: ErrUnknownOption, At: s}
 	}
 	opt := Opt{Neg: neg, Or: place == groupNext, Kind: kind}
+	if err := failFrom(state.OnOption(opt), s); err.Failed() {
+		return s, err
+	}
+	return rest, fail{}
+}
+
+// parseKeepStateOption parses the optional ` :flow` after `keep-state`.
+func parseKeepStateOption(s string, state State, neg bool, place optionPlace) (string, fail) {
+	flow, rest, _ := parseFlowName(s)
+	opt := Opt{Neg: neg, Or: place == groupNext, Kind: OptKeepState, Text: flow}
 	if err := failFrom(state.OnOption(opt), s); err.Failed() {
 		return s, err
 	}
