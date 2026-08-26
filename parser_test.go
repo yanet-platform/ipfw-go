@@ -1,6 +1,7 @@
 package ipfw_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -616,10 +617,10 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 			},
 		},
 		{
-			name:  "trailing content after the destination",
+			name:  "unknown option after the destination port",
 			input: "add allow ip from any to any 80 extra\n",
 			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedNewlineOrEOF,
+				Kind:   ipfw.ErrUnknownOption,
 				Line:   1,
 				Column: 32,
 				Text:   "add allow ip from any to any 80 extra",
@@ -1099,7 +1100,7 @@ func Test_Parser_Next_Ports(t *testing.T) {
 // emitted.
 //
 // A source list fails the line at the missing port, a destination list is
-// abandoned and the comma becomes trailing content.
+// abandoned and its first element is then an unknown option.
 func Test_Parser_Next_PortListTrailingComma(t *testing.T) {
 	var state ipfw.CollectState
 	_, err := ipfw.NewParser("add pass tcp from any 22, to any\n").Next(&state)
@@ -1120,7 +1121,7 @@ func Test_Parser_Next_PortListTrailingComma(t *testing.T) {
 	_, err = ipfw.NewParser("add pass tcp from any to any 22,\n").Next(&state)
 	require.NotNil(t, err)
 	require.Equal(t, ipfw.ParseError{
-		Kind:   ipfw.ErrExpectedNewlineOrEOF,
+		Kind:   ipfw.ErrUnknownOption,
 		Line:   1,
 		Column: 29,
 		Text:   "add pass tcp from any to any 22,",
@@ -1436,6 +1437,207 @@ func Test_Parser_Next_LogErrors(t *testing.T) {
 	}
 }
 
+// verifies that the option list after the destination reaches the state
+// and takes precedence over destination ports.
+//
+// A token that is an option is one, anything else there is a port, and
+// options may follow the port.
+func Test_Parser_Next_Options(t *testing.T) {
+	anyToAny := []ipfw.Target{{Kind: ipfw.TargetAny}}
+	tcp := []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}}
+	established := ipfw.Opt{Kind: ipfw.OptEstablished}
+	cases := []struct {
+		name    string
+		input   string
+		comment string
+		state   ipfw.CollectState
+	}{
+		{
+			name:  "established",
+			input: "add allow tcp from any to any established\n",
+			state: ipfw.CollectState{
+				Protos:       tcp,
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      []ipfw.Opt{established},
+			},
+		},
+		{
+			name:  "destination port then option",
+			input: "add allow tcp from any to any 22 established\n",
+			state: ipfw.CollectState{
+				Protos:           tcp,
+				Sources:          anyToAny,
+				Destinations:     anyToAny,
+				DestinationPorts: []ipfw.PortMatch{portNumber(22)},
+				Options:          []ipfw.Opt{established},
+			},
+		},
+		{
+			name:  "source port then option",
+			input: "add allow tcp from any 22 to any established\n",
+			state: ipfw.CollectState{
+				Protos:       tcp,
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				SourcePorts:  []ipfw.PortMatch{portNumber(22)},
+				Options:      []ipfw.Opt{established},
+			},
+		},
+		{
+			name:  "token that is not an option is a port",
+			input: "add allow tcp from any to any foo\n",
+			state: ipfw.CollectState{
+				Protos:           tcp,
+				Sources:          anyToAny,
+				Destinations:     anyToAny,
+				DestinationPorts: []ipfw.PortMatch{portService("foo")},
+			},
+		},
+		{
+			name:    "option before an inline comment",
+			input:   "add allow tcp from any to any established // c\n",
+			comment: " c",
+			state: ipfw.CollectState{
+				Protos:       tcp,
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      []ipfw.Opt{established},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var state ipfw.CollectState
+			rec, err := ipfw.NewParser(tc.input).Next(&state)
+			require.Nil(t, err)
+			require.Equal(t, ipfw.Record{
+				Line: 1,
+				Text: strings.TrimSuffix(tc.input, "\n"),
+				Kind: ipfw.RecordInstruction,
+				Instruction: ipfw.Instruction{
+					Action:        ipfw.Action{Kind: ipfw.ActionPass},
+					InlineComment: tc.comment,
+				},
+			}, *rec)
+			require.Equal(t, tc.state, state)
+		})
+	}
+}
+
+// verifies that a token after the option list, or after a port that was
+// not an option, is an unknown option positioned at the token.
+//
+// Leftovers glued to the ports, with no whitespace to open an option list,
+// are trailing content.
+func Test_Parser_Next_OptionErrors(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		expected ipfw.ParseError
+	}{
+		{
+			name:  "port after an option",
+			input: "add allow tcp from any to any established 22",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrUnknownOption,
+				Line:   1,
+				Column: 42,
+				Text:   "add allow tcp from any to any established 22",
+			},
+		},
+		{
+			name:  "unknown option after a port",
+			input: "add allow tcp from any to any 22 foo",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrUnknownOption,
+				Line:   1,
+				Column: 33,
+				Text:   "add allow tcp from any to any 22 foo",
+			},
+		},
+		{
+			name:  "unknown option after a token taken as a port",
+			input: "add allow tcp from any to any foo bar",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrUnknownOption,
+				Line:   1,
+				Column: 34,
+				Text:   "add allow tcp from any to any foo bar",
+			},
+		},
+		{
+			name:  "leftover after the ports",
+			input: "add allow tcp from any to any 1,1000...\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedNewlineOrEOF,
+				Line:   1,
+				Column: 36,
+				Text:   "add allow tcp from any to any 1,1000...",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			nextError(t, ipfw.NewParser(tc.input), tc.expected)
+		})
+	}
+}
+
+// verifies that an error a state returns fails the line at the rejected
+// token.
+//
+// An ErrorKind keeps its kind, any other error is an ErrState that wraps
+// it.
+func Test_Parser_Next_StateError(t *testing.T) {
+	_, err := ipfw.NewParser("add allow foobar from any to any\n").
+		Next(rejectingState{err: ipfw.ErrExpectedEitherIPOrProto})
+	require.NotNil(t, err)
+	require.Equal(t, ipfw.ParseError{
+		Kind:   ipfw.ErrExpectedEitherIPOrProto,
+		Line:   1,
+		Column: 10,
+		Text:   "add allow foobar from any to any",
+	}, *err)
+
+	boom := errors.New("boom")
+	_, err = ipfw.NewParser("add allow foobar from any to any\n").Next(rejectingState{err: boom})
+	require.NotNil(t, err)
+	require.Equal(t, ipfw.ParseError{
+		Kind:   ipfw.ErrState,
+		Err:    boom,
+		Line:   1,
+		Column: 10,
+		Text:   "add allow foobar from any to any",
+	}, *err)
+	require.ErrorIs(t, err, boom)
+	require.ErrorIs(t, err, ipfw.ErrState)
+	require.Equal(t, "1:10: state error: boom", err.Error())
+}
+
+// verifies that a line with ports and options, the dry run of the options
+// included, parses into a warmed-up state without allocating.
+func Test_Parser_Next_OptionsNoAllocs(t *testing.T) {
+	src := "add pass tcp from any to any 22 established\nadd pass tcp from any to any established\n"
+	parser := ipfw.NewParser(src)
+	var state ipfw.CollectState
+	for _, err := range parser.All(&state) {
+		require.Nil(t, err)
+	}
+	ok := true
+	allocs := testing.AllocsPerRun(100, func() {
+		parser.Reset(src)
+		state.Reset()
+		for _, err := range parser.All(&state) {
+			if err != nil {
+				ok = false
+			}
+		}
+	})
+	require.True(t, ok)
+	require.Zero(t, allocs)
+}
+
 // verifies that a token of no known shape reaches the state as a custom
 // target with its raw text, the line parsing as a whole.
 func Test_Parser_Next_CustomTarget(t *testing.T) {
@@ -1540,7 +1742,7 @@ func Test_Parser_Next_TrailingWhitespace(t *testing.T) {
 }
 
 // verifies that an inline comment after the body is the raw text after the
-// slashes, part of the line text, and that a lone slash is trailing content.
+// slashes, part of the line text, and that a lone slash is an unknown option.
 func Test_Parser_Next_InlineComment(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -1568,7 +1770,7 @@ func Test_Parser_Next_InlineComment(t *testing.T) {
 		})
 	}
 	nextError(t, ipfw.NewParser("add pass ip from any to any / x"), ipfw.ParseError{
-		Kind:   ipfw.ErrExpectedNewlineOrEOF,
+		Kind:   ipfw.ErrUnknownOption,
 		Line:   1,
 		Column: 28,
 		Text:   "add pass ip from any to any / x",

@@ -210,8 +210,7 @@ func parseTag(s string) (uint32, string, fail) {
 	return tag, buf, fail{}
 }
 
-// parseBody parses `PROTO from SRC [PORT] to DST [PORT]`, options still to
-// come.
+// parseBody parses `PROTO from SRC [PORT] to DST [PORT] [OPTIONS]`.
 func (m *Parser) parseBody(s string, state State) (string, fail) {
 	rest, err := parseProtocols(s, state)
 	if err.Failed() {
@@ -263,11 +262,23 @@ func (m *Parser) parseBody(s string, state State) (string, fail) {
 	if err.Failed() {
 		return s, err
 	}
-	// Destination ports are optional, a failed attempt leaving the input
-	// where the destination ended.
+	// Options come before destination ports, tried first over a discarding
+	// state so that a rejected attempt emits nothing.
+	//
+	// `to any established` is an option, `to any domain` a port and `to any
+	// 22 established` both. A failed port attempt leaves the input where the
+	// destination ended.
 	if buf, ok := ws1(rest); ok {
+		if _, err = parseOptions(buf, DiscardState{}, nil); !err.Failed() {
+			return parseOptions(buf, state, nil)
+		}
 		if buf, err = parsePorts(buf, state, true); !err.Failed() {
 			rest = buf
+		}
+	}
+	if buf, ok := ws1(rest); ok {
+		if rest, err = parseOptions(buf, state, nil); err.Failed() {
+			return s, err
 		}
 	}
 	return rest, fail{}

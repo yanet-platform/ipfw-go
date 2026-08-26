@@ -1,5 +1,7 @@
 package ipfw
 
+import "strings"
+
 // OptKind names a rule option.
 type OptKind uint8
 
@@ -23,6 +25,95 @@ const (
 	OptAntiSpoof
 	OptCustom
 )
+
+// String returns the ipfw keyword of the option, empty for the zero value.
+func (m OptKind) String() string {
+	switch m {
+	case OptComment:
+		return "//"
+	case OptDiverted:
+		return "diverted"
+	case OptSourcePort:
+		return "src-port"
+	case OptDestinationPort:
+		return "dst-port"
+	case OptEstablished:
+		return "established"
+	case OptFrag:
+		return "frag"
+	case OptICMPTypes:
+		return "icmptypes"
+	case OptICMP6Types:
+		return "icmp6types"
+	case OptIn:
+		return "in"
+	case OptOut:
+		return "out"
+	case OptKeepState:
+		return "keep-state"
+	case OptProto:
+		return "proto"
+	case OptTCPFlags:
+		return "tcpflags"
+	case OptVia:
+		return "via"
+	case OptAntiSpoof:
+		return "antispoof"
+	case OptCustom:
+		return "custom"
+	default:
+		return ""
+	}
+}
+
+// ParseOptions parses the trailing option list of a rule body into state.
+//
+// The hook takes the keywords the grammar does not know, nil leaving them
+// unknown. It returns the number of bytes consumed, or on failure its
+// offset together with the error, an ErrorKind unless the state returned
+// something else.
+func ParseOptions(s string, state State, hook OptionHook) (int, error) {
+	rest, err := parseOptions(s, state, hook)
+	return consumed(s, rest, err)
+}
+
+// parseOptions parses the option list up to the end of the input, the end
+// of the line or an inline comment.
+//
+// Every option is handed to the state as it is read, so the ones before a
+// failure stay in the state.
+func parseOptions(s string, state State, hook OptionHook) (string, fail) {
+	rest := s
+	var ok bool
+	for rest != "" && rest[0] != '\n' && !strings.HasPrefix(rest, "//") {
+		buf, err := parseOption(rest, state, hook)
+		if err.Failed() {
+			return s, err
+		}
+		if rest, ok = ws1(buf); !ok {
+			return rest, fail{}
+		}
+	}
+	return rest, fail{}
+}
+
+// parseOption parses one option, the keyword matching by prefix.
+//
+// The keywords are tried in the order of the Rust crate: `//`, `diverted`,
+// `src-port`, `dst-port`, `frag`, `icmptypes`, `icmp6types`, `established`,
+// `in`, `out`, `keep-state`, `proto`, `tcpflags`, `via`, `antispoof`. Only
+// `established` is known so far, anything else is ErrUnknownOption at the
+// token.
+func parseOption(s string, state State, hook OptionHook) (string, fail) {
+	rest, ok := prefix(s, "established")
+	if !ok {
+		return s, fail{Kind: ErrUnknownOption, At: s}
+	}
+	if failure := failFrom(state.Option(Opt{Kind: OptEstablished}), s); failure.Failed() {
+		return s, failure
+	}
+	return rest, fail{}
+}
 
 // Opt is one rule option with the argument of its kind.
 type Opt struct {
