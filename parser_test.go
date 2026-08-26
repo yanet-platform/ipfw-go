@@ -1771,6 +1771,16 @@ func Test_Parser_Next_Options(t *testing.T) {
 			},
 		},
 		{
+			name:  "via table then in",
+			input: "add allow ip from any to any via table(t) in\n",
+			state: ipfw.ReduceState{
+				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      []ipfw.Opt{viaTable("t", ""), {Kind: ipfw.OptIn}},
+			},
+		},
+		{
 			name:    "option before an inline comment",
 			input:   "add allow tcp from any to any established // c\n",
 			comment: " c",
@@ -1960,6 +1970,16 @@ func Test_Parser_Next_OptionErrors(t *testing.T) {
 				Line:   1,
 				Column: 45,
 				Text:   "add allow ip from any to any established via tun**",
+			},
+		},
+		{
+			name:  "via table with an empty name",
+			input: "add allow ip from any to any established via table()",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedTableName,
+				Line:   1,
+				Column: 51,
+				Text:   "add allow ip from any to any established via table()",
 			},
 		},
 		{

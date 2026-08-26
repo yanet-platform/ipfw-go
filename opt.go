@@ -333,9 +333,18 @@ func parseViaOption(s string, state State, neg bool, place optionPlace) (string,
 	return buf, fail{}
 }
 
-// parseVia reads an interface name, a mask when it holds a glob byte, the
-// mask having to be one ipfw(8) accepts.
+// parseVia reads a `table(NAME[,VALUE])` lookup or an interface name, a
+// mask when it holds a glob byte.
+//
+// A mask has to be one ipfw(8) accepts.
 func parseVia(s string) (Via, string, fail) {
+	if buf, ok := prefix(s, "table("); ok {
+		via, rest, err := parseViaTable(buf)
+		if err.Failed() {
+			return Via{}, s, err
+		}
+		return via, rest, fail{}
+	}
 	name, rest := takeWhile(s, isIfNameByte)
 	if name == "" {
 		return Via{}, s, fail{Kind: ErrExpectedOpt, At: s}
@@ -351,6 +360,38 @@ func parseVia(s string) (Via, string, fail) {
 
 func isIfNameByte(c byte) bool {
 	return !isASCIISpace(c) && c != '/' && c != '{' && c != '}'
+}
+
+// parseViaTable reads the `NAME[,VALUE])` of a table lookup after the
+// opening parenthesis.
+//
+// Both parts run up to whitespace or the closing parenthesis, the name up
+// to a comma as well.
+func parseViaTable(s string) (Via, string, fail) {
+	name, rest := takeWhile(s, isTableNameByte)
+	if name == "" {
+		return Via{}, s, fail{Kind: ErrExpectedTableName, At: s}
+	}
+	via := Via{Kind: ViaTable, Name: name}
+	if buf, ok := prefix(rest, ","); ok {
+		via.Value, rest = takeWhile(buf, isTableValueByte)
+		if via.Value == "" {
+			return Via{}, s, fail{Kind: ErrExpectedTableValue, At: buf}
+		}
+	}
+	rest, ok := prefix(rest, ")")
+	if !ok {
+		return Via{}, s, fail{Kind: ErrExpectedPrefix, At: rest}
+	}
+	return via, rest, fail{}
+}
+
+func isTableNameByte(c byte) bool {
+	return !isASCIISpace(c) && c != ')' && c != ','
+}
+
+func isTableValueByte(c byte) bool {
+	return !isASCIISpace(c) && c != ')'
 }
 
 // parsePortsOption parses the port list after `src-port` or `dst-port`,

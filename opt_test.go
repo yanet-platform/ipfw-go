@@ -55,6 +55,11 @@ func viaMask(pattern string) ipfw.Opt {
 	return ipfw.Opt{Kind: ipfw.OptVia, Via: ipfw.Via{Kind: ipfw.ViaMask, Name: pattern}}
 }
 
+// viaTable is a via option looking the interface up in a table.
+func viaTable(name, value string) ipfw.Opt {
+	return ipfw.Opt{Kind: ipfw.OptVia, Via: ipfw.Via{Kind: ipfw.ViaTable, Name: name, Value: value}}
+}
+
 // notOpt is the option with its negation set.
 func notOpt(opt ipfw.Opt) ipfw.Opt {
 	opt.Neg = true
@@ -586,6 +591,48 @@ func Test_ParseOptions_Table(t *testing.T) {
 			input: "via {",
 			n:     4,
 			err:   ipfw.ErrExpectedOpt,
+		},
+		{
+			name:    "via table",
+			input:   "via table(_JUMP_IN_)",
+			n:       20,
+			options: []ipfw.Opt{viaTable("_JUMP_IN_", "")},
+		},
+		{
+			name:    "via table with a value",
+			input:   "via table(t,:LBL)",
+			n:       17,
+			options: []ipfw.Opt{viaTable("t", ":LBL")},
+		},
+		{
+			name:    "via table then in",
+			input:   "via table(t) in",
+			n:       15,
+			options: []ipfw.Opt{viaTable("t", ""), {Kind: ipfw.OptIn}},
+		},
+		{
+			name:  "via table with an empty name",
+			input: "via table()",
+			n:     10,
+			err:   ipfw.ErrExpectedTableName,
+		},
+		{
+			name:  "via table with an empty value",
+			input: "via table(t,)",
+			n:     12,
+			err:   ipfw.ErrExpectedTableValue,
+		},
+		{
+			name:  "via table without its closing parenthesis",
+			input: "via table(t",
+			n:     11,
+			err:   ipfw.ErrExpectedPrefix,
+		},
+		{
+			name:  "via table name stops at a space",
+			input: "via table(t x)",
+			n:     11,
+			err:   ipfw.ErrExpectedPrefix,
 		},
 		{
 			name:    "in with a suffix is in",
