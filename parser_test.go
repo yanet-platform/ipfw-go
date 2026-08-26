@@ -417,3 +417,45 @@ func Test_Parser_Next_ActionSkipTo(t *testing.T) {
 		})
 	}
 }
+
+// verifies that a check-state rule has no body: the line ends right after
+// the optional flow name, and anything else there is trailing content.
+func Test_Parser_Next_ActionCheckState(t *testing.T) {
+	checkState := func(line int, text, flow string, num uint32) ipfw.Record {
+		return ipfw.Record{
+			Line:        line,
+			Text:        text,
+			Kind:        ipfw.RecordInstruction,
+			Instruction: ipfw.Instruction{Num: num, Action: ipfw.Action{Kind: ipfw.ActionCheckState, Flow: flow}},
+		}
+	}
+	next(t, ipfw.NewParser("add check-state :any\n"), checkState(1, "add check-state :any", "any", 0))
+	next(t, ipfw.NewParser("add check-state"), checkState(1, "add check-state", "", 0))
+	next(t, ipfw.NewParser("add 10 check-state :x\n"), checkState(1, "add 10 check-state :x", "x", 10))
+
+	// TODO(070): the second line is `add pass ip from any to any` in the reference.
+	parser := ipfw.NewParser("add check-state :any\nadd check-state\n")
+	next(t, parser, checkState(1, "add check-state :any", "any", 0))
+	next(t, parser, checkState(2, "add check-state", "", 0))
+	next(t, parser, eof)
+
+	cases := []struct {
+		name     string
+		input    string
+		expected ipfw.ParseError
+	}{
+		{name: "colon without a name", input: "add check-state :\n", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedNewlineOrEOF, Line: 1, Column: 16, Text: "add check-state :"}},
+		{name: "word after the keyword", input: "add check-state foo", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedNewlineOrEOF, Line: 1, Column: 16, Text: "add check-state foo"}},
+		{name: "inline comment is not accepted either", input: "add check-state // c", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedNewlineOrEOF, Line: 1, Column: 16, Text: "add check-state // c"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			nextError(t, ipfw.NewParser(tc.input), tc.expected)
+		})
+	}
+}
+
+// verifies that a long label name is taken whole.
+func Test_Parser_Next_LabelFlowName(t *testing.T) {
+	next(t, ipfw.NewParser(":MEICMP6LOGDOUBLECOLON\n"), ipfw.Record{Line: 1, Text: ":MEICMP6LOGDOUBLECOLON", Kind: ipfw.RecordLabel, Label: "MEICMP6LOGDOUBLECOLON"})
+}

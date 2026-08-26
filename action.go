@@ -41,6 +41,11 @@ func (m Action) String() string {
 		return "count"
 	case ActionSkipTo:
 		return "skipto " + m.SkipTo.String()
+	case ActionCheckState:
+		if m.Flow == "" {
+			return "check-state"
+		}
+		return "check-state :" + m.Flow
 	default:
 		return ""
 	}
@@ -104,6 +109,13 @@ func parseAction(s string) (Action, string, fail) {
 			return Action{Kind: entry.kind}, rest, fail{}
 		}
 	}
+	if rest, ok := prefix(s, "check-state"); ok {
+		action := Action{Kind: ActionCheckState}
+		if flow, afterFlow, found := parseFlowName(rest); found {
+			action.Flow, rest = flow, afterFlow
+		}
+		return action, rest, fail{}
+	}
 	if rest, ok := prefix(s, "skipto"); ok {
 		rest, ok = ws1(rest)
 		if !ok {
@@ -118,6 +130,24 @@ func parseAction(s string) (Action, string, fail) {
 		return Action{Kind: ActionSkipTo, SkipTo: target}, rest, fail{}
 	}
 	return Action{}, s, fail{Kind: ErrExpectedAction, At: s}
+}
+
+// parseFlowName reads the optional ` :flow` of check-state, reporting
+// whether it was there.
+func parseFlowName(s string) (string, string, bool) {
+	rest, ok := ws1(s)
+	if !ok {
+		return "", s, false
+	}
+	rest, ok = prefix(rest, ":")
+	if !ok {
+		return "", s, false
+	}
+	flow, rest := token(rest)
+	if flow == "" {
+		return "", s, false
+	}
+	return flow, rest, true
 }
 
 // parseSkipTo reads a `:label`, a rule number or `tablearg`.

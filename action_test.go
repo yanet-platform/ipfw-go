@@ -130,3 +130,31 @@ func Test_SkipTo_String(t *testing.T) {
 		})
 	}
 }
+
+// verifies that check-state takes an optional `:flow` name, leaving
+// anything that is not one for the line parser, and prints accordingly.
+func Test_ParseAction_CheckState(t *testing.T) {
+	cases := []struct {
+		name   string
+		input  string
+		action Action
+		rest   string
+	}{
+		{name: "bare", input: "check-state", action: Action{Kind: ActionCheckState}, rest: ""},
+		{name: "flow name", input: "check-state :any", action: Action{Kind: ActionCheckState, Flow: "any"}, rest: ""},
+		{name: "flow name stops at newline", input: "check-state :any\n", action: Action{Kind: ActionCheckState, Flow: "any"}, rest: "\n"},
+		{name: "word without colon is not a flow", input: "check-state foo", action: Action{Kind: ActionCheckState}, rest: " foo"},
+		{name: "colon without a name is not a flow", input: "check-state :", action: Action{Kind: ActionCheckState}, rest: " :"},
+		{name: "keyword glued to a word", input: "check-statex", action: Action{Kind: ActionCheckState}, rest: "x"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			action, rest, err := parseAction(tc.input)
+			require.Equal(t, ErrorKind(0), err.Kind)
+			require.Equal(t, tc.action, action)
+			require.Equal(t, tc.rest, rest)
+		})
+	}
+	require.Equal(t, "check-state", Action{Kind: ActionCheckState}.String())
+	require.Equal(t, "check-state :any", Action{Kind: ActionCheckState, Flow: "any"}.String())
+}

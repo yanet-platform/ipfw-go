@@ -132,6 +132,9 @@ func (m *Parser) parseInstruction(s string, state State) (Instruction, string, f
 		return instruction, input, err
 	}
 	instruction.Action = action
+	if action.Kind == ActionCheckState {
+		return instruction, rest, fail{}
+	}
 	rest, ok := ws1(rest)
 	if !ok {
 		return instruction, input, fail{Kind: ErrExpectedWhitespace, At: rest}
