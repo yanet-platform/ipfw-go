@@ -99,6 +99,10 @@ func classifyTarget(token string) (Target, ErrorKind) {
 	switch token {
 	case "any":
 		return Target{Kind: TargetAny}, 0
+	case "me6":
+		return Target{Kind: TargetMe6}, 0
+	case "me":
+		return Target{Kind: TargetMe}, 0
 	default:
 		return Target{}, ErrExpectedTarget
 	}

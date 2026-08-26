@@ -559,6 +559,16 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedTarget, Line: 1, Column: 19, Text: "add allow tcp from anything to any"},
 		},
 		{
+			name:  "me with a suffix is not a target",
+			input: "add allow tcp from mex to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedTarget,
+				Line:   1,
+				Column: 19,
+				Text:   "add allow tcp from mex to any",
+			},
+		},
+		{
 			name:     "to missing",
 			input:    "add allow ip from any x to any",
 			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedPrefix, Line: 1, Column: 22, Text: "add allow ip from any x to any"},
@@ -642,6 +652,25 @@ func Test_Parser_Next_AnyToAny(t *testing.T) {
 	require.Nil(t, err)
 	require.Equal(t, passAnyToAny(1, "add pass ip from any to any"), *rec)
 	require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), state)
+}
+
+// verifies that me and me6 reach the state as targets without text, the
+// whole token telling me6 from me.
+func Test_Parser_Next_MeToMe6(t *testing.T) {
+	var state ipfw.CollectState
+	rec, err := ipfw.NewParser("add pass ip from me to me6\n").Next(&state)
+	require.Nil(t, err)
+	require.Equal(t, ipfw.Record{
+		Line:        1,
+		Text:        "add pass ip from me to me6",
+		Kind:        ipfw.RecordInstruction,
+		Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
+	}, *rec)
+	require.Equal(t, ipfw.CollectState{
+		IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+		Sources:      []ipfw.Target{{Kind: ipfw.TargetMe}},
+		Destinations: []ipfw.Target{{Kind: ipfw.TargetMe6}},
+	}, state)
 }
 
 // verifies that a braced single target and trailing whitespace parse, the
