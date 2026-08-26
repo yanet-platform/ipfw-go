@@ -30,7 +30,7 @@ func prefix(s *string, p string) bool {
 }
 
 // takeWhile consumes and returns the longest run of leading bytes that
-// satisfy f; the result is empty when the first byte fails.
+// satisfy f. The result is empty when the first byte fails.
 func takeWhile(s *string, f func(byte) bool) string {
 	str := *s
 	idx := 0
@@ -46,14 +46,14 @@ func ws0(s *string) {
 	takeWhile(s, isWS)
 }
 
-// ws1 skips inline whitespace and reports whether there was any; the cursor
+// ws1 skips inline whitespace and reports whether there was any. The cursor
 // does not move when there was none.
 func ws1(s *string) bool {
 	return takeWhile(s, isWS) != ""
 }
 
 // token consumes and returns the run of bytes up to the first ASCII
-// whitespace; it is empty when the cursor is at whitespace or at the end.
+// whitespace. It is empty when the cursor is at whitespace or at the end.
 func token(s *string) string {
 	return takeWhile(s, isTokenByte)
 }
@@ -89,8 +89,8 @@ func parseU8(s *string) (uint8, ErrorKind) {
 	return uint8(value), 0
 }
 
-// parseU16 consumes a decimal number that fits in sixteen bits; otherwise it
-// behaves like parseU8 with ErrExpectedU16.
+// parseU16 consumes a decimal number that fits in sixteen bits, otherwise
+// behaving like parseU8 with ErrExpectedU16.
 func parseU16(s *string) (uint16, ErrorKind) {
 	value, ok := parseUint(s, 0xffff)
 	if !ok {
@@ -99,8 +99,8 @@ func parseU16(s *string) (uint16, ErrorKind) {
 	return uint16(value), 0
 }
 
-// parseU32 consumes a decimal number that fits in thirty-two bits; otherwise
-// it behaves like parseU8 with ErrExpectedU32.
+// parseU32 consumes a decimal number that fits in thirty-two bits,
+// otherwise behaving like parseU8 with ErrExpectedU32.
 func parseU32(s *string) (uint32, ErrorKind) {
 	value, ok := parseUint(s, 0xffffffff)
 	if !ok {
@@ -112,7 +112,7 @@ func parseU32(s *string) (uint32, ErrorKind) {
 // parseUint consumes leading decimal digits into a value no larger than max.
 //
 // Leading zeros are accepted. The overflow check runs before each digit is
-// folded in, so the accumulator never wraps; on any failure the cursor is
+// folded in, so the accumulator never wraps. On any failure the cursor is
 // left untouched.
 func parseUint(s *string, max uint64) (uint64, bool) {
 	str := *s

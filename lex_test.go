@@ -200,7 +200,7 @@ func Test_ParseU32_Table(t *testing.T) {
 // and report a missing separator or closing brace where it is detected.
 //
 // Any ASCII whitespace inside the braces is skipped. The element parser here
-// consumes a run of letters; an empty run is the element error whose
+// consumes a run of letters, and an empty run is the element error whose
 // propagation the last cases check.
 func Test_OrDelimited_Table(t *testing.T) {
 	cases := []struct {

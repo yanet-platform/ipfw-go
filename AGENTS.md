@@ -67,6 +67,8 @@ has every dependency: use `GOPROXY=off go get …` / `GOPROXY=off go mod tidy`.
   restate the line below. No references to Rust files or line numbers in
   shipped code (they belong in `.roadmap/`). Sentences start with a capital
   letter.
+- No semicolons in comment prose: use separate sentences, commas or
+  dashes.
 - Examples go in `Example*` test functions, not in doc comments.
 
 ## Code style

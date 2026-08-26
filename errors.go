@@ -5,7 +5,7 @@ import "strconv"
 // ErrorKind names a syntax or semantic error found while parsing a ruleset.
 //
 // Parsing functions report failures as an ErrorKind, the zero value meaning
-// success; the public API wraps the kind into a positioned ParseError. Every
+// success. The public API wraps the kind into a positioned ParseError. Every
 // kind is an error value on its own, so errors.Is works against a kind.
 type ErrorKind uint8
 
@@ -105,7 +105,7 @@ const (
 	// after a complete command.
 	ErrExpectedNewlineOrEOF
 	// ErrState is reported when a State or a hook returned an error that is
-	// not an ErrorKind; the error is attached to the ParseError.
+	// not an ErrorKind. The error is attached to the ParseError.
 	ErrState
 )
 
@@ -194,13 +194,13 @@ func (k ErrorKind) Error() string {
 // ParseError is a parse failure located in the input.
 //
 // Column is a byte offset into Text, the offending line with its leading
-// whitespace skipped and trailing whitespace trimmed; a column equal to the
+// whitespace skipped and trailing whitespace trimmed. A column equal to the
 // text length means the error is at the end of the line. Err carries the
 // error a State or a hook returned when Kind is ErrState.
 type ParseError struct {
 	// Kind is what went wrong.
 	Kind ErrorKind
-	// Err is the error a State or a hook returned; nil unless Kind is ErrState.
+	// Err is the error a State or a hook returned, nil unless Kind is ErrState.
 	Err error
 	// Line is the 1-based line number of the offending line.
 	Line int
