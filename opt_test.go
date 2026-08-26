@@ -198,6 +198,18 @@ func Test_ParseOptions_Table(t *testing.T) {
 			options: []ipfw.Opt{{Neg: true, Kind: ipfw.OptDiverted}},
 		},
 		{
+			name:    "antispoof",
+			input:   "antispoof",
+			n:       9,
+			options: []ipfw.Opt{{Kind: ipfw.OptAntiSpoof}},
+		},
+		{
+			name:    "antispoof then in",
+			input:   "antispoof in",
+			n:       12,
+			options: []ipfw.Opt{{Kind: ipfw.OptAntiSpoof}, {Kind: ipfw.OptIn}},
+		},
+		{
 			name:    "in with a suffix is in",
 			input:   "inet",
 			n:       2,

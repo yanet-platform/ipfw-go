@@ -144,6 +144,7 @@ var keywordOptions = [...]struct {
 	{"established", OptEstablished},
 	{"in", OptIn},
 	{"out", OptOut},
+	{"antispoof", OptAntiSpoof},
 }
 
 // keywordOption tells an option without an argument by its keyword.
