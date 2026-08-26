@@ -123,6 +123,23 @@ func notWS1(s string) (string, bool) {
 	return keywordWS1(s, "not")
 }
 
+// ws1Keyword consumes whitespace followed by the keyword and leaves the
+// input alone when either is missing.
+//
+// That is the shape of an optional trailing keyword such as ` log`. The
+// keyword matches by prefix.
+func ws1Keyword(s, keyword string) (string, bool) {
+	rest, ok := ws1(s)
+	if !ok {
+		return s, false
+	}
+	rest, ok = prefix(rest, keyword)
+	if !ok {
+		return s, false
+	}
+	return rest, true
+}
+
 // parseU8 stops at the first non-digit. A missing or overflowing number is an
 // error, and the input is returned unchanged.
 func parseU8(s string) (uint8, string, ErrorKind) {

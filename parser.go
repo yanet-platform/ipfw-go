@@ -168,31 +168,23 @@ func (m *Parser) parseInstruction(s string, state State, instruction *Instructio
 // `log` before it is read as `log` and the caller fails at `amount`, and so
 // does `logx` at `x`. A logamount without its number is an error.
 func parseLog(s string) (Log, string, fail) {
-	rest, ok := ws1(s)
+	afterLog, ok := ws1Keyword(s, "log")
 	if !ok {
 		return Log{}, s, fail{}
 	}
-	rest, ok = prefix(rest, "log")
+	afterKeyword, ok := ws1Keyword(afterLog, "logamount")
 	if !ok {
-		return Log{}, s, fail{}
+		return Log{Enabled: true}, afterLog, fail{}
 	}
-	afterAmount, ok := ws1(rest)
+	afterWS, ok := ws1(afterKeyword)
 	if !ok {
-		return Log{Enabled: true}, rest, fail{}
+		return Log{}, s, fail{Kind: ErrExpectedWhitespace, At: afterKeyword}
 	}
-	afterAmount, ok = prefix(afterAmount, "logamount")
-	if !ok {
-		return Log{Enabled: true}, rest, fail{}
-	}
-	afterAmount, ok = ws1(afterAmount)
-	if !ok {
-		return Log{}, s, fail{Kind: ErrExpectedWhitespace, At: afterAmount}
-	}
-	amount, afterAmount, kind := parseU32(afterAmount)
+	amount, rest, kind := parseU32(afterWS)
 	if kind != 0 {
-		return Log{}, s, fail{Kind: kind, At: afterAmount}
+		return Log{}, s, fail{Kind: kind, At: afterWS}
 	}
-	return Log{Enabled: true, HasAmount: true, Amount: amount}, afterAmount, fail{}
+	return Log{Enabled: true, HasAmount: true, Amount: amount}, rest, fail{}
 }
 
 // parseBody parses `PROTO from SRC [PORT] to DST [PORT]`, options still to

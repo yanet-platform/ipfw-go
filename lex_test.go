@@ -126,6 +126,32 @@ func Test_NotWS1_Table(t *testing.T) {
 	}
 }
 
+// verifies that a trailing keyword is taken only behind whitespace, by
+// prefix, and that the input is returned unchanged otherwise.
+func Test_WS1Keyword_Table(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		ok    bool
+		rest  string
+	}{
+		{name: "space then keyword", input: " log x", ok: true, rest: " x"},
+		{name: "tab then keyword", input: "\tlog", ok: true, rest: ""},
+		{name: "keyword matches by prefix", input: " logamount", ok: true, rest: "amount"},
+		{name: "keyword without whitespace", input: "log x", ok: false, rest: "log x"},
+		{name: "whitespace then another word", input: " tag", ok: false, rest: " tag"},
+		{name: "whitespace alone", input: " ", ok: false, rest: " "},
+		{name: "empty input", input: "", ok: false, rest: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rest, ok := ws1Keyword(tc.input, "log")
+			require.Equal(t, tc.ok, ok)
+			require.Equal(t, tc.rest, rest)
+		})
+	}
+}
+
 // A number case shared by the three widths: the expected value when kind is
 // zero, the expected kind otherwise, and the rest afterwards.
 type numberCase struct {
