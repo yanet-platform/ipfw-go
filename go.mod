@@ -4,6 +4,7 @@ go 1.24
 
 require (
 	github.com/stretchr/testify v1.11.1
+	github.com/yanet-platform/xnetip v0.1.1
 	pgregory.net/rapid v1.3.0
 )
 
