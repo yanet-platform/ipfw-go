@@ -82,16 +82,36 @@ func Test_Parser_Next_Comment(t *testing.T) {
 // verifies that a label line yields the name without the colon and that a
 // missing name or trailing content is a positioned error.
 func Test_Parser_Next_Label(t *testing.T) {
-	next(t, ipfw.NewParser(":ENDOFME\n"), ipfw.Record{Line: 1, Text: ":ENDOFME", Kind: ipfw.RecordLabel, Label: "ENDOFME"})
-	next(t, ipfw.NewParser(":L  \n"), ipfw.Record{Line: 1, Text: ":L", Kind: ipfw.RecordLabel, Label: "L"})
-	nextError(t, ipfw.NewParser(":"), ipfw.ParseError{Kind: ipfw.ErrExpectedToken, Line: 1, Column: 1, Text: ":"})
-	nextError(t, ipfw.NewParser(":X # c"), ipfw.ParseError{Kind: ipfw.ErrExpectedNewlineOrEOF, Line: 1, Column: 3, Text: ":X # c"})
+	next(
+		t,
+		ipfw.NewParser(":ENDOFME\n"),
+		ipfw.Record{Line: 1, Text: ":ENDOFME", Kind: ipfw.RecordLabel, Label: "ENDOFME"},
+	)
+	next(
+		t,
+		ipfw.NewParser(":L  \n"),
+		ipfw.Record{Line: 1, Text: ":L", Kind: ipfw.RecordLabel, Label: "L"},
+	)
+	nextError(
+		t,
+		ipfw.NewParser(":"),
+		ipfw.ParseError{Kind: ipfw.ErrExpectedToken, Line: 1, Column: 1, Text: ":"},
+	)
+	nextError(
+		t,
+		ipfw.NewParser(":X # c"),
+		ipfw.ParseError{Kind: ipfw.ErrExpectedNewlineOrEOF, Line: 1, Column: 3, Text: ":X # c"},
+	)
 }
 
 // verifies that a line starting with none of the known commands is
 // rejected at its first byte with the whole line as text.
 func Test_Parser_Next_UnknownLine(t *testing.T) {
-	nextError(t, ipfw.NewParser("foobar\n"), ipfw.ParseError{Kind: ipfw.ErrExpectedLine, Line: 1, Column: 0, Text: "foobar"})
+	nextError(
+		t,
+		ipfw.NewParser("foobar\n"),
+		ipfw.ParseError{Kind: ipfw.ErrExpectedLine, Line: 1, Column: 0, Text: "foobar"},
+	)
 }
 
 // verifies that the add and table keywords require whitespace and then
@@ -102,11 +122,56 @@ func Test_Parser_Next_CommandStubs(t *testing.T) {
 		input    string
 		expected ipfw.ParseError
 	}{
-		{name: "add without whitespace", input: "add\n", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 3, Text: "add"}},
-		{name: "add without action", input: "add \n", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedAction, Line: 1, Column: 3, Text: "add"}},
-		{name: "add glued to a word", input: "addx\n", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 3, Text: "addx"}},
-		{name: "table without whitespace", input: "table\n", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 5, Text: "table"}},
-		{name: "table without command", input: "table x\n", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedTableCommand, Line: 1, Column: 6, Text: "table x"}},
+		{
+			name:  "add without whitespace",
+			input: "add\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 3,
+				Text:   "add",
+			},
+		},
+		{
+			name:  "add without action",
+			input: "add \n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedAction,
+				Line:   1,
+				Column: 3,
+				Text:   "add",
+			},
+		},
+		{
+			name:  "add glued to a word",
+			input: "addx\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 3,
+				Text:   "addx",
+			},
+		},
+		{
+			name:  "table without whitespace",
+			input: "table\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 5,
+				Text:   "table",
+			},
+		},
+		{
+			name:  "table without command",
+			input: "table x\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedTableCommand,
+				Line:   1,
+				Column: 6,
+				Text:   "table x",
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -135,7 +200,11 @@ func Test_Parser_Next_NoTrailingNewline(t *testing.T) {
 // parses the following line and the input is always consumed.
 func Test_Parser_Next_SkipsFailedLine(t *testing.T) {
 	parser := ipfw.NewParser("bad line\n:L\n")
-	nextError(t, parser, ipfw.ParseError{Kind: ipfw.ErrExpectedLine, Line: 1, Column: 0, Text: "bad line"})
+	nextError(
+		t,
+		parser,
+		ipfw.ParseError{Kind: ipfw.ErrExpectedLine, Line: 1, Column: 0, Text: "bad line"},
+	)
 	next(t, parser, ipfw.Record{Line: 2, Text: ":L", Kind: ipfw.RecordLabel, Label: "L"})
 	next(t, parser, eof)
 }
@@ -143,8 +212,16 @@ func Test_Parser_Next_SkipsFailedLine(t *testing.T) {
 // verifies that the error text is the line with leading whitespace skipped
 // and the column counts from there.
 func Test_ParseError_Position(t *testing.T) {
-	nextError(t, ipfw.NewParser("  foo"), ipfw.ParseError{Kind: ipfw.ErrExpectedLine, Line: 1, Column: 0, Text: "foo"})
-	nextError(t, ipfw.NewParser("\t:X y\t\n"), ipfw.ParseError{Kind: ipfw.ErrExpectedNewlineOrEOF, Line: 1, Column: 3, Text: ":X y"})
+	nextError(
+		t,
+		ipfw.NewParser("  foo"),
+		ipfw.ParseError{Kind: ipfw.ErrExpectedLine, Line: 1, Column: 0, Text: "foo"},
+	)
+	nextError(
+		t,
+		ipfw.NewParser("\t:X y\t\n"),
+		ipfw.ParseError{Kind: ipfw.ErrExpectedNewlineOrEOF, Line: 1, Column: 3, Text: ":X y"},
+	)
 }
 
 // verifies that the iterator yields every record and stops right after the
@@ -200,9 +277,26 @@ func Test_ParseLine_Table(t *testing.T) {
 	}{
 		{name: "with newline", input: ":A\n", expected: label},
 		{name: "without newline", input: ":A", expected: label},
-		{name: "empty input is an empty line", input: "", expected: ipfw.Record{Line: 1, Kind: ipfw.RecordEmpty}},
-		{name: "second line is rejected", input: ":A\n:B", err: &ipfw.ParseError{Kind: ipfw.ErrExpectedNewlineOrEOF, Line: 1, Column: 2, Text: ":A"}},
-		{name: "unknown line", input: "x", err: &ipfw.ParseError{Kind: ipfw.ErrExpectedLine, Line: 1, Column: 0, Text: "x"}},
+		{
+			name:     "empty input is an empty line",
+			input:    "",
+			expected: ipfw.Record{Line: 1, Kind: ipfw.RecordEmpty},
+		},
+		{
+			name:  "second line is rejected",
+			input: ":A\n:B",
+			err: &ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedNewlineOrEOF,
+				Line:   1,
+				Column: 2,
+				Text:   ":A",
+			},
+		},
+		{
+			name:  "unknown line",
+			input: "x",
+			err:   &ipfw.ParseError{Kind: ipfw.ErrExpectedLine, Line: 1, Column: 0, Text: "x"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -225,8 +319,10 @@ func Test_CollectState_Reset(t *testing.T) {
 	require.NoError(t, state.Proto(ipfw.ProtoMatch{Proto: ipfw.Proto{Name: "tcp"}}))
 	require.NoError(t, state.SourceTarget(ipfw.Target{Kind: ipfw.TargetAny}))
 	require.NoError(t, state.DestinationTarget(ipfw.Target{Kind: ipfw.TargetMe}))
-	require.NoError(t, state.SourcePort(ipfw.PortMatch{Range: ipfw.PortRange{Lo: ipfw.Port{Number: 1}, Hi: ipfw.Port{Number: 1}}}))
-	require.NoError(t, state.DestinationPort(ipfw.PortMatch{Neg: true, Range: ipfw.PortRange{Lo: ipfw.Port{Number: 2}, Hi: ipfw.Port{Number: 3}}}))
+	single := ipfw.PortRange{Lo: ipfw.Port{Number: 1}, Hi: ipfw.Port{Number: 1}}
+	span := ipfw.PortRange{Lo: ipfw.Port{Number: 2}, Hi: ipfw.Port{Number: 3}}
+	require.NoError(t, state.SourcePort(ipfw.PortMatch{Range: single}))
+	require.NoError(t, state.DestinationPort(ipfw.PortMatch{Neg: true, Range: span}))
 	require.NoError(t, state.Option(ipfw.Opt{Kind: ipfw.OptIn}))
 	require.NoError(t, state.Option(ipfw.Opt{Kind: ipfw.OptOut, Or: true}))
 	require.Equal(t, ipfw.CollectState{
@@ -234,8 +330,8 @@ func Test_CollectState_Reset(t *testing.T) {
 		Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 		Sources:          []ipfw.Target{{Kind: ipfw.TargetAny}},
 		Destinations:     []ipfw.Target{{Kind: ipfw.TargetMe}},
-		SourcePorts:      []ipfw.PortMatch{{Range: ipfw.PortRange{Lo: ipfw.Port{Number: 1}, Hi: ipfw.Port{Number: 1}}}},
-		DestinationPorts: []ipfw.PortMatch{{Neg: true, Range: ipfw.PortRange{Lo: ipfw.Port{Number: 2}, Hi: ipfw.Port{Number: 3}}}},
+		SourcePorts:      []ipfw.PortMatch{{Range: single}},
+		DestinationPorts: []ipfw.PortMatch{{Neg: true, Range: span}},
 		Options:          []ipfw.Opt{{Kind: ipfw.OptIn}, {Kind: ipfw.OptOut, Or: true}},
 	}, state)
 
@@ -322,14 +418,30 @@ func Test_Parser_Next_NoAllocs(t *testing.T) {
 // verifies that arbitrary input never panics, is always consumed, and only
 // ever fails with a positioned parse error before reaching the end.
 func Fuzz_Parser_Next(f *testing.F) {
-	for _, seed := range []string{"", "# c\n", ":L\n", "add \n", "x", "\n\n", "  :L  # x", "table\n", ":\n", "add allow ip from any to any\n"} {
+	for _, seed := range []string{
+		"",
+		"# c\n",
+		":L\n",
+		"add \n",
+		"x",
+		"\n\n",
+		"  :L  # x",
+		"table\n",
+		":\n",
+		"add allow ip from any to any\n",
+	} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, input string) {
 		parser := ipfw.NewParser(input)
 		var state ipfw.CollectState
 		for calls := 0; ; calls++ {
-			require.LessOrEqual(t, calls, len(input)+1, "the parser must consume input on every call")
+			require.LessOrEqual(
+				t,
+				calls,
+				len(input)+1,
+				"the parser must consume input on every call",
+			)
 			rec, err := parser.Next(&state)
 			if err != nil {
 				require.GreaterOrEqual(t, err.Line, 1)
@@ -353,11 +465,56 @@ func Test_Parser_Next_InstructionNumber(t *testing.T) {
 		input    string
 		expected ipfw.ParseError
 	}{
-		{name: "number then unknown action", input: "add 100 x", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedAction, Line: 1, Column: 8, Text: "add 100 x"}},
-		{name: "number then tab then unknown action", input: "add 50\tx\n", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedAction, Line: 1, Column: 7, Text: "add 50\tx"}},
-		{name: "number at end of input is not a number", input: "add 100", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedAction, Line: 1, Column: 4, Text: "add 100"}},
-		{name: "overflowing number is not a number", input: "add 4294967296 allow", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedAction, Line: 1, Column: 4, Text: "add 4294967296 allow"}},
-		{name: "no number", input: "add x", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedAction, Line: 1, Column: 4, Text: "add x"}},
+		{
+			name:  "number then unknown action",
+			input: "add 100 x",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedAction,
+				Line:   1,
+				Column: 8,
+				Text:   "add 100 x",
+			},
+		},
+		{
+			name:  "number then tab then unknown action",
+			input: "add 50\tx\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedAction,
+				Line:   1,
+				Column: 7,
+				Text:   "add 50\tx",
+			},
+		},
+		{
+			name:  "number at end of input is not a number",
+			input: "add 100",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedAction,
+				Line:   1,
+				Column: 4,
+				Text:   "add 100",
+			},
+		},
+		{
+			name:  "overflowing number is not a number",
+			input: "add 4294967296 allow",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedAction,
+				Line:   1,
+				Column: 4,
+				Text:   "add 4294967296 allow",
+			},
+		},
+		{
+			name:  "no number",
+			input: "add x",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedAction,
+				Line:   1,
+				Column: 4,
+				Text:   "add x",
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -374,9 +531,36 @@ func Test_Parser_Next_ActionPass(t *testing.T) {
 		input    string
 		expected ipfw.ParseError
 	}{
-		{name: "body expected", input: "add allow ip", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedEitherIPOrProto, Line: 1, Column: 10, Text: "add allow ip"}},
-		{name: "numbered rule", input: "add 100 permit x", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedEitherIPOrProto, Line: 1, Column: 15, Text: "add 100 permit x"}},
-		{name: "no whitespace after the action", input: "add allow\n", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 9, Text: "add allow"}},
+		{
+			name:  "body expected",
+			input: "add allow ip",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedEitherIPOrProto,
+				Line:   1,
+				Column: 10,
+				Text:   "add allow ip",
+			},
+		},
+		{
+			name:  "numbered rule",
+			input: "add 100 permit x",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedEitherIPOrProto,
+				Line:   1,
+				Column: 15,
+				Text:   "add 100 permit x",
+			},
+		},
+		{
+			name:  "no whitespace after the action",
+			input: "add allow\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 9,
+				Text:   "add allow",
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -388,13 +572,40 @@ func Test_Parser_Next_ActionPass(t *testing.T) {
 // verifies that a deny action hands over to the body and that a keyword
 // glued to a longer word fails at the whitespace check after it.
 func Test_Parser_Next_ActionDeny(t *testing.T) {
-	nextError(t, ipfw.NewParser("add drop ip"), ipfw.ParseError{Kind: ipfw.ErrExpectedEitherIPOrProto, Line: 1, Column: 9, Text: "add drop ip"})
-	nextError(t, ipfw.NewParser("add denyall ip"), ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 8, Text: "add denyall ip"})
+	nextError(
+		t,
+		ipfw.NewParser("add drop ip"),
+		ipfw.ParseError{
+			Kind:   ipfw.ErrExpectedEitherIPOrProto,
+			Line:   1,
+			Column: 9,
+			Text:   "add drop ip",
+		},
+	)
+	nextError(
+		t,
+		ipfw.NewParser("add denyall ip"),
+		ipfw.ParseError{
+			Kind:   ipfw.ErrExpectedWhitespace,
+			Line:   1,
+			Column: 8,
+			Text:   "add denyall ip",
+		},
+	)
 }
 
 // verifies that a count action hands over to the body.
 func Test_Parser_Next_ActionCount(t *testing.T) {
-	nextError(t, ipfw.NewParser("add count ip"), ipfw.ParseError{Kind: ipfw.ErrExpectedEitherIPOrProto, Line: 1, Column: 10, Text: "add count ip"})
+	nextError(
+		t,
+		ipfw.NewParser("add count ip"),
+		ipfw.ParseError{
+			Kind:   ipfw.ErrExpectedEitherIPOrProto,
+			Line:   1,
+			Column: 10,
+			Text:   "add count ip",
+		},
+	)
 }
 
 // verifies that a skipto action with each target kind hands over to the
@@ -405,11 +616,56 @@ func Test_Parser_Next_ActionSkipTo(t *testing.T) {
 		input    string
 		expected ipfw.ParseError
 	}{
-		{name: "number target", input: "add skipto 1500 ip", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedEitherIPOrProto, Line: 1, Column: 16, Text: "add skipto 1500 ip"}},
-		{name: "label target", input: "add skipto :X ip", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedEitherIPOrProto, Line: 1, Column: 14, Text: "add skipto :X ip"}},
-		{name: "tablearg target", input: "add skipto tablearg ip", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedEitherIPOrProto, Line: 1, Column: 20, Text: "add skipto tablearg ip"}},
-		{name: "missing target", input: "add skipto", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 10, Text: "add skipto"}},
-		{name: "unknown target", input: "add skipto x", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedSkipTo, Line: 1, Column: 11, Text: "add skipto x"}},
+		{
+			name:  "number target",
+			input: "add skipto 1500 ip",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedEitherIPOrProto,
+				Line:   1,
+				Column: 16,
+				Text:   "add skipto 1500 ip",
+			},
+		},
+		{
+			name:  "label target",
+			input: "add skipto :X ip",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedEitherIPOrProto,
+				Line:   1,
+				Column: 14,
+				Text:   "add skipto :X ip",
+			},
+		},
+		{
+			name:  "tablearg target",
+			input: "add skipto tablearg ip",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedEitherIPOrProto,
+				Line:   1,
+				Column: 20,
+				Text:   "add skipto tablearg ip",
+			},
+		},
+		{
+			name:  "missing target",
+			input: "add skipto",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 10,
+				Text:   "add skipto",
+			},
+		},
+		{
+			name:  "unknown target",
+			input: "add skipto x",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedSkipTo,
+				Line:   1,
+				Column: 11,
+				Text:   "add skipto x",
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -423,15 +679,26 @@ func Test_Parser_Next_ActionSkipTo(t *testing.T) {
 func Test_Parser_Next_ActionCheckState(t *testing.T) {
 	checkState := func(line int, text, flow string, num uint32) ipfw.Record {
 		return ipfw.Record{
-			Line:        line,
-			Text:        text,
-			Kind:        ipfw.RecordInstruction,
-			Instruction: ipfw.Instruction{Num: num, Action: ipfw.Action{Kind: ipfw.ActionCheckState, Flow: flow}},
+			Line: line,
+			Text: text,
+			Kind: ipfw.RecordInstruction,
+			Instruction: ipfw.Instruction{
+				Num:    num,
+				Action: ipfw.Action{Kind: ipfw.ActionCheckState, Flow: flow},
+			},
 		}
 	}
-	next(t, ipfw.NewParser("add check-state :any\n"), checkState(1, "add check-state :any", "any", 0))
+	next(
+		t,
+		ipfw.NewParser("add check-state :any\n"),
+		checkState(1, "add check-state :any", "any", 0),
+	)
 	next(t, ipfw.NewParser("add check-state"), checkState(1, "add check-state", "", 0))
-	next(t, ipfw.NewParser("add 10 check-state :x\n"), checkState(1, "add 10 check-state :x", "x", 10))
+	next(
+		t,
+		ipfw.NewParser("add 10 check-state :x\n"),
+		checkState(1, "add 10 check-state :x", "x", 10),
+	)
 
 	// TODO(070): the second line is `add pass ip from any to any` in the reference.
 	parser := ipfw.NewParser("add check-state :any\nadd check-state\n")
@@ -444,9 +711,36 @@ func Test_Parser_Next_ActionCheckState(t *testing.T) {
 		input    string
 		expected ipfw.ParseError
 	}{
-		{name: "colon without a name", input: "add check-state :\n", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedNewlineOrEOF, Line: 1, Column: 16, Text: "add check-state :"}},
-		{name: "word after the keyword", input: "add check-state foo", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedNewlineOrEOF, Line: 1, Column: 16, Text: "add check-state foo"}},
-		{name: "inline comment is not accepted either", input: "add check-state // c", expected: ipfw.ParseError{Kind: ipfw.ErrExpectedNewlineOrEOF, Line: 1, Column: 16, Text: "add check-state // c"}},
+		{
+			name:  "colon without a name",
+			input: "add check-state :\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedNewlineOrEOF,
+				Line:   1,
+				Column: 16,
+				Text:   "add check-state :",
+			},
+		},
+		{
+			name:  "word after the keyword",
+			input: "add check-state foo",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedNewlineOrEOF,
+				Line:   1,
+				Column: 16,
+				Text:   "add check-state foo",
+			},
+		},
+		{
+			name:  "inline comment is not accepted either",
+			input: "add check-state // c",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedNewlineOrEOF,
+				Line:   1,
+				Column: 16,
+				Text:   "add check-state // c",
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -457,5 +751,14 @@ func Test_Parser_Next_ActionCheckState(t *testing.T) {
 
 // verifies that a long label name is taken whole.
 func Test_Parser_Next_LabelFlowName(t *testing.T) {
-	next(t, ipfw.NewParser(":MEICMP6LOGDOUBLECOLON\n"), ipfw.Record{Line: 1, Text: ":MEICMP6LOGDOUBLECOLON", Kind: ipfw.RecordLabel, Label: "MEICMP6LOGDOUBLECOLON"})
+	next(
+		t,
+		ipfw.NewParser(":MEICMP6LOGDOUBLECOLON\n"),
+		ipfw.Record{
+			Line:  1,
+			Text:  ":MEICMP6LOGDOUBLECOLON",
+			Kind:  ipfw.RecordLabel,
+			Label: "MEICMP6LOGDOUBLECOLON",
+		},
+	)
 }

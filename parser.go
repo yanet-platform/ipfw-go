@@ -53,7 +53,13 @@ func (m *Parser) Next(state State) (Record, *ParseError) {
 		lineText := physicalLine(text)
 		m.rest = afterLine(text)
 		column := min(max(len(text)-len(err.At), 0), len(lineText))
-		return Record{}, &ParseError{Kind: err.Kind, Err: err.Err, Line: m.line, Column: column, Text: lineText}
+		return Record{}, &ParseError{
+			Kind:   err.Kind,
+			Err:    err.Err,
+			Line:   m.line,
+			Column: column,
+			Text:   lineText,
+		}
 	}
 	record.Line = m.line
 	record.Text = trimRightSpace(text[:len(text)-len(rest)])
@@ -223,7 +229,12 @@ func parseSingleLine(parser *Parser, state State) (Record, *ParseError) {
 		return Record{Line: 1, Kind: RecordEmpty}, nil
 	}
 	if parser.rest != "" {
-		return Record{}, &ParseError{Kind: ErrExpectedNewlineOrEOF, Line: 1, Column: len(record.Text), Text: record.Text}
+		return Record{}, &ParseError{
+			Kind:   ErrExpectedNewlineOrEOF,
+			Line:   1,
+			Column: len(record.Text),
+			Text:   record.Text,
+		}
 	}
 	return record, nil
 }

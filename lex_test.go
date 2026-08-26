@@ -19,8 +19,20 @@ func Test_Prefix_Table(t *testing.T) {
 		ok     bool
 		rest   string
 	}{
-		{name: "match consumes the prefix", input: "add pass", prefix: "add", ok: true, rest: " pass"},
-		{name: "mismatch returns the input", input: "table x", prefix: "add", ok: false, rest: "table x"},
+		{
+			name:   "match consumes the prefix",
+			input:  "add pass",
+			prefix: "add",
+			ok:     true,
+			rest:   " pass",
+		},
+		{
+			name:   "mismatch returns the input",
+			input:  "table x",
+			prefix: "add",
+			ok:     false,
+			rest:   "table x",
+		},
 		{name: "empty prefix always matches", input: "abc", prefix: "", ok: true, rest: "abc"},
 		{name: "prefix longer than the input", input: "ad", prefix: "add", ok: false, rest: "ad"},
 		{name: "empty input", input: "", prefix: "add", ok: false, rest: ""},
@@ -135,7 +147,12 @@ func Test_ParseU8_Table(t *testing.T) {
 		{name: "leading zeros", input: "007", value: 7, rest: ""},
 		{name: "no digits", input: "abc", kind: ErrExpectedU8, rest: "abc"},
 		{name: "empty input", input: "", kind: ErrExpectedU8, rest: ""},
-		{name: "long overflow", input: "99999999999999999999999", kind: ErrExpectedU8, rest: "99999999999999999999999"},
+		{
+			name:  "long overflow",
+			input: "99999999999999999999999",
+			kind:  ErrExpectedU8,
+			rest:  "99999999999999999999999",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -206,15 +223,63 @@ func Test_OrDelimited_Table(t *testing.T) {
 		at       string
 		rest     string
 	}{
-		{name: "single element without braces", input: "a rest", elements: []string{"a"}, rest: " rest"},
-		{name: "spaced group", input: "{ a or b } rest", elements: []string{"a", "b"}, rest: " rest"},
+		{
+			name:     "single element without braces",
+			input:    "a rest",
+			elements: []string{"a"},
+			rest:     " rest",
+		},
+		{
+			name:     "spaced group",
+			input:    "{ a or b } rest",
+			elements: []string{"a", "b"},
+			rest:     " rest",
+		},
 		{name: "tight group", input: "{a or b}", elements: []string{"a", "b"}, rest: ""},
-		{name: "three elements", input: "{ a or b or c }", elements: []string{"a", "b", "c"}, rest: ""},
-		{name: "newline inside the group", input: "{ a or\nb }", elements: []string{"a", "b"}, rest: ""},
-		{name: "missing separator", input: "{ a b }", elements: []string{"a"}, kind: ErrExpectedOr, at: "b }", rest: "{ a b }"},
-		{name: "missing closing brace", input: "{ a", elements: []string{"a"}, kind: ErrExpectedOr, at: "", rest: "{ a"},
-		{name: "separator at end of input", input: "{ a or", elements: []string{"a"}, kind: ErrExpectedToken, at: "", rest: "{ a or"},
-		{name: "element error propagates", input: "{ a or } x", elements: []string{"a"}, kind: ErrExpectedToken, at: "} x", rest: "{ a or } x"},
+		{
+			name:     "three elements",
+			input:    "{ a or b or c }",
+			elements: []string{"a", "b", "c"},
+			rest:     "",
+		},
+		{
+			name:     "newline inside the group",
+			input:    "{ a or\nb }",
+			elements: []string{"a", "b"},
+			rest:     "",
+		},
+		{
+			name:     "missing separator",
+			input:    "{ a b }",
+			elements: []string{"a"},
+			kind:     ErrExpectedOr,
+			at:       "b }",
+			rest:     "{ a b }",
+		},
+		{
+			name:     "missing closing brace",
+			input:    "{ a",
+			elements: []string{"a"},
+			kind:     ErrExpectedOr,
+			at:       "",
+			rest:     "{ a",
+		},
+		{
+			name:     "separator at end of input",
+			input:    "{ a or",
+			elements: []string{"a"},
+			kind:     ErrExpectedToken,
+			at:       "",
+			rest:     "{ a or",
+		},
+		{
+			name:     "element error propagates",
+			input:    "{ a or } x",
+			elements: []string{"a"},
+			kind:     ErrExpectedToken,
+			at:       "} x",
+			rest:     "{ a or } x",
+		},
 		{name: "empty group", input: "{ }", kind: ErrExpectedToken, at: "}", rest: "{ }"},
 		{name: "single element error", input: "1", kind: ErrExpectedToken, at: "1", rest: "1"},
 	}

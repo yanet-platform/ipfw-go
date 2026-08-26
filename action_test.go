@@ -16,11 +16,26 @@ func Test_ParseAction_Pass(t *testing.T) {
 		kind   ErrorKind
 		rest   string
 	}{
-		{name: "allow", input: "allow ip from any to any", action: Action{Kind: ActionPass}, rest: " ip from any to any"},
-		{name: "pass", input: "pass ip from any to any", action: Action{Kind: ActionPass}, rest: " ip from any to any"},
+		{
+			name:   "allow",
+			input:  "allow ip from any to any",
+			action: Action{Kind: ActionPass},
+			rest:   " ip from any to any",
+		},
+		{
+			name:   "pass",
+			input:  "pass ip from any to any",
+			action: Action{Kind: ActionPass},
+			rest:   " ip from any to any",
+		},
 		{name: "accept", input: "accept ip", action: Action{Kind: ActionPass}, rest: " ip"},
 		{name: "permit", input: "permit ip", action: Action{Kind: ActionPass}, rest: " ip"},
-		{name: "prefix match leaves the tail", input: "passthru x", action: Action{Kind: ActionPass}, rest: "thru x"},
+		{
+			name:   "prefix match leaves the tail",
+			input:  "passthru x",
+			action: Action{Kind: ActionPass},
+			rest:   "thru x",
+		},
 		{name: "truncated keyword", input: "pas ip", kind: ErrExpectedAction, rest: "pas ip"},
 		{name: "unknown keyword", input: "x", kind: ErrExpectedAction, rest: "x"},
 		{name: "empty input", input: "", kind: ErrExpectedAction, rest: ""},
@@ -53,10 +68,25 @@ func Test_ParseAction_Deny(t *testing.T) {
 		kind   ErrorKind
 		rest   string
 	}{
-		{name: "deny", input: "deny ip from any to any", action: Action{Kind: ActionDeny}, rest: " ip from any to any"},
+		{
+			name:   "deny",
+			input:  "deny ip from any to any",
+			action: Action{Kind: ActionDeny},
+			rest:   " ip from any to any",
+		},
 		{name: "drop", input: "drop ip", action: Action{Kind: ActionDeny}, rest: " ip"},
-		{name: "prefix match leaves the tail", input: "denyall ip", action: Action{Kind: ActionDeny}, rest: "all ip"},
-		{name: "denied is not deny", input: "denied ip", kind: ErrExpectedAction, rest: "denied ip"},
+		{
+			name:   "prefix match leaves the tail",
+			input:  "denyall ip",
+			action: Action{Kind: ActionDeny},
+			rest:   "all ip",
+		},
+		{
+			name:  "denied is not deny",
+			input: "denied ip",
+			kind:  ErrExpectedAction,
+			rest:  "denied ip",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -89,15 +119,68 @@ func Test_ParseAction_SkipTo(t *testing.T) {
 		at     string
 		rest   string
 	}{
-		{name: "label", input: "skipto :SSH_RULES x", action: Action{Kind: ActionSkipTo, SkipTo: SkipTo{Kind: SkipToLabel, Label: "SSH_RULES"}}, rest: " x"},
-		{name: "label stops at newline", input: "skipto :L\n", action: Action{Kind: ActionSkipTo, SkipTo: SkipTo{Kind: SkipToLabel, Label: "L"}}, rest: "\n"},
-		{name: "number", input: "skipto 50 ", action: Action{Kind: ActionSkipTo, SkipTo: SkipTo{Kind: SkipToNumber, Number: 50}}, rest: " "},
-		{name: "tablearg", input: "skipto tablearg", action: Action{Kind: ActionSkipTo, SkipTo: SkipTo{Kind: SkipToTableArg}}, rest: ""},
-		{name: "no whitespace", input: "skipto", kind: ErrExpectedWhitespace, at: "", rest: "skipto"},
-		{name: "keyword glued to a word", input: "skiptox", kind: ErrExpectedWhitespace, at: "x", rest: "skiptox"},
-		{name: "unknown target", input: "skipto x", kind: ErrExpectedSkipTo, at: "x", rest: "skipto x"},
-		{name: "label without a name", input: "skipto :", kind: ErrExpectedToken, at: "", rest: "skipto :"},
-		{name: "overflowing number", input: "skipto 4294967296", kind: ErrExpectedSkipTo, at: "4294967296", rest: "skipto 4294967296"},
+		{
+			name:  "label",
+			input: "skipto :SSH_RULES x",
+			action: Action{
+				Kind:   ActionSkipTo,
+				SkipTo: SkipTo{Kind: SkipToLabel, Label: "SSH_RULES"},
+			},
+			rest: " x",
+		},
+		{
+			name:   "label stops at newline",
+			input:  "skipto :L\n",
+			action: Action{Kind: ActionSkipTo, SkipTo: SkipTo{Kind: SkipToLabel, Label: "L"}},
+			rest:   "\n",
+		},
+		{
+			name:   "number",
+			input:  "skipto 50 ",
+			action: Action{Kind: ActionSkipTo, SkipTo: SkipTo{Kind: SkipToNumber, Number: 50}},
+			rest:   " ",
+		},
+		{
+			name:   "tablearg",
+			input:  "skipto tablearg",
+			action: Action{Kind: ActionSkipTo, SkipTo: SkipTo{Kind: SkipToTableArg}},
+			rest:   "",
+		},
+		{
+			name:  "no whitespace",
+			input: "skipto",
+			kind:  ErrExpectedWhitespace,
+			at:    "",
+			rest:  "skipto",
+		},
+		{
+			name:  "keyword glued to a word",
+			input: "skiptox",
+			kind:  ErrExpectedWhitespace,
+			at:    "x",
+			rest:  "skiptox",
+		},
+		{
+			name:  "unknown target",
+			input: "skipto x",
+			kind:  ErrExpectedSkipTo,
+			at:    "x",
+			rest:  "skipto x",
+		},
+		{
+			name:  "label without a name",
+			input: "skipto :",
+			kind:  ErrExpectedToken,
+			at:    "",
+			rest:  "skipto :",
+		},
+		{
+			name:  "overflowing number",
+			input: "skipto 4294967296",
+			kind:  ErrExpectedSkipTo,
+			at:    "4294967296",
+			rest:  "skipto 4294967296",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -119,9 +202,24 @@ func Test_SkipTo_String(t *testing.T) {
 		target string
 		action string
 	}{
-		{name: "label", skipTo: SkipTo{Kind: SkipToLabel, Label: "SSH_RULES"}, target: ":SSH_RULES", action: "skipto :SSH_RULES"},
-		{name: "number", skipTo: SkipTo{Kind: SkipToNumber, Number: 100}, target: "100", action: "skipto 100"},
-		{name: "tablearg", skipTo: SkipTo{Kind: SkipToTableArg}, target: "tablearg", action: "skipto tablearg"},
+		{
+			name:   "label",
+			skipTo: SkipTo{Kind: SkipToLabel, Label: "SSH_RULES"},
+			target: ":SSH_RULES",
+			action: "skipto :SSH_RULES",
+		},
+		{
+			name:   "number",
+			skipTo: SkipTo{Kind: SkipToNumber, Number: 100},
+			target: "100",
+			action: "skipto 100",
+		},
+		{
+			name:   "tablearg",
+			skipTo: SkipTo{Kind: SkipToTableArg},
+			target: "tablearg",
+			action: "skipto tablearg",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -141,11 +239,36 @@ func Test_ParseAction_CheckState(t *testing.T) {
 		rest   string
 	}{
 		{name: "bare", input: "check-state", action: Action{Kind: ActionCheckState}, rest: ""},
-		{name: "flow name", input: "check-state :any", action: Action{Kind: ActionCheckState, Flow: "any"}, rest: ""},
-		{name: "flow name stops at newline", input: "check-state :any\n", action: Action{Kind: ActionCheckState, Flow: "any"}, rest: "\n"},
-		{name: "word without colon is not a flow", input: "check-state foo", action: Action{Kind: ActionCheckState}, rest: " foo"},
-		{name: "colon without a name is not a flow", input: "check-state :", action: Action{Kind: ActionCheckState}, rest: " :"},
-		{name: "keyword glued to a word", input: "check-statex", action: Action{Kind: ActionCheckState}, rest: "x"},
+		{
+			name:   "flow name",
+			input:  "check-state :any",
+			action: Action{Kind: ActionCheckState, Flow: "any"},
+			rest:   "",
+		},
+		{
+			name:   "flow name stops at newline",
+			input:  "check-state :any\n",
+			action: Action{Kind: ActionCheckState, Flow: "any"},
+			rest:   "\n",
+		},
+		{
+			name:   "word without colon is not a flow",
+			input:  "check-state foo",
+			action: Action{Kind: ActionCheckState},
+			rest:   " foo",
+		},
+		{
+			name:   "colon without a name is not a flow",
+			input:  "check-state :",
+			action: Action{Kind: ActionCheckState},
+			rest:   " :",
+		},
+		{
+			name:   "keyword glued to a word",
+			input:  "check-statex",
+			action: Action{Kind: ActionCheckState},
+			rest:   "x",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

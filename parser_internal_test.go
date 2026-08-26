@@ -16,7 +16,12 @@ func Test_ParseInlineComment_Table(t *testing.T) {
 		rest    string
 	}{
 		{name: "comment with leading space", input: " // x", comment: " x", rest: ""},
-		{name: "comment up to the newline", input: "// {\"id\": 1}\n:L", comment: " {\"id\": 1}", rest: "\n:L"},
+		{
+			name:    "comment up to the newline",
+			input:   "// {\"id\": 1}\n:L",
+			comment: " {\"id\": 1}",
+			rest:    "\n:L",
+		},
 		{name: "empty comment", input: "//", comment: "", rest: ""},
 		{name: "no comment", input: "x", comment: "", rest: "x"},
 		{name: "whitespace without comment is kept", input: "  x", comment: "", rest: "  x"},

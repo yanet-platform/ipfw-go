@@ -17,44 +17,128 @@ func Test_ErrorKind_Error(t *testing.T) {
 		kind    ipfw.ErrorKind
 		message string
 	}{
-		{name: "expected line", kind: ipfw.ErrExpectedLine, message: "expected `add`, `table`, a `:label` or a `#` comment"},
+		{
+			name:    "expected line",
+			kind:    ipfw.ErrExpectedLine,
+			message: "expected `add`, `table`, a `:label` or a `#` comment",
+		},
 		{name: "expected command", kind: ipfw.ErrExpectedCommand, message: "expected command"},
 		{name: "expected from", kind: ipfw.ErrExpectedFrom, message: "expected `from`"},
 		{name: "expected prefix", kind: ipfw.ErrExpectedPrefix, message: "unexpected token"},
 		{name: "expected action", kind: ipfw.ErrExpectedAction, message: "expected action"},
 		{name: "expected or", kind: ipfw.ErrExpectedOr, message: "expected `or` separator"},
 		{name: "expected proto", kind: ipfw.ErrExpectedProto, message: "expected protocol"},
-		{name: "expected whitespace", kind: ipfw.ErrExpectedWhitespace, message: "expected whitespace"},
+		{
+			name:    "expected whitespace",
+			kind:    ipfw.ErrExpectedWhitespace,
+			message: "expected whitespace",
+		},
 		{name: "expected IP proto", kind: ipfw.ErrExpectedIPProto, message: "expected IP protocol"},
-		{name: "expected either IP or proto", kind: ipfw.ErrExpectedEitherIPOrProto, message: "expected IP or transport protocol"},
-		{name: "expected IPv4 network", kind: ipfw.ErrExpectedIPv4Network, message: "expected IPv4 network"},
-		{name: "expected IPv6 network", kind: ipfw.ErrExpectedIPv6Network, message: "expected IPv6 network"},
+		{
+			name:    "expected either IP or proto",
+			kind:    ipfw.ErrExpectedEitherIPOrProto,
+			message: "expected IP or transport protocol",
+		},
+		{
+			name:    "expected IPv4 network",
+			kind:    ipfw.ErrExpectedIPv4Network,
+			message: "expected IPv4 network",
+		},
+		{
+			name:    "expected IPv6 network",
+			kind:    ipfw.ErrExpectedIPv6Network,
+			message: "expected IPv6 network",
+		},
 		{name: "expected hostname", kind: ipfw.ErrExpectedHostname, message: "expected hostname"},
 		{name: "expected port", kind: ipfw.ErrExpectedPort, message: "expected port"},
-		{name: "unexpected escape", kind: ipfw.ErrUnexpectedEscape, message: "unexpected escape character in port name"},
+		{
+			name:    "unexpected escape",
+			kind:    ipfw.ErrUnexpectedEscape,
+			message: "unexpected escape character in port name",
+		},
 		{name: "expected token", kind: ipfw.ErrExpectedToken, message: "expected token"},
 		{name: "expected flow name", kind: ipfw.ErrExpectedFlowName, message: "expected flow name"},
 		{name: "unknown option", kind: ipfw.ErrUnknownOption, message: "unknown option"},
 		{name: "expected target", kind: ipfw.ErrExpectedTarget, message: "expected target"},
-		{name: "expected hostname escape close", kind: ipfw.ErrExpectedHostnameEscapeClose, message: "expected closing `'` of a quoted hostname"},
-		{name: "expected table command", kind: ipfw.ErrExpectedTableCommand, message: "expected table command (`create` or `add`)"},
-		{name: "expected table key", kind: ipfw.ErrExpectedTableKey, message: "expected table key (network or interface name)"},
-		{name: "expected skipto", kind: ipfw.ErrExpectedSkipTo, message: "expected skipto target (label, rule number or `tablearg`)"},
+		{
+			name:    "expected hostname escape close",
+			kind:    ipfw.ErrExpectedHostnameEscapeClose,
+			message: "expected closing `'` of a quoted hostname",
+		},
+		{
+			name:    "expected table command",
+			kind:    ipfw.ErrExpectedTableCommand,
+			message: "expected table command (`create` or `add`)",
+		},
+		{
+			name:    "expected table key",
+			kind:    ipfw.ErrExpectedTableKey,
+			message: "expected table key (network or interface name)",
+		},
+		{
+			name:    "expected skipto",
+			kind:    ipfw.ErrExpectedSkipTo,
+			message: "expected skipto target (label, rule number or `tablearg`)",
+		},
 		{name: "expected u8", kind: ipfw.ErrExpectedU8, message: "expected 8-bit unsigned integer"},
-		{name: "expected u16", kind: ipfw.ErrExpectedU16, message: "expected 16-bit unsigned integer"},
-		{name: "expected u32", kind: ipfw.ErrExpectedU32, message: "expected 32-bit unsigned integer"},
+		{
+			name:    "expected u16",
+			kind:    ipfw.ErrExpectedU16,
+			message: "expected 16-bit unsigned integer",
+		},
+		{
+			name:    "expected u32",
+			kind:    ipfw.ErrExpectedU32,
+			message: "expected 32-bit unsigned integer",
+		},
 		{name: "unknown ICMP type", kind: ipfw.ErrUnknownICMPType, message: "unknown ICMP type"},
-		{name: "unknown ICMPv6 type", kind: ipfw.ErrUnknownICMP6Type, message: "unknown ICMPv6 type"},
+		{
+			name:    "unknown ICMPv6 type",
+			kind:    ipfw.ErrUnknownICMP6Type,
+			message: "unknown ICMPv6 type",
+		},
 		{name: "unknown TCP flag", kind: ipfw.ErrUnknownTCPFlag, message: "unknown TCP flag"},
-		{name: "expected interface name", kind: ipfw.ErrExpectedIfName, message: "expected interface name"},
-		{name: "invalid interface mask", kind: ipfw.ErrExpectedIfMask, message: "invalid interface mask pattern"},
-		{name: "expected table type", kind: ipfw.ErrExpectedTableType, message: "expected table type"},
-		{name: "expected table name", kind: ipfw.ErrExpectedTableName, message: "expected table name"},
-		{name: "expected table value", kind: ipfw.ErrExpectedTableValue, message: "expected table value"},
-		{name: "expected option argument", kind: ipfw.ErrExpectedOpt, message: "expected option argument"},
-		{name: "expected newline or EOF", kind: ipfw.ErrExpectedNewlineOrEOF, message: "expected `\\n` or EOF"},
+		{
+			name:    "expected interface name",
+			kind:    ipfw.ErrExpectedIfName,
+			message: "expected interface name",
+		},
+		{
+			name:    "invalid interface mask",
+			kind:    ipfw.ErrExpectedIfMask,
+			message: "invalid interface mask pattern",
+		},
+		{
+			name:    "expected table type",
+			kind:    ipfw.ErrExpectedTableType,
+			message: "expected table type",
+		},
+		{
+			name:    "expected table name",
+			kind:    ipfw.ErrExpectedTableName,
+			message: "expected table name",
+		},
+		{
+			name:    "expected table value",
+			kind:    ipfw.ErrExpectedTableValue,
+			message: "expected table value",
+		},
+		{
+			name:    "expected option argument",
+			kind:    ipfw.ErrExpectedOpt,
+			message: "expected option argument",
+		},
+		{
+			name:    "expected newline or EOF",
+			kind:    ipfw.ErrExpectedNewlineOrEOF,
+			message: "expected `\\n` or EOF",
+		},
 		{name: "state error", kind: ipfw.ErrState, message: "state error"},
-		{name: "unknown value renders its number", kind: ipfw.ErrorKind(200), message: "unknown error kind 200"},
+		{
+			name:    "unknown value renders its number",
+			kind:    ipfw.ErrorKind(200),
+			message: "unknown error kind 200",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -86,13 +170,23 @@ func Test_ParseError_Error(t *testing.T) {
 		expected string
 	}{
 		{
-			name:     "kind only",
-			err:      &ipfw.ParseError{Kind: ipfw.ErrExpectedAction, Line: 3, Column: 12, Text: "add foobar"},
+			name: "kind only",
+			err: &ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedAction,
+				Line:   3,
+				Column: 12,
+				Text:   "add foobar",
+			},
 			expected: "3:12: expected action",
 		},
 		{
-			name:     "state error with cause",
-			err:      &ipfw.ParseError{Kind: ipfw.ErrState, Err: errors.New("boom"), Line: 3, Column: 12},
+			name: "state error with cause",
+			err: &ipfw.ParseError{
+				Kind:   ipfw.ErrState,
+				Err:    errors.New("boom"),
+				Line:   3,
+				Column: 12,
+			},
 			expected: "3:12: state error: boom",
 		},
 	}

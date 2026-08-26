@@ -100,6 +100,9 @@ has every dependency: use `GOPROXY=off go get …` / `GOPROXY=off go mod tidy`.
 - Function ordering: top-down, exported entry points first, helpers below
   their first caller.
 - Dead code is deleted, never commented out.
+- Lines stay within 100 columns (`gofumpt` does not wrap). A composite
+  literal or a call that does not fit is written one field or argument per
+  line, table-test cases included.
 
 ## Tests
 
