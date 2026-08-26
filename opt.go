@@ -139,6 +139,7 @@ var keywordOptions = [...]struct {
 	keyword string
 	kind    OptKind
 }{
+	{"frag", OptFrag},
 	{"established", OptEstablished},
 	{"in", OptIn},
 	{"out", OptOut},

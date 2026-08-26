@@ -180,6 +180,12 @@ func Test_ParseOptions_Table(t *testing.T) {
 			options: []ipfw.Opt{{Kind: ipfw.OptIn}, {Or: true, Kind: ipfw.OptOut}},
 		},
 		{
+			name:    "frag",
+			input:   "frag",
+			n:       4,
+			options: []ipfw.Opt{{Kind: ipfw.OptFrag}},
+		},
+		{
 			name:    "in with a suffix is in",
 			input:   "inet",
 			n:       2,

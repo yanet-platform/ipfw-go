@@ -1590,6 +1590,16 @@ func Test_Parser_Next_Options(t *testing.T) {
 			},
 		},
 		{
+			name:  "frag",
+			input: "add allow ip from any to any frag\n",
+			state: ipfw.ReduceState{
+				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      []ipfw.Opt{{Kind: ipfw.OptFrag}},
+			},
+		},
+		{
 			name:    "option before an inline comment",
 			input:   "add allow tcp from any to any established // c\n",
 			comment: " c",
@@ -1699,6 +1709,16 @@ func Test_Parser_Next_OptionErrors(t *testing.T) {
 				Line:   1,
 				Column: 31,
 				Text:   "add allow ip from any to any inet",
+			},
+		},
+		{
+			name:  "port after frag",
+			input: "add allow ip from any to any frag 22",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrUnknownOption,
+				Line:   1,
+				Column: 34,
+				Text:   "add allow ip from any to any frag 22",
 			},
 		},
 		{
