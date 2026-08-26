@@ -27,8 +27,8 @@ go test ./...                                   # all tests
 go test -run 'Test_Parser_Next_' -v ./...
 go test -short ./...                            # rapid checks divided by five
 go test -run 'Test_X' -rapid.checks=1000 -rapid.seed=<n> ./...   # more checks / replay a failure
-go test -run xxx -bench 'BenchmarkParser_Next' -benchmem ./...
-go test -run xxx -fuzz 'FuzzNext' -fuzztime 30s ./...
+go test -run xxx -bench 'Benchmark_Parser_Next' -benchmem ./...
+go test -run xxx -fuzz 'Fuzz_Parser_Next' -fuzztime 30s ./...
 make test | make lint | make bench | make fuzz  # wrappers; make lint is the pre-commit hook
 make hooks                                      # once per clone: git config core.hooksPath .githooks
 ```
@@ -96,9 +96,10 @@ has every dependency: use `GOPROXY=off go get …` / `GOPROXY=off go mod tidy`.
 
 ## Tests
 
-- Names: `Test_<Unit>_<Case>` (`Test_Parser_Next_Comment`,
-  `Test_ParseOptions_OrGroup`); benchmarks `Benchmark<Type>_<Method>[_<Shape>]`;
-  fuzz `Fuzz<Function>`; examples `Example<Type>_<Method>`.
+- Names: `Test_<What>_<Case>` (`Test_Parser_Next_Comment`,
+  `Test_ParseOptions_OrGroup`), `Benchmark_<What>_<Case>`,
+  `Fuzz_<What>_<Case>`; examples `Example<Type>_<Method>` (Go fixes that
+  shape).
 - Each test carries a one-line `// verifies that …` brief.
 - `require` by default, `assert` for several independent checks;
   `(t, expected, actual)` order. Table cases have self-describing `name:`s.

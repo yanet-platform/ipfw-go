@@ -343,7 +343,7 @@ func benchElement(s string) (string, fail) {
 	return rest, fail{}
 }
 
-func BenchmarkOrDelimited_Group(b *testing.B) {
+func Benchmark_OrDelimited_Group(b *testing.B) {
 	input := "{ not tcp or udp or 42 } from any to any"
 	b.ReportAllocs()
 	for b.Loop() {
@@ -352,7 +352,7 @@ func BenchmarkOrDelimited_Group(b *testing.B) {
 	}
 }
 
-func BenchmarkOrDelimited_Single(b *testing.B) {
+func Benchmark_OrDelimited_Single(b *testing.B) {
 	input := "tcp from any to any"
 	b.ReportAllocs()
 	for b.Loop() {
@@ -361,7 +361,7 @@ func BenchmarkOrDelimited_Single(b *testing.B) {
 	}
 }
 
-func BenchmarkParseU32(b *testing.B) {
+func Benchmark_ParseU32_Maximum(b *testing.B) {
 	input := "4294967295 count"
 	b.ReportAllocs()
 	for b.Loop() {
@@ -370,7 +370,7 @@ func BenchmarkParseU32(b *testing.B) {
 	}
 }
 
-func BenchmarkPrefix_WS1_Token(b *testing.B) {
+func Benchmark_Lex_KeywordSequence(b *testing.B) {
 	input := "add   allow tcp"
 	b.ReportAllocs()
 	for b.Loop() {
