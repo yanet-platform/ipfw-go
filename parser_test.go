@@ -533,22 +533,22 @@ func Test_Parser_Next_ActionPass(t *testing.T) {
 	}{
 		{
 			name:  "body expected",
-			input: "add allow ip",
+			input: "add allow _",
 			expected: ipfw.ParseError{
 				Kind:   ipfw.ErrExpectedEitherIPOrProto,
 				Line:   1,
 				Column: 10,
-				Text:   "add allow ip",
+				Text:   "add allow _",
 			},
 		},
 		{
 			name:  "numbered rule",
-			input: "add 100 permit x",
+			input: "add 100 permit _",
 			expected: ipfw.ParseError{
 				Kind:   ipfw.ErrExpectedEitherIPOrProto,
 				Line:   1,
 				Column: 15,
-				Text:   "add 100 permit x",
+				Text:   "add 100 permit _",
 			},
 		},
 		{
@@ -574,12 +574,12 @@ func Test_Parser_Next_ActionPass(t *testing.T) {
 func Test_Parser_Next_ActionDeny(t *testing.T) {
 	nextError(
 		t,
-		ipfw.NewParser("add drop ip"),
+		ipfw.NewParser("add drop _"),
 		ipfw.ParseError{
 			Kind:   ipfw.ErrExpectedEitherIPOrProto,
 			Line:   1,
 			Column: 9,
-			Text:   "add drop ip",
+			Text:   "add drop _",
 		},
 	)
 	nextError(
@@ -598,12 +598,12 @@ func Test_Parser_Next_ActionDeny(t *testing.T) {
 func Test_Parser_Next_ActionCount(t *testing.T) {
 	nextError(
 		t,
-		ipfw.NewParser("add count ip"),
+		ipfw.NewParser("add count _"),
 		ipfw.ParseError{
 			Kind:   ipfw.ErrExpectedEitherIPOrProto,
 			Line:   1,
 			Column: 10,
-			Text:   "add count ip",
+			Text:   "add count _",
 		},
 	)
 }
@@ -618,32 +618,32 @@ func Test_Parser_Next_ActionSkipTo(t *testing.T) {
 	}{
 		{
 			name:  "number target",
-			input: "add skipto 1500 ip",
+			input: "add skipto 1500 _",
 			expected: ipfw.ParseError{
 				Kind:   ipfw.ErrExpectedEitherIPOrProto,
 				Line:   1,
 				Column: 16,
-				Text:   "add skipto 1500 ip",
+				Text:   "add skipto 1500 _",
 			},
 		},
 		{
 			name:  "label target",
-			input: "add skipto :X ip",
+			input: "add skipto :X _",
 			expected: ipfw.ParseError{
 				Kind:   ipfw.ErrExpectedEitherIPOrProto,
 				Line:   1,
 				Column: 14,
-				Text:   "add skipto :X ip",
+				Text:   "add skipto :X _",
 			},
 		},
 		{
 			name:  "tablearg target",
-			input: "add skipto tablearg ip",
+			input: "add skipto tablearg _",
 			expected: ipfw.ParseError{
 				Kind:   ipfw.ErrExpectedEitherIPOrProto,
 				Line:   1,
 				Column: 20,
-				Text:   "add skipto tablearg ip",
+				Text:   "add skipto tablearg _",
 			},
 		},
 		{
@@ -761,4 +761,54 @@ func Test_Parser_Next_LabelFlowName(t *testing.T) {
 			Label: "MEICMP6LOGDOUBLECOLON",
 		},
 	)
+}
+
+// verifies that the body starts with a protocol followed by `from`, and
+// that each missing piece is positioned where it was expected.
+func Test_Parser_Next_BodyProtocol(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		expected ipfw.ParseError
+	}{
+		{
+			name:     "nothing after the protocol",
+			input:    "add allow tcp\n",
+			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 13, Text: "add allow tcp"},
+		},
+		{
+			name:     "from missing",
+			input:    "add allow tcp any",
+			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedFrom, Line: 1, Column: 14, Text: "add allow tcp any"},
+		},
+		{
+			name:     "nothing after from",
+			input:    "add allow tcp from",
+			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 18, Text: "add allow tcp from"},
+		},
+		{
+			name:     "source expected",
+			input:    "add allow tcp from any",
+			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedTarget, Line: 1, Column: 19, Text: "add allow tcp from any"},
+		},
+		{
+			name:     "no protocol",
+			input:    "add allow _ from any",
+			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedEitherIPOrProto, Line: 1, Column: 10, Text: "add allow _ from any"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			nextError(t, ipfw.NewParser(tc.input), tc.expected)
+		})
+	}
+}
+
+// verifies that a token handed to the state stays there when the line fails
+// later on: the state is not rolled back.
+func Test_Parser_Next_BodyProtocolEmittedBeforeFailure(t *testing.T) {
+	var state ipfw.CollectState
+	_, err := ipfw.NewParser("add allow tcp x").Next(&state)
+	require.NotNil(t, err)
+	require.Equal(t, ipfw.CollectState{Protos: []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}}}, state)
 }

@@ -18,6 +18,30 @@ func (m fail) Failed() bool {
 	return m.Kind != 0
 }
 
+// ToError returns the failure as the error a public function reports: the
+// attached error when a State or a hook produced one, the kind otherwise.
+func (m fail) ToError() error {
+	if m.Err != nil {
+		return m.Err
+	}
+	return m.Kind
+}
+
+// failFrom turns the error a State or a hook returned into a failure at the
+// rejected token.
+//
+// An ErrorKind keeps its kind, anything else is an ErrState carrying the
+// error.
+func failFrom(err error, at string) fail {
+	if err == nil {
+		return fail{}
+	}
+	if kind, ok := err.(ErrorKind); ok {
+		return fail{Kind: kind, At: at}
+	}
+	return fail{Kind: ErrState, At: at, Err: err}
+}
+
 func isWS(c byte) bool {
 	return c == ' ' || c == '\t'
 }

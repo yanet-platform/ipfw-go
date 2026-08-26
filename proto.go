@@ -43,3 +43,61 @@ type ProtoMatch struct {
 	// Proto is the protocol.
 	Proto Proto
 }
+
+// ParseProtocols parses the protocol part of a rule body into state.
+//
+// It returns the number of bytes consumed, or on failure its offset together
+// with the error, an ErrorKind unless the state returned something else.
+func ParseProtocols(s string, state State) (int, error) {
+	rest, err := parseProtocols(s, state)
+	if err.Failed() {
+		return len(s) - len(err.At), err.ToError()
+	}
+	return len(s) - len(rest), nil
+}
+
+func parseProtocols(s string, state State) (string, fail) {
+	return parseProtocolElement(s, state)
+}
+
+// parseProtocolElement parses one protocol, a failure pointing at the
+// element start whatever went wrong inside it.
+func parseProtocolElement(s string, state State) (string, fail) {
+	match, rest, kind := parseProtoMatch(s)
+	if kind != 0 {
+		return s, fail{Kind: ErrExpectedEitherIPOrProto, At: s}
+	}
+	if err := failFrom(state.Proto(match), s); err.Failed() {
+		return s, err
+	}
+	return rest, fail{}
+}
+
+func parseProtoMatch(s string) (ProtoMatch, string, ErrorKind) {
+	rest, neg := notWS1(s)
+	proto, rest, kind := parseProto(rest)
+	if kind != 0 {
+		return ProtoMatch{}, s, kind
+	}
+	return ProtoMatch{Neg: neg, Proto: proto}, rest, 0
+}
+
+// parseProto reads a `[A-Za-z0-9-]+` token, a number only when every byte is
+// a digit and the value fits a byte.
+//
+// An overflowing number is a name like any other, since custom protocols may
+// be named by digits.
+func parseProto(s string) (Proto, string, ErrorKind) {
+	name, rest := takeWhile(s, isProtoByte)
+	if name == "" {
+		return Proto{}, s, ErrExpectedProto
+	}
+	if number, afterNumber, kind := parseU8(name); kind == 0 && afterNumber == "" {
+		return Proto{Number: number}, rest, 0
+	}
+	return Proto{Name: name}, rest, 0
+}
+
+func isProtoByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-'
+}

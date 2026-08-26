@@ -153,8 +153,25 @@ func (m *Parser) parseInstruction(s string, state State) (Instruction, string, f
 	return instruction, rest, fail{}
 }
 
+// parseBody parses `PROTO from SRC to DST …`, the targets still to come.
 func (m *Parser) parseBody(s string, state State) (string, fail) {
-	return s, fail{Kind: ErrExpectedEitherIPOrProto, At: s}
+	rest, err := parseProtocols(s, state)
+	if err.Failed() {
+		return s, err
+	}
+	rest, ok := ws1(rest)
+	if !ok {
+		return s, fail{Kind: ErrExpectedWhitespace, At: rest}
+	}
+	rest, ok = prefix(rest, "from")
+	if !ok {
+		return s, fail{Kind: ErrExpectedFrom, At: rest}
+	}
+	rest, ok = ws1(rest)
+	if !ok {
+		return s, fail{Kind: ErrExpectedWhitespace, At: rest}
+	}
+	return s, fail{Kind: ErrExpectedTarget, At: rest}
 }
 
 // parseInlineComment returns the raw text after `//`, leading whitespace
