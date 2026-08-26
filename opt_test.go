@@ -45,6 +45,16 @@ func tcpFlags(set, mask ipfw.TCPFlag) ipfw.Opt {
 	return ipfw.Opt{Kind: ipfw.OptTCPFlags, TCPFlags: ipfw.TCPFlags{Set: set, Mask: mask}}
 }
 
+// viaExact is a via option naming one interface.
+func viaExact(name string) ipfw.Opt {
+	return ipfw.Opt{Kind: ipfw.OptVia, Via: ipfw.Via{Kind: ipfw.ViaExact, Name: name}}
+}
+
+// viaMask is a via option with an interface mask.
+func viaMask(pattern string) ipfw.Opt {
+	return ipfw.Opt{Kind: ipfw.OptVia, Via: ipfw.Via{Kind: ipfw.ViaMask, Name: pattern}}
+}
+
 // notOpt is the option with its negation set.
 func notOpt(opt ipfw.Opt) ipfw.Opt {
 	opt.Neg = true
@@ -500,6 +510,82 @@ func Test_ParseOptions_Table(t *testing.T) {
 			input: "tcpflags",
 			n:     8,
 			err:   ipfw.ErrExpectedWhitespace,
+		},
+		{
+			name:    "via exact name",
+			input:   "via tun0",
+			n:       8,
+			options: []ipfw.Opt{viaExact("tun0")},
+		},
+		{
+			name:    "via mask with a star",
+			input:   "via tun*",
+			n:       8,
+			options: []ipfw.Opt{viaMask("tun*")},
+		},
+		{
+			name:    "via mask with question marks",
+			input:   "via mce??88",
+			n:       11,
+			options: []ipfw.Opt{viaMask("mce??88")},
+		},
+		{
+			name:    "via mask with a negated class",
+			input:   "via tun[!a]",
+			n:       11,
+			options: []ipfw.Opt{viaMask("tun[!a]")},
+		},
+		{
+			name:    "via name stops at a slash",
+			input:   "via eth0/1",
+			n:       8,
+			options: []ipfw.Opt{viaExact("eth0")},
+		},
+		{
+			name:    "via then in",
+			input:   "via eth0 in",
+			n:       11,
+			options: []ipfw.Opt{viaExact("eth0"), {Kind: ipfw.OptIn}},
+		},
+		{
+			name:  "group of via masks",
+			input: "{ via vlan1?? or via vlan2??? or via eth??3??? }",
+			n:     48,
+			options: []ipfw.Opt{
+				viaMask("vlan1??"),
+				orOpt(viaMask("vlan2???")),
+				orOpt(viaMask("eth??3???")),
+			},
+		},
+		{
+			name:  "via mask with a double star",
+			input: "via tun**",
+			n:     4,
+			err:   ipfw.ErrExpectedIfMask,
+		},
+		{
+			name:  "via mask with an unclosed class",
+			input: "via tun[a-z",
+			n:     4,
+			err:   ipfw.ErrExpectedIfMask,
+		},
+		{
+			name:  "via mask with an unclosed negated class",
+			input: "via tun[!",
+			n:     4,
+			err:   ipfw.ErrExpectedIfMask,
+		},
+		{
+			name:  "via without whitespace",
+			input: "via",
+			n:     3,
+			err:   ipfw.ErrExpectedWhitespace,
+		},
+		{
+			name:  "via without a name",
+			input: "via {",
+			n:     4,
+			err:   ipfw.ErrExpectedOpt,
 		},
 		{
 			name:    "in with a suffix is in",

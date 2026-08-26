@@ -1,5 +1,7 @@
 package ipfw
 
+import "strings"
+
 // MatchIfMask reports whether the interface name matches the fnmatch-style
 // pattern of a `via` mask.
 //
@@ -107,4 +109,35 @@ func rangeMatch(pattern string, c byte) (string, bool) {
 			matched = true
 		}
 	}
+}
+
+// validateIfMask rejects the mask patterns ipfw(8) does not accept: a
+// double star and a class without its closing bracket.
+func validateIfMask(pattern string) ErrorKind {
+	idx := 0
+	for idx < len(pattern) {
+		switch pattern[idx] {
+		case '*':
+			if idx+1 < len(pattern) && pattern[idx+1] == '*' {
+				return ErrExpectedIfMask
+			}
+			idx++
+		case '[':
+			if idx+4 <= len(pattern) && pattern[idx+1] == '!' {
+				if close := strings.IndexByte(pattern[idx+3:], ']'); close >= 0 {
+					idx += close + 4
+					continue
+				}
+			} else if idx+3 <= len(pattern) && pattern[idx+1] != '!' {
+				if close := strings.IndexByte(pattern[idx+2:], ']'); close >= 0 {
+					idx += close + 3
+					continue
+				}
+			}
+			return ErrExpectedIfMask
+		default:
+			idx++
+		}
+	}
+	return 0
 }

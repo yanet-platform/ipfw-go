@@ -1751,6 +1751,26 @@ func Test_Parser_Next_Options(t *testing.T) {
 			},
 		},
 		{
+			name:  "group of via names",
+			input: "add allow ip from me to me { via lo0 or via lo1 }\n",
+			state: ipfw.ReduceState{
+				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetMe}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetMe}},
+				Options:      []ipfw.Opt{viaExact("lo0"), orOpt(viaExact("lo1"))},
+			},
+		},
+		{
+			name:  "via then in",
+			input: "add allow ip from any to any via eth0 in\n",
+			state: ipfw.ReduceState{
+				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      []ipfw.Opt{viaExact("eth0"), {Kind: ipfw.OptIn}},
+			},
+		},
+		{
 			name:    "option before an inline comment",
 			input:   "add allow tcp from any to any established // c\n",
 			comment: " c",
@@ -1930,6 +1950,16 @@ func Test_Parser_Next_OptionErrors(t *testing.T) {
 				Line:   1,
 				Column: 51,
 				Text:   "add allow tcp from any to any established tcpflags foo",
+			},
+		},
+		{
+			name:  "via mask with a double star",
+			input: "add allow ip from any to any established via tun**",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedIfMask,
+				Line:   1,
+				Column: 45,
+				Text:   "add allow ip from any to any established via tun**",
 			},
 		},
 		{

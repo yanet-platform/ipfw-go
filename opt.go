@@ -154,6 +154,8 @@ func parseOption(s string, state State, hook OptionHook, place optionPlace) (str
 		buf, err = parseProtoOption(rest[len("proto"):], state, neg, place)
 	case strings.HasPrefix(rest, "tcpflags"):
 		buf, err = parseTCPFlagsOption(rest[len("tcpflags"):], state, neg, place)
+	case strings.HasPrefix(rest, "via"):
+		buf, err = parseViaOption(rest[len("via"):], state, neg, place)
 	default:
 		buf, err = parseKeywordOption(rest, state, neg, place)
 	}
@@ -312,6 +314,43 @@ func tcpFlagByName(s string) (TCPFlag, string, bool) {
 		}
 	}
 	return 0, s, false
+}
+
+// parseViaOption parses the interface after `via`.
+func parseViaOption(s string, state State, neg bool, place optionPlace) (string, fail) {
+	rest, ok := ws1(s)
+	if !ok {
+		return s, fail{Kind: ErrExpectedWhitespace, At: rest}
+	}
+	via, buf, err := parseVia(rest)
+	if err.Failed() {
+		return s, err
+	}
+	opt := Opt{Neg: neg, Or: place == groupNext, Kind: OptVia, Via: via}
+	if err = failFrom(state.OnOption(opt), rest); err.Failed() {
+		return s, err
+	}
+	return buf, fail{}
+}
+
+// parseVia reads an interface name, a mask when it holds a glob byte, the
+// mask having to be one ipfw(8) accepts.
+func parseVia(s string) (Via, string, fail) {
+	name, rest := takeWhile(s, isIfNameByte)
+	if name == "" {
+		return Via{}, s, fail{Kind: ErrExpectedOpt, At: s}
+	}
+	if !strings.ContainsAny(name, "*?[]") {
+		return Via{Kind: ViaExact, Name: name}, rest, fail{}
+	}
+	if kind := validateIfMask(name); kind != 0 {
+		return Via{}, s, fail{Kind: kind, At: s}
+	}
+	return Via{Kind: ViaMask, Name: name}, rest, fail{}
+}
+
+func isIfNameByte(c byte) bool {
+	return !isASCIISpace(c) && c != '/' && c != '{' && c != '}'
 }
 
 // parsePortsOption parses the port list after `src-port` or `dst-port`,
