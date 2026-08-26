@@ -48,7 +48,12 @@ func Test_Parser_Next_TableCreate(t *testing.T) {
 			table: ipfw.Table{Name: "t", Kind: ipfw.TableCreate, Type: ipfw.TableTypeMAC},
 		},
 		{
-			name:  "no type needs the trailing whitespace",
+			name:  "no type",
+			input: "table t create\n",
+			table: ipfw.Table{Name: "t", Kind: ipfw.TableCreate},
+		},
+		{
+			name:  "no type with trailing whitespace",
 			input: "table t create \n",
 			table: ipfw.Table{Name: "t", Kind: ipfw.TableCreate},
 		},
@@ -205,8 +210,6 @@ func Test_Parser_Next_TableAddErrors(t *testing.T) {
 
 // verifies that each missing or wrong piece of a table command is a
 // positioned error.
-//
-// The whitespace after `create` is required even without options.
 func Test_Parser_Next_TableErrors(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -234,13 +237,13 @@ func Test_Parser_Next_TableErrors(t *testing.T) {
 			},
 		},
 		{
-			name:  "nothing after create",
-			input: "table t create\n",
+			name:  "token glued to create is trailing content",
+			input: "table t createx\n",
 			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedWhitespace,
+				Kind:   ipfw.ErrExpectedNewlineOrEOF,
 				Line:   1,
 				Column: 14,
-				Text:   "table t create",
+				Text:   "table t createx",
 			},
 		},
 		{

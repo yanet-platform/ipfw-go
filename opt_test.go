@@ -1,6 +1,7 @@
 package ipfw_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -697,4 +698,40 @@ func Test_ParseOptions_Group_NoAllocs(t *testing.T) {
 	})
 	require.True(t, ok)
 	require.Zero(t, allocs)
+}
+
+// zzOption is an option hook for `zz ARG`, the argument running up to
+// whitespace or a closing brace.
+func zzOption(rest string) (ipfw.Opt, int, error) {
+	if !strings.HasPrefix(rest, "zz ") {
+		return ipfw.Opt{}, 0, nil
+	}
+	arg := rest[len("zz "):]
+	if end := strings.IndexAny(arg, " \t\n}"); end >= 0 {
+		arg = arg[:end]
+	}
+	if arg == "" {
+		return ipfw.Opt{}, len("zz "), ipfw.ErrExpectedOpt
+	}
+	return ipfw.Opt{Kind: ipfw.OptCustom, Text: "zz", Arg: arg}, len("zz ") + len(arg), nil
+}
+
+func Fuzz_ParseOptions(f *testing.F) {
+	f.Add("established in { not out or zz 1 } dst-port 22,80 via table(t,:L)")
+	f.Add("tcpflags syn,!ack icmptypes 0,8 keep-state :f proto 6 zz")
+	f.Add("{ in")
+	f.Add("not ")
+	f.Add("zz x // c")
+	f.Fuzz(func(t *testing.T, input string) {
+		var state ipfw.ReduceState
+		n, err := ipfw.ParseOptions(input, &state, zzOption)
+		require.GreaterOrEqual(t, n, 0)
+		require.LessOrEqual(t, n, len(input))
+		if err != nil {
+			require.NotEmpty(t, err.Error())
+		}
+		dryN, dryErr := ipfw.ParseOptions(input, ipfw.DiscardState{}, zzOption)
+		require.Equal(t, n, dryN, "the dry run must consume the same bytes")
+		require.Equal(t, err, dryErr, "the dry run must fail the same way")
+	})
 }

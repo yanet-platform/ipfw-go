@@ -134,6 +134,7 @@ func (m *Parser) parseLine(text string, state State) (string, fail) {
 	if !commanded {
 		if rest, ok := prefix(s, "#"); ok {
 			record.Comment, rest = takeWhile(rest, isNotNewline)
+			record.Comment = trimRightSpace(record.Comment)
 			record.Kind = RecordComment
 			s = rest
 		} else if s != "" && s[0] != '\n' && m.opts.CommandHook != nil {
@@ -331,14 +332,17 @@ func (m *Parser) parseBody(s string, state State) (string, fail) {
 	return rest, fail{}
 }
 
-// parseInlineComment returns the raw text after `//`, leading whitespace
-// before the slashes skipped, or the untouched input when there is none.
+// parseInlineComment returns the text after `//` without its trailing
+// whitespace, or the untouched input when there is none.
+//
+// Whitespace before the slashes is skipped.
 func parseInlineComment(s string) (string, string) {
 	rest, ok := prefix(ws0(s), "//")
 	if !ok {
 		return "", s
 	}
-	return takeWhile(rest, isNotNewline)
+	comment, rest := takeWhile(rest, isNotNewline)
+	return trimRightSpace(comment), rest
 }
 
 // parseTable parses `NAME create|add …` after `table `.
@@ -369,15 +373,12 @@ func parseTable(s string) (Table, string, fail) {
 	return table, rest, fail{}
 }
 
-// parseTableCreate parses the options after `create`, the whitespace after
-// the keyword being required even with none, and the last `type` winning.
+// parseTableCreate parses the options after `create`, the last `type`
+// winning and none being fine.
 func parseTableCreate(s string) (TableType, string, fail) {
-	rest, ok := ws1(s)
-	if !ok {
-		return TableTypeUnset, s, fail{Kind: ErrExpectedWhitespace, At: rest}
-	}
+	rest := s
 	tableType := TableTypeUnset
-	buf, ok := prefix(rest, "type")
+	buf, ok := ws1Keyword(rest, "type")
 	for ok {
 		var kind ErrorKind
 		if buf, ok = ws1(buf); !ok {

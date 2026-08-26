@@ -2,7 +2,10 @@ package ipfw_test
 
 import (
 	"errors"
+	"fmt"
+	"math/rand/v2"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -343,48 +346,6 @@ func Test_Parser_Next_NoAllocs(t *testing.T) {
 	})
 	require.True(t, ok)
 	require.Zero(t, allocs)
-}
-
-// verifies that arbitrary input never panics, is always consumed, and only
-// ever fails with a positioned parse error before reaching the end.
-func Fuzz_Parser_Next(f *testing.F) {
-	for _, seed := range []string{
-		"",
-		"# c\n",
-		":L\n",
-		"add \n",
-		"x",
-		"\n\n",
-		"  :L  # x",
-		"table\n",
-		":\n",
-		"add allow ip from any to any\n",
-	} {
-		f.Add(seed)
-	}
-	f.Fuzz(func(t *testing.T, input string) {
-		parser := ipfw.NewParser(input)
-		var state ipfw.ReduceState
-		for calls := 0; ; calls++ {
-			require.LessOrEqual(
-				t,
-				calls,
-				len(input)+1,
-				"the parser must consume input on every call",
-			)
-			rec, err := parser.Next(&state)
-			if err != nil {
-				require.GreaterOrEqual(t, err.Line, 1)
-				require.GreaterOrEqual(t, err.Column, 0)
-				require.LessOrEqual(t, err.Column, len(err.Text))
-				continue
-			}
-			if rec.Kind == ipfw.RecordEOF {
-				return
-			}
-			require.GreaterOrEqual(t, rec.Line, 1)
-		}
-	})
 }
 
 // verifies that an optional rule number is consumed only when whitespace
@@ -2161,6 +2122,11 @@ func Test_Parser_Next_InlineComment(t *testing.T) {
 			comment: " {\"id\": \"RULE-42\", \"log\": true}",
 		},
 		{name: "empty comment", input: "add pass ip from any to any //", comment: ""},
+		{
+			name:    "trailing whitespace is trimmed",
+			input:   "add pass ip from any to any // c \t\n",
+			comment: " c",
+		},
 		{name: "tab before the slashes", input: "add pass ip from any to any\t//x\n", comment: "x"},
 		{name: "no comment", input: "add pass ip from any to any\n", comment: ""},
 	}
@@ -2202,6 +2168,20 @@ func Test_Parser_Body_NoAllocs(t *testing.T) {
 	require.Zero(t, allocs)
 }
 
+// verifies that a comment keeps its leading space and loses its trailing
+// whitespace, like the text of the line.
+//
+// The record is then a function of its text.
+func Test_Parser_Next_CommentTrailingWhitespace(t *testing.T) {
+	next(t, ipfw.NewParser("# c \t\n"), ipfw.Record{
+		Line:    1,
+		Text:    "# c",
+		Kind:    ipfw.RecordComment,
+		Comment: " c",
+	})
+	next(t, ipfw.NewParser("# \n"), ipfw.Record{Line: 1, Text: "#", Kind: ipfw.RecordComment})
+}
+
 // verifies that a long label name is taken whole.
 func Test_Parser_Next_LongLabel(t *testing.T) {
 	next(t, ipfw.NewParser(":LONG_LABEL_NAME_42\n"), ipfw.Record{
@@ -2231,6 +2211,241 @@ func benchmarkNext(b *testing.B, line string) {
 		parser.Reset(line)
 		state.Reset()
 		benchRecord, benchErr = parser.Next(&state)
+	}
+}
+
+// fuzzSeeds are one line per syntax form plus the shapes that trip
+// parsers.
+//
+// Odd bytes, long tokens, unbalanced groups, comments in odd places and
+// several lines at once.
+var fuzzSeeds = []string{
+	"",
+	"\n",
+	"add pass ip from any to any\n",
+	"add 100 deny log logamount 5 tag 7 tcp from any 22 to any 80 established\n",
+	"add allow { tcp or udp } from { 192.0.2.0/24 or not ::1 } 1024-65535 to me domain\n",
+	"add skipto :LBL ip from table(t) to host.example.com { in or out }\n",
+	"add count ip from `node-1.example.net' to _MACRO_ via vlan1?? keep-state :flow\n",
+	"add check-state :flow log\n",
+	"add deny ip from any to any not dst-port 22,80 tcpflags syn,!ack icmptypes 0,8\n",
+	"add pass ip from any to any proto tcp via table(t,:L) antispoof frag diverted // c\n",
+	"add allow udp from any src-port 1,2-3,ftp\\-data to any icmp6types 135\n",
+	"table _T_ create type iface\n",
+	"table _T_ add 192.0.2.0/24 :L\n",
+	"table _T_ add vlan7\n",
+	":LABEL\n",
+	"# comment\n",
+	"  add pass ip from any to any  \n\n# c\n:L\n",
+	"add pass ip from any to any\r\n",
+	"add pass ip from any\x00 to any\n",
+	"add pass ip from { any\n",
+	"add pass ip from any to any {\n",
+	"add pass ip from any to any established }\n",
+	"// not a comment\n",
+	"add pass ip from any to any # trailing\n",
+	"add pass ip from any to any //",
+	"add pass ip from " + strings.Repeat("a", 4096) + ".example.com to any\n",
+	"add pass ip from any to any " + strings.Repeat("{ ", 64) + "in\n",
+	"add pass\n",
+	"add \n",
+	"table\n",
+	":\n",
+	"foobar\n",
+	"  :L  # x",
+	"x",
+	"\n\n",
+}
+
+func Fuzz_Parser_Next(f *testing.F) {
+	for _, seed := range fuzzSeeds {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, input string) {
+		parser := ipfw.NewParser(input)
+		replay := ipfw.NewParser("")
+		var state, again ipfw.ReduceState
+		for lines := 0; ; lines++ {
+			require.LessOrEqual(t, lines, strings.Count(input, "\n")+1, "the parser must terminate")
+			state.Reset()
+			rec, err := parser.Next(&state)
+			if err != nil {
+				require.GreaterOrEqual(t, err.Line, 1)
+				require.GreaterOrEqual(t, err.Column, 0)
+				require.LessOrEqual(t, err.Column, len(err.Text))
+				require.Contains(t, input, err.Text)
+				require.NotEmpty(t, err.Error())
+				continue
+			}
+			if rec.Kind == ipfw.RecordEOF {
+				break
+			}
+			require.Contains(t, input, rec.Text)
+			if rec.Kind == ipfw.RecordEmpty {
+				continue
+			}
+			expected := *rec
+			expected.Line = 1
+			again.Reset()
+			replay.Reset(rec.Text)
+			replayed, replayErr := replay.Next(&again)
+			require.Nil(t, replayErr, "the text of a record must parse again")
+			require.Equal(t, expected, *replayed)
+			require.Equal(t, emptyToNil(state), emptyToNil(again))
+		}
+	})
+}
+
+// emptyToNil makes the empty slices of a state nil.
+//
+// Two states then compare by content whatever their history of resets.
+func emptyToNil(state ipfw.ReduceState) ipfw.ReduceState {
+	if len(state.IPProtos) == 0 {
+		state.IPProtos = nil
+	}
+	if len(state.Protos) == 0 {
+		state.Protos = nil
+	}
+	if len(state.Sources) == 0 {
+		state.Sources = nil
+	}
+	if len(state.Destinations) == 0 {
+		state.Destinations = nil
+	}
+	if len(state.SourcePorts) == 0 {
+		state.SourcePorts = nil
+	}
+	if len(state.DestinationPorts) == 0 {
+		state.DestinationPorts = nil
+	}
+	if len(state.Options) == 0 {
+		state.Options = nil
+	}
+	return state
+}
+
+// syntheticRuleset is a deterministic ruleset of about ten thousand lines
+// mixing every syntax form, built once for the benchmarks.
+var syntheticRuleset = sync.OnceValue(func() string {
+	random := rand.New(rand.NewPCG(1, 2))
+	pick := func(choices ...string) string {
+		return choices[random.IntN(len(choices))]
+	}
+	var b strings.Builder
+	for idx := range 10000 {
+		switch random.IntN(20) {
+		case 0:
+			fmt.Fprintf(&b, "table _T%d_ create type %s\n", idx%8, pick("iface", "addr"))
+		case 1:
+			fmt.Fprintf(&b, "table _T%d_ add %s\n", idx%8, pick(
+				"192.0.2.0/24", "2001:db8::/48 :L", "vlan7 :JUMP", "198.51.100.1",
+			))
+		case 2:
+			fmt.Fprintf(&b, ":LABEL_%d\n", idx)
+		case 3:
+			fmt.Fprintf(&b, "# rule %d of the synthetic set\n", idx)
+		case 4:
+			b.WriteString("\n")
+		case 5:
+			fmt.Fprintf(&b, "add %d check-state%s\n", idx, pick("", " :flow", " log"))
+		default:
+			b.WriteString("add ")
+			if random.IntN(2) == 0 {
+				fmt.Fprintf(&b, "%d ", idx)
+			}
+			b.WriteString(pick("pass", "deny", "count", "skipto :LABEL_1", "skipto 100"))
+			b.WriteString(pick("", " log", " log logamount 50", " tag 3"))
+			b.WriteString(pick(" ip", " tcp", " udp", " icmp", " { tcp or udp }", " not tcp"))
+			b.WriteString(" from ")
+			b.WriteString(pick(
+				"any", "me", "192.0.2.0/24", "2001:db8::/32", "host.example.com",
+				"table(_T1_)", "{ 192.0.2.1 or ::1 or me6 }", "not 198.51.100.0/24", "_MACRO_",
+			))
+			b.WriteString(pick("", "", " 22", " 1024-65535", " 22,80,443", " not 22"))
+			b.WriteString(" to ")
+			b.WriteString(pick(
+				"any", "me6", "203.0.113.0/24", "2001:db8:1::/48", "`node-1.example.net'",
+				"table(_T2_)", "{ any or table(_T3_) }", "not 192.0.2.128/25",
+			))
+			b.WriteString(pick("", "", " 80", " 1-65535", " 53,443"))
+			b.WriteString(pick(
+				"", "", " in", " out", " established", " keep-state :flow", " proto tcp",
+				" tcpflags syn,!ack", " dst-port 8080,8443", " src-port 1024-65535",
+				" via vlan1??", " via table(_T4_)", " icmptypes 0,8", " { in or out }",
+				" not diverted", " antispoof", " frag", " in via eth0 established",
+			))
+			b.WriteString(pick("", "", " // {\"id\": 1}"))
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
+})
+
+// verifies that the whole synthetic ruleset parses into a warmed-up state
+// without a single allocation.
+func Test_Parser_SyntheticRuleset_NoAllocs(t *testing.T) {
+	src := syntheticRuleset()
+	parser := ipfw.NewParser(src)
+	var state ipfw.ReduceState
+	for _, err := range parser.All(&state) {
+		require.Nil(t, err)
+	}
+	ok := true
+	allocs := testing.AllocsPerRun(1, func() {
+		parser.Reset(src)
+		for {
+			state.Reset()
+			rec, err := parser.Next(&state)
+			if err != nil {
+				ok = false
+				return
+			}
+			if rec.Kind == ipfw.RecordEOF {
+				return
+			}
+		}
+	})
+	require.True(t, ok)
+	require.Zero(t, allocs)
+}
+
+func Benchmark_Parser_Next_Discard(b *testing.B) {
+	src := syntheticRuleset()
+	parser := ipfw.NewParser(src)
+	b.SetBytes(int64(len(src)))
+	b.ReportAllocs()
+	for b.Loop() {
+		parser.Reset(src)
+		for {
+			rec, err := parser.Next(ipfw.DiscardState{})
+			if err != nil {
+				b.Fatal(err)
+			}
+			if rec.Kind == ipfw.RecordEOF {
+				break
+			}
+		}
+	}
+}
+
+func Benchmark_Parser_Next_Reduce(b *testing.B) {
+	src := syntheticRuleset()
+	parser := ipfw.NewParser(src)
+	var state ipfw.ReduceState
+	b.SetBytes(int64(len(src)))
+	b.ReportAllocs()
+	for b.Loop() {
+		parser.Reset(src)
+		for {
+			state.Reset()
+			rec, err := parser.Next(&state)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if rec.Kind == ipfw.RecordEOF {
+				break
+			}
+		}
 	}
 }
 
