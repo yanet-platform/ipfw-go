@@ -92,8 +92,11 @@ has every dependency: use `GOPROXY=off go get …` / `GOPROXY=off go mod tidy`.
   an interface call is treated as escaping and heap-allocates the caller's
   cursor. Public functions return `error`.
 - No named result parameters.
-- A variadic option parameter is named `options`. `opts` is only the local
-  variable a constructor accumulates options into.
+- Functional options configure an unexported `xOptions` struct with
+  exported fields (`type XOption func(*xOptions)`), built with defaults by
+  `newXOptions()`. A variadic option parameter is named `options`. `opts` is
+  only the local the constructor accumulates them into before building the
+  value.
 - Function ordering: top-down, exported entry points first, helpers below
   their first caller.
 - Dead code is deleted, never commented out.

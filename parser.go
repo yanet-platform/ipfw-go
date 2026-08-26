@@ -10,18 +10,26 @@ import (
 type Parser struct {
 	rest string
 	line int
+	opts parserOptions
 }
 
-// ParserOption configures a Parser.
-type ParserOption func(*Parser)
+// parserOptions is what a ParserOption configures. Hooks will be its fields.
+type parserOptions struct{}
+
+func newParserOptions() parserOptions {
+	return parserOptions{}
+}
+
+// ParserOption configures a Parser, see the With functions.
+type ParserOption func(*parserOptions)
 
 // NewParser returns a parser over src.
 func NewParser(src string, options ...ParserOption) *Parser {
-	parser := &Parser{rest: src}
+	opts := newParserOptions()
 	for _, option := range options {
-		option(parser)
+		option(&opts)
 	}
-	return parser
+	return &Parser{rest: src, opts: opts}
 }
 
 // Reset makes the parser read src from its first line.
@@ -166,7 +174,7 @@ func ParseLine(line string, state State, options ...ParserOption) (Record, error
 	if len(options) > 0 {
 		return parseSingleLine(NewParser(line, options...), state)
 	}
-	parser := Parser{rest: line}
+	parser := Parser{rest: line, opts: newParserOptions()}
 	return parseSingleLine(&parser, state)
 }
 
