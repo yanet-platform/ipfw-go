@@ -21,7 +21,7 @@ func next(t *testing.T, parser *ipfw.Parser, expected ipfw.Record) {
 	var state ipfw.CollectState
 	rec, err := parser.Next(&state)
 	require.Nil(t, err)
-	require.Equal(t, expected, rec)
+	require.Equal(t, expected, *rec)
 	require.Equal(t, ipfw.CollectState{}, state)
 }
 
@@ -232,13 +232,14 @@ func Test_Parser_All_StopsAtError(t *testing.T) {
 	var records []ipfw.Record
 	var errs []*ipfw.ParseError
 	for rec, err := range parser.All(ipfw.DiscardState{}) {
-		records = append(records, rec)
+		if rec != nil {
+			records = append(records, *rec)
+		}
 		errs = append(errs, err)
 	}
 	require.Equal(t, []ipfw.Record{
 		{Line: 1, Text: ":A", Kind: ipfw.RecordLabel, Label: "A"},
 		{Line: 2, Text: "# c", Kind: ipfw.RecordComment, Comment: " c"},
-		{},
 	}, records)
 	require.Len(t, errs, 3)
 	require.Nil(t, errs[0])
@@ -639,7 +640,7 @@ func Test_Parser_Next_AnyToAny(t *testing.T) {
 	var state ipfw.CollectState
 	rec, err := ipfw.NewParser("add pass ip from any to any\n").Next(&state)
 	require.Nil(t, err)
-	require.Equal(t, passAnyToAny(1, "add pass ip from any to any"), rec)
+	require.Equal(t, passAnyToAny(1, "add pass ip from any to any"), *rec)
 	require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), state)
 }
 
@@ -649,7 +650,7 @@ func Test_Parser_Next_TrailingWhitespace(t *testing.T) {
 	var state ipfw.CollectState
 	rec, err := ipfw.NewParser("add allow tcp from any to { any } \n").Next(&state)
 	require.Nil(t, err)
-	require.Equal(t, passAnyToAny(1, "add allow tcp from any to { any }"), rec)
+	require.Equal(t, passAnyToAny(1, "add allow tcp from any to { any }"), *rec)
 	require.Equal(t, ipfw.CollectState{
 		Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 		Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
@@ -681,7 +682,7 @@ func Test_Parser_Next_InlineComment(t *testing.T) {
 			require.Nil(t, err)
 			expected := passAnyToAny(1, strings.TrimSpace(tc.input))
 			expected.Instruction.InlineComment = tc.comment
-			require.Equal(t, expected, rec)
+			require.Equal(t, expected, *rec)
 			require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), state)
 		})
 	}
@@ -724,7 +725,8 @@ func Test_Parser_Next_LongLabel(t *testing.T) {
 
 // The benchmark results are sunk here so the compiler keeps the work.
 var (
-	benchRecord ipfw.Record
+	benchRecord *ipfw.Record
+	benchLine   ipfw.Record
 	benchErr    *ipfw.ParseError
 )
 
@@ -764,6 +766,6 @@ func Benchmark_ParseLine_AnyToAny(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		state.Reset()
-		benchRecord, benchErr = ipfw.ParseLine(line, &state)
+		benchLine, benchErr = ipfw.ParseLine(line, &state)
 	}
 }

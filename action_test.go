@@ -51,7 +51,7 @@ func Test_Parser_Next_ActionPass(t *testing.T) {
 	var state ipfw.CollectState
 	rec, err := ipfw.NewParser("add accept ip from any to any\n").Next(&state)
 	require.Nil(t, err)
-	require.Equal(t, passAnyToAny(1, "add accept ip from any to any"), rec)
+	require.Equal(t, passAnyToAny(1, "add accept ip from any to any"), *rec)
 }
 
 // verifies that both spellings of the deny action are recognized by prefix.
@@ -84,7 +84,7 @@ func Test_Parser_Next_ActionDeny(t *testing.T) {
 	require.Nil(t, err)
 	expected := passAnyToAny(1, "add deny ip from any to any")
 	expected.Instruction.Action = ipfw.Action{Kind: ipfw.ActionDeny}
-	require.Equal(t, expected, rec)
+	require.Equal(t, expected, *rec)
 }
 
 // verifies that the count action is recognized.
@@ -95,7 +95,7 @@ func Test_Parser_Next_ActionCount(t *testing.T) {
 	require.Nil(t, err)
 	expected := passAnyToAny(1, "add count ip from any to any")
 	expected.Instruction.Action = ipfw.Action{Kind: ipfw.ActionCount}
-	require.Equal(t, expected, rec)
+	require.Equal(t, expected, *rec)
 }
 
 // verifies that skipto takes a label, a rule number or tablearg after
@@ -159,7 +159,7 @@ func Test_Parser_Next_ActionSkipTo(t *testing.T) {
 			expected := passAnyToAny(1, tc.input)
 			expected.Instruction.Num = tc.num
 			expected.Instruction.Action = ipfw.Action{Kind: ipfw.ActionSkipTo, SkipTo: tc.skipTo}
-			require.Equal(t, expected, rec)
+			require.Equal(t, expected, *rec)
 			require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), state)
 		})
 	}
@@ -185,7 +185,7 @@ func Test_Parser_Next_ActionCheckState(t *testing.T) {
 	var state ipfw.CollectState
 	rec, err := parser.Next(&state)
 	require.Nil(t, err)
-	require.Equal(t, passAnyToAny(2, "add pass ip from any to any"), rec)
+	require.Equal(t, passAnyToAny(2, "add pass ip from any to any"), *rec)
 	require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), state)
 	next(t, parser, eof)
 

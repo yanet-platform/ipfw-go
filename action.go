@@ -102,34 +102,36 @@ var actionKeywords = [...]struct {
 	{"count", ActionCount},
 }
 
-// parseAction recognizes the action keyword by prefix.
-func parseAction(s string) (Action, string, fail) {
+// parseAction recognizes the action keyword by prefix, writing into action,
+// which may be partially written when it fails.
+func parseAction(s string, action *Action) (string, fail) {
 	for _, entry := range actionKeywords {
 		if rest, ok := prefix(s, entry.keyword); ok {
-			return Action{Kind: entry.kind}, rest, fail{}
+			action.Kind = entry.kind
+			return rest, fail{}
 		}
 	}
 	if rest, ok := prefix(s, "check-state"); ok {
-		action := Action{Kind: ActionCheckState}
+		action.Kind = ActionCheckState
 		if flow, afterFlow, found := parseFlowName(rest); found {
 			action.Flow, rest = flow, afterFlow
 		}
-		return action, rest, fail{}
+		return rest, fail{}
 	}
 	if rest, ok := prefix(s, "skipto"); ok {
 		rest, ok = ws1(rest)
 		if !ok {
-			return Action{}, s, fail{Kind: ErrExpectedWhitespace, At: rest}
+			return s, fail{Kind: ErrExpectedWhitespace, At: rest}
 		}
-		var target SkipTo
 		var err fail
-		target, rest, err = parseSkipTo(rest)
+		action.SkipTo, rest, err = parseSkipTo(rest)
 		if err.Failed() {
-			return Action{}, s, err
+			return s, err
 		}
-		return Action{Kind: ActionSkipTo, SkipTo: target}, rest, fail{}
+		action.Kind = ActionSkipTo
+		return rest, fail{}
 	}
-	return Action{}, s, fail{Kind: ErrExpectedAction, At: s}
+	return s, fail{Kind: ErrExpectedAction, At: s}
 }
 
 // parseFlowName reads the optional ` :flow` of check-state, reporting
