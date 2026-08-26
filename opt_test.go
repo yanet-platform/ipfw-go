@@ -39,6 +39,12 @@ func icmp6Types(types ...uint8) ipfw.Opt {
 	return ipfw.Opt{Kind: ipfw.OptICMP6Types, Types: typeSet(types...)}
 }
 
+// tcpFlags is a tcpflags option with the flags that must be set among the
+// ones in the mask.
+func tcpFlags(set, mask ipfw.TCPFlag) ipfw.Opt {
+	return ipfw.Opt{Kind: ipfw.OptTCPFlags, TCPFlags: ipfw.TCPFlags{Set: set, Mask: mask}}
+}
+
 // notOpt is the option with its negation set.
 func notOpt(opt ipfw.Opt) ipfw.Opt {
 	opt.Neg = true
@@ -446,6 +452,54 @@ func Test_ParseOptions_Table(t *testing.T) {
 			input: "icmp6types 5",
 			n:     11,
 			err:   ipfw.ErrUnknownICMP6Type,
+		},
+		{
+			name:    "tcpflags single",
+			input:   "tcpflags rst",
+			n:       12,
+			options: []ipfw.Opt{tcpFlags(ipfw.TCPRst, ipfw.TCPRst)},
+		},
+		{
+			name:    "tcpflags with a cleared flag",
+			input:   "tcpflags syn,!ack",
+			n:       17,
+			options: []ipfw.Opt{tcpFlags(ipfw.TCPSyn, ipfw.TCPSyn|ipfw.TCPAck)},
+		},
+		{
+			name:    "tcpflags all six",
+			input:   "tcpflags fin,syn,rst,psh,ack,urg",
+			n:       32,
+			options: []ipfw.Opt{tcpFlags(ipfw.TCPFin|ipfw.TCPSyn|ipfw.TCPRst|ipfw.TCPPsh|ipfw.TCPAck|ipfw.TCPUrg, 63)},
+		},
+		{
+			name:    "tcpflags all cleared",
+			input:   "tcpflags !fin,!urg",
+			n:       18,
+			options: []ipfw.Opt{tcpFlags(0, ipfw.TCPFin|ipfw.TCPUrg)},
+		},
+		{
+			name:  "unknown tcp flag",
+			input: "tcpflags foo",
+			n:     9,
+			err:   ipfw.ErrUnknownTCPFlag,
+		},
+		{
+			name:  "tcpflags with a bare bang",
+			input: "tcpflags !",
+			n:     10,
+			err:   ipfw.ErrUnknownTCPFlag,
+		},
+		{
+			name:  "tcpflags with a trailing comma",
+			input: "tcpflags syn,",
+			n:     13,
+			err:   ipfw.ErrUnknownTCPFlag,
+		},
+		{
+			name:  "tcpflags without whitespace",
+			input: "tcpflags",
+			n:     8,
+			err:   ipfw.ErrExpectedWhitespace,
 		},
 		{
 			name:    "in with a suffix is in",

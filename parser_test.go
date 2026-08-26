@@ -1731,6 +1731,26 @@ func Test_Parser_Next_Options(t *testing.T) {
 			},
 		},
 		{
+			name:  "tcpflags",
+			input: "add allow tcp from any to any tcpflags rst\n",
+			state: ipfw.ReduceState{
+				Protos:       tcp,
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      []ipfw.Opt{tcpFlags(ipfw.TCPRst, ipfw.TCPRst)},
+			},
+		},
+		{
+			name:  "tcpflags with a cleared flag",
+			input: "add allow tcp from any to any tcpflags syn,!ack\n",
+			state: ipfw.ReduceState{
+				Protos:       tcp,
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      []ipfw.Opt{tcpFlags(ipfw.TCPSyn, ipfw.TCPSyn|ipfw.TCPAck)},
+			},
+		},
+		{
 			name:    "option before an inline comment",
 			input:   "add allow tcp from any to any established // c\n",
 			comment: " c",
@@ -1900,6 +1920,16 @@ func Test_Parser_Next_OptionErrors(t *testing.T) {
 				Line:   1,
 				Column: 52,
 				Text:   "add allow ip from any to any established icmp6types 150",
+			},
+		},
+		{
+			name:  "unknown tcp flag",
+			input: "add allow tcp from any to any established tcpflags foo",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrUnknownTCPFlag,
+				Line:   1,
+				Column: 51,
+				Text:   "add allow tcp from any to any established tcpflags foo",
 			},
 		},
 		{

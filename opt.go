@@ -152,6 +152,8 @@ func parseOption(s string, state State, hook OptionHook, place optionPlace) (str
 		buf, err = parseKeepStateOption(rest[len("keep-state"):], state, neg, place)
 	case strings.HasPrefix(rest, "proto"):
 		buf, err = parseProtoOption(rest[len("proto"):], state, neg, place)
+	case strings.HasPrefix(rest, "tcpflags"):
+		buf, err = parseTCPFlagsOption(rest[len("tcpflags"):], state, neg, place)
 	default:
 		buf, err = parseKeywordOption(rest, state, neg, place)
 	}
@@ -254,6 +256,62 @@ func parseProtoOption(s string, state State, neg bool, place optionPlace) (strin
 		return s, err
 	}
 	return buf, fail{}
+}
+
+// parseTCPFlagsOption parses the comma list of `[!]flag` after `tcpflags`
+// into one option.
+//
+// Every flag goes into the mask, the ones without a bang into the set as
+// well.
+func parseTCPFlagsOption(s string, state State, neg bool, place optionPlace) (string, fail) {
+	rest, ok := ws1(s)
+	if !ok {
+		return s, fail{Kind: ErrExpectedWhitespace, At: rest}
+	}
+	var flags TCPFlags
+	buf := rest
+	for {
+		afterBang, cleared := prefix(buf, "!")
+		flag, afterFlag, ok := tcpFlagByName(afterBang)
+		if !ok {
+			return s, fail{Kind: ErrUnknownTCPFlag, At: afterBang}
+		}
+		flags.Mask |= flag
+		if !cleared {
+			flags.Set |= flag
+		}
+		if buf, ok = prefix(afterFlag, ","); !ok {
+			break
+		}
+	}
+	opt := Opt{Neg: neg, Or: place == groupNext, Kind: OptTCPFlags, TCPFlags: flags}
+	if err := failFrom(state.OnOption(opt), rest); err.Failed() {
+		return s, err
+	}
+	return buf, fail{}
+}
+
+// tcpFlagNames are the flag keywords in the order they are tried.
+var tcpFlagNames = [...]struct {
+	name string
+	flag TCPFlag
+}{
+	{"fin", TCPFin},
+	{"syn", TCPSyn},
+	{"rst", TCPRst},
+	{"psh", TCPPsh},
+	{"ack", TCPAck},
+	{"urg", TCPUrg},
+}
+
+// tcpFlagByName tells a TCP flag by its keyword, matching by prefix.
+func tcpFlagByName(s string) (TCPFlag, string, bool) {
+	for idx := range tcpFlagNames {
+		if rest, ok := prefix(s, tcpFlagNames[idx].name); ok {
+			return tcpFlagNames[idx].flag, rest, true
+		}
+	}
+	return 0, s, false
 }
 
 // parsePortsOption parses the port list after `src-port` or `dst-port`,
