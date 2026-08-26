@@ -77,8 +77,12 @@ has every dependency: use `GOPROXY=off go get …` / `GOPROXY=off go mod tidy`.
 
 ## Code style
 
-- `gofumpt` formatting; receiver names are short and consistent per type;
-  loop index `idx`; no abbreviated identifiers beyond `ok`, `err`, `idx`.
+- `gofumpt` formatting; loop index `idx`; no abbreviated identifiers beyond
+  `ok`, `err`, `idx`.
+- Receivers are **always** named `m`.
+- Encapsulation: a method that is called from outside its own type is
+  exported, even on an unexported type. Unexported methods are called only
+  from inside the type's own methods.
 - Parsing functions take the input `string` and return the rest. Failure is
   atomic: the function returns its input unchanged together with the error
   (`fail{kind, at}` internally, `at` being the input at the detection

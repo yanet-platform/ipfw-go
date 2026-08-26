@@ -11,8 +11,9 @@ type fail struct {
 	at   string
 }
 
-func (f fail) failed() bool {
-	return f.kind != 0
+// Failed reports whether the value describes a failure.
+func (m fail) Failed() bool {
+	return m.kind != 0
 }
 
 func isWS(c byte) bool {
@@ -138,7 +139,7 @@ func orDelimited(s string, each func(string) (string, fail)) (string, fail) {
 		return orElement(s, each)
 	}
 	rest, err := orElement(skipSpace(rest), each)
-	if err.failed() {
+	if err.Failed() {
 		return s, err
 	}
 	rest = skipSpace(rest)
@@ -151,7 +152,7 @@ func orDelimited(s string, each func(string) (string, fail)) (string, fail) {
 			return s, fail{kind: ErrExpectedOr, at: rest}
 		}
 		rest, err = orElement(skipSpace(rest), each)
-		if err.failed() {
+		if err.Failed() {
 			return s, err
 		}
 		rest = skipSpace(rest)
@@ -160,7 +161,7 @@ func orDelimited(s string, each func(string) (string, fail)) (string, fail) {
 
 func orElement(s string, each func(string) (string, fail)) (string, fail) {
 	rest, err := each(s)
-	if err.failed() {
+	if err.Failed() {
 		return s, err
 	}
 	return rest, fail{}

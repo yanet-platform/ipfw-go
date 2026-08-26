@@ -52,8 +52,8 @@ const (
 )
 
 // Error returns the message of the kind.
-func (k ErrorKind) Error() string {
-	switch k {
+func (m ErrorKind) Error() string {
+	switch m {
 	case ErrExpectedLine:
 		return "expected `add`, `table`, a `:label` or a `#` comment"
 	case ErrExpectedCommand:
@@ -129,7 +129,7 @@ func (k ErrorKind) Error() string {
 	case ErrState:
 		return "state error"
 	default:
-		return "unknown error kind " + strconv.Itoa(int(k))
+		return "unknown error kind " + strconv.Itoa(int(m))
 	}
 }
 
@@ -147,21 +147,21 @@ type ParseError struct {
 }
 
 // Error renders the position, the message and the attached error, if any.
-func (e *ParseError) Error() string {
-	message := strconv.Itoa(e.Line) + ":" + strconv.Itoa(e.Column) + ": " + e.Kind.Error()
-	if e.Err != nil {
-		message += ": " + e.Err.Error()
+func (m *ParseError) Error() string {
+	message := strconv.Itoa(m.Line) + ":" + strconv.Itoa(m.Column) + ": " + m.Kind.Error()
+	if m.Err != nil {
+		message += ": " + m.Err.Error()
 	}
 	return message
 }
 
 // Is matches target against the kind.
-func (e *ParseError) Is(target error) bool {
+func (m *ParseError) Is(target error) bool {
 	kind, ok := target.(ErrorKind)
-	return ok && kind == e.Kind
+	return ok && kind == m.Kind
 }
 
 // Unwrap returns the attached error, if any.
-func (e *ParseError) Unwrap() error {
-	return e.Err
+func (m *ParseError) Unwrap() error {
+	return m.Err
 }

@@ -314,7 +314,7 @@ func Test_Lex_NoAllocs(t *testing.T) {
 			}
 			return rest, fail{}
 		})
-		if err.failed() || count != 2 || rest != " rest" {
+		if err.Failed() || count != 2 || rest != " rest" {
 			parsed = false
 		}
 	})
