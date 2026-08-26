@@ -60,11 +60,15 @@ Read in this order, fully, even if you think you remember them:
 Run, in order, and fix everything they report:
 
 ```bash
+set -o pipefail  # a `make lint | tail` pipe must not hide a failing gate
 gofumpt -w .
 make test        # go test -race ./...
 git add -A       # gocommentlint inspects the STAGED diff: stage before linting
 make lint        # gofumpt check, go vet, golangci-lint, gocommentlint
 ```
+
+Never chain the commit and the roadmap update behind a piped gate: check the
+commit landed (`git log -1`) before marking the step done.
 
 If the step added a fuzz target: `go test -run xxx -fuzz '^Fuzz<Name>$' -fuzztime 10s <pkg>`.
 If the step added benchmarks: `make bench` must compile and run them.
