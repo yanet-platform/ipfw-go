@@ -157,7 +157,7 @@ func parseOption(s string, state State, hook OptionHook, place optionPlace) (str
 	case strings.HasPrefix(rest, "via"):
 		buf, err = parseViaOption(rest[len("via"):], state, neg, place)
 	default:
-		buf, err = parseKeywordOption(rest, state, neg, place)
+		buf, err = parseKeywordOption(rest, state, hook, neg, place)
 	}
 	if err.Failed() {
 		return s, err
@@ -165,17 +165,54 @@ func parseOption(s string, state State, hook OptionHook, place optionPlace) (str
 	return buf, fail{}
 }
 
-// parseKeywordOption parses an option without an argument.
-func parseKeywordOption(s string, state State, neg bool, place optionPlace) (string, fail) {
+// parseKeywordOption parses an option without an argument, the hook
+// taking a keyword the grammar does not know.
+func parseKeywordOption(
+	s string,
+	state State,
+	hook OptionHook,
+	neg bool,
+	place optionPlace,
+) (string, fail) {
 	kind, rest, ok := keywordOption(s)
 	if !ok {
-		return s, fail{Kind: ErrUnknownOption, At: s}
+		return parseCustomOption(s, state, hook, neg, place)
 	}
 	opt := Opt{Neg: neg, Or: place == groupNext, Kind: kind}
 	if err := failFrom(state.OnOption(opt), s); err.Failed() {
 		return s, err
 	}
 	return rest, fail{}
+}
+
+// parseCustomOption hands an unknown keyword to the hook, the negation and
+// the or-flag being the parser's to set on what the hook returns.
+//
+// The hook runs during the speculative pass over the options as well, so
+// it must be free of side effects.
+func parseCustomOption(
+	s string,
+	state State,
+	hook OptionHook,
+	neg bool,
+	place optionPlace,
+) (string, fail) {
+	if hook == nil {
+		return s, fail{Kind: ErrUnknownOption, At: s}
+	}
+	opt, n, err := hook(s)
+	n = min(max(n, 0), len(s))
+	if err != nil {
+		return s, failFrom(err, s[n:])
+	}
+	if n == 0 {
+		return s, fail{Kind: ErrUnknownOption, At: s}
+	}
+	opt.Neg, opt.Or = neg, place == groupNext
+	if failure := failFrom(state.OnOption(opt), s); failure.Failed() {
+		return s, failure
+	}
+	return s[n:], fail{}
 }
 
 // parseTypesOption parses the comma list of type numbers after `icmptypes`

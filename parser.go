@@ -9,6 +9,9 @@ import (
 type parserOptions struct {
 	// CommandHook takes the lines the grammar does not know, nil rejecting them.
 	CommandHook CommandHook
+	// OptionHook takes the option keywords the grammar does not know, nil
+	// rejecting them.
+	OptionHook OptionHook
 }
 
 func newParserOptions() parserOptions {
@@ -22,6 +25,14 @@ type ParserOption func(*parserOptions)
 func WithCommandHook(hook CommandHook) ParserOption {
 	return func(opts *parserOptions) {
 		opts.CommandHook = hook
+	}
+}
+
+// WithOptionHook hands the option keywords the grammar does not know to
+// hook.
+func WithOptionHook(hook OptionHook) ParserOption {
+	return func(opts *parserOptions) {
+		opts.OptionHook = hook
 	}
 }
 
@@ -305,15 +316,15 @@ func (m *Parser) parseBody(s string, state State) (string, fail) {
 	// 22 established` both. A failed port attempt leaves the input where the
 	// destination ended.
 	if buf, ok := ws1(rest); ok {
-		if _, err = parseOptions(buf, DiscardState{}, nil); !err.Failed() {
-			return parseOptions(buf, state, nil)
+		if _, err = parseOptions(buf, DiscardState{}, m.opts.OptionHook); !err.Failed() {
+			return parseOptions(buf, state, m.opts.OptionHook)
 		}
 		if buf, err = parsePorts(buf, state, destinationSide); !err.Failed() {
 			rest = buf
 		}
 	}
 	if buf, ok := ws1(rest); ok {
-		if rest, err = parseOptions(buf, state, nil); err.Failed() {
+		if rest, err = parseOptions(buf, state, m.opts.OptionHook); err.Failed() {
 			return s, err
 		}
 	}

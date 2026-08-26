@@ -267,3 +267,183 @@ func Test_CommandHook_NoAllocs(t *testing.T) {
 	require.True(t, ok)
 	require.Zero(t, allocs)
 }
+
+// customOptions is an option hook for two options the grammar does not
+// know: the keyword `setup` and `uid NAME`.
+func customOptions(rest string) (ipfw.Opt, int, error) {
+	if strings.HasPrefix(rest, "setup") {
+		return ipfw.Opt{Kind: ipfw.OptCustom, Text: "setup"}, len("setup"), nil
+	}
+	if strings.HasPrefix(rest, "uid ") {
+		name := rest[len("uid "):]
+		if end := strings.IndexAny(name, " \t\n}"); end >= 0 {
+			name = name[:end]
+		}
+		if name == "" {
+			return ipfw.Opt{}, len("uid "), ipfw.ErrExpectedOpt
+		}
+		return ipfw.Opt{Kind: ipfw.OptCustom, Text: "uid", Arg: name}, len("uid ") + len(name), nil
+	}
+	return ipfw.Opt{}, 0, nil
+}
+
+// verifies that an option hook takes the keywords the grammar does not
+// know in every place an option can stand.
+//
+// The parser adds the negation and the or-flag, and the hook takes part in
+// the option-versus-port precedence.
+func Test_OptionHook_Table(t *testing.T) {
+	anyToAny := []ipfw.Target{{Kind: ipfw.TargetAny}}
+	tcp := []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}}
+	setup := ipfw.Opt{Kind: ipfw.OptCustom, Text: "setup"}
+	cases := []struct {
+		name    string
+		input   string
+		options []ipfw.Opt
+	}{
+		{
+			name:    "keyword then a known option",
+			input:   "add allow tcp from any to any setup in\n",
+			options: []ipfw.Opt{setup, {Kind: ipfw.OptIn}},
+		},
+		{
+			name:    "keyword in a group",
+			input:   "add allow tcp from any to any { setup or in }\n",
+			options: []ipfw.Opt{setup, {Or: true, Kind: ipfw.OptIn}},
+		},
+		{
+			name:    "negated keyword",
+			input:   "add allow tcp from any to any not setup\n",
+			options: []ipfw.Opt{notOpt(setup)},
+		},
+		{
+			name:    "option with an argument",
+			input:   "add allow tcp from any to any uid root established\n",
+			options: []ipfw.Opt{{Kind: ipfw.OptCustom, Text: "uid", Arg: "root"}, {Kind: ipfw.OptEstablished}},
+		},
+		{
+			name:    "keyword alone is an option, not a port",
+			input:   "add allow tcp from any to any setup\n",
+			options: []ipfw.Opt{setup},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var state ipfw.ReduceState
+			rec, err := ipfw.NewParser(tc.input, ipfw.WithOptionHook(customOptions)).Next(&state)
+			require.Nil(t, err)
+			require.Equal(t, passAnyToAny(1, strings.TrimSuffix(tc.input, "\n")), *rec)
+			require.Equal(t, ipfw.ReduceState{
+				Protos:       tcp,
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      tc.options,
+			}, state)
+		})
+	}
+}
+
+// verifies that the hook is consulted for unknown keywords only.
+func Test_OptionHook_Precedence(t *testing.T) {
+	calls := 0
+	counting := func(rest string) (ipfw.Opt, int, error) {
+		calls++
+		return customOptions(rest)
+	}
+	_, err := ipfw.NewParser("add allow tcp from any to any in established\n", ipfw.WithOptionHook(counting)).
+		Next(ipfw.DiscardState{})
+	require.Nil(t, err)
+	require.Equal(t, 0, calls)
+
+	_, err = ipfw.NewParser("add allow tcp from any to any setup\n", ipfw.WithOptionHook(counting)).
+		Next(ipfw.DiscardState{})
+	require.Nil(t, err)
+	require.Positive(t, calls)
+}
+
+// verifies the failures around an option hook.
+//
+// A declined token is an unknown option, a hook error is positioned at the
+// bytes it consumed, an ErrorKind keeping its kind and anything else
+// becoming an ErrState.
+func Test_OptionHook_Errors(t *testing.T) {
+	boom := errors.New("boom")
+	cases := []struct {
+		name     string
+		input    string
+		hook     ipfw.OptionHook
+		expected ipfw.ParseError
+	}{
+		{
+			name:  "declined token",
+			input: "add allow tcp from any to any established foo",
+			hook:  customOptions,
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrUnknownOption,
+				Line:   1,
+				Column: 42,
+				Text:   "add allow tcp from any to any established foo",
+			},
+		},
+		{
+			name:  "error kind from the hook",
+			input: "add allow tcp from any to any established uid \n",
+			hook:  customOptions,
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedOpt,
+				Line:   1,
+				Column: 45,
+				Text:   "add allow tcp from any to any established uid",
+			},
+		},
+		{
+			name:  "plain error from the hook",
+			input: "add allow tcp from any to any established zz",
+			hook: func(string) (ipfw.Opt, int, error) {
+				return ipfw.Opt{}, 2, boom
+			},
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrState,
+				Err:    boom,
+				Line:   1,
+				Column: 44,
+				Text:   "add allow tcp from any to any established zz",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			nextError(t, ipfw.NewParser(tc.input, ipfw.WithOptionHook(tc.hook)), tc.expected)
+		})
+	}
+}
+
+// verifies that the exported option parser passes the hook through.
+func Test_ParseOptions_Hook(t *testing.T) {
+	var state ipfw.ReduceState
+	n, err := ipfw.ParseOptions("setup in", &state, customOptions)
+	require.NoError(t, err)
+	require.Equal(t, 8, n)
+	require.Equal(t, ipfw.ReduceState{
+		Options: []ipfw.Opt{{Kind: ipfw.OptCustom, Text: "setup"}, {Kind: ipfw.OptIn}},
+	}, state)
+}
+
+// verifies that a line with custom options parses into a warmed-up state
+// without allocating.
+func Test_OptionHook_NoAllocs(t *testing.T) {
+	src := "add allow tcp from any to any uid root { setup or in } established\n"
+	parser := ipfw.NewParser(src, ipfw.WithOptionHook(customOptions))
+	var state ipfw.ReduceState
+	_, _ = parser.Next(&state)
+	ok := true
+	allocs := testing.AllocsPerRun(100, func() {
+		parser.Reset(src)
+		state.Reset()
+		if _, err := parser.Next(&state); err != nil {
+			ok = false
+		}
+	})
+	require.True(t, ok)
+	require.Zero(t, allocs)
+}
