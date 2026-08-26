@@ -5,8 +5,11 @@ import (
 	"strings"
 )
 
-// parserOptions is what a ParserOption configures. Hooks will be its fields.
-type parserOptions struct{}
+// parserOptions is what a ParserOption configures.
+type parserOptions struct {
+	// CommandHook takes the lines the grammar does not know, nil rejecting them.
+	CommandHook CommandHook
+}
 
 func newParserOptions() parserOptions {
 	return parserOptions{}
@@ -14,6 +17,13 @@ func newParserOptions() parserOptions {
 
 // ParserOption configures a Parser, see the With functions.
 type ParserOption func(*parserOptions)
+
+// WithCommandHook hands the lines the grammar does not know to hook.
+func WithCommandHook(hook CommandHook) ParserOption {
+	return func(opts *parserOptions) {
+		opts.CommandHook = hook
+	}
+}
 
 // Parser reads a ruleset line by line.
 type Parser struct {
@@ -115,6 +125,11 @@ func (m *Parser) parseLine(text string, state State) (string, fail) {
 			record.Comment, rest = takeWhile(rest, isNotNewline)
 			record.Kind = RecordComment
 			s = rest
+		} else if s != "" && s[0] != '\n' && m.opts.CommandHook != nil {
+			if s, err = m.hookLine(s, state); err.Failed() {
+				return text, err
+			}
+			s, commanded = ws0(s), true
 		}
 	}
 	if rest, ok := prefix(s, "\n"); ok {
@@ -123,10 +138,26 @@ func (m *Parser) parseLine(text string, state State) (string, fail) {
 	if s == "" {
 		return s, fail{}
 	}
-	if record.Kind == RecordEmpty {
+	if !commanded && record.Kind == RecordEmpty {
 		return text, fail{Kind: ErrExpectedLine, At: s}
 	}
 	return text, fail{Kind: ErrExpectedNewlineOrEOF, At: s}
+}
+
+// hookLine hands a line the grammar does not know to the command hook, the
+// record becoming the hook's and the rest starting where it stopped.
+func (m *Parser) hookLine(s string, state State) (string, fail) {
+	line, _ := takeWhile(s, isNotNewline)
+	rec, n, err := m.opts.CommandHook(line, state)
+	n = min(max(n, 0), len(line))
+	if err != nil {
+		return s, failFrom(err, s[n:])
+	}
+	if n == 0 {
+		return s, fail{Kind: ErrExpectedLine, At: s}
+	}
+	m.record = rec
+	return s[n:], fail{}
 }
 
 // parseInstruction parses `[NUM] ACTION … [// comment]` after `add ` into
