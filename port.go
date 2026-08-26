@@ -83,17 +83,17 @@ func emitPort(state State, side bodySide, match PortMatch) error {
 // parsePortRange parses a port or a `lo-hi` range, a single port running
 // from itself to itself, the failure pointing at the missing port.
 func parsePortRange(s string) (PortRange, string, fail) {
-	lo, rest, failure := parsePort(s)
-	if failure.Failed() {
-		return PortRange{}, s, failure
+	lo, rest, err := parsePort(s)
+	if err.Failed() {
+		return PortRange{}, s, err
 	}
 	afterDash, ok := prefix(rest, "-")
 	if !ok {
 		return PortRange{Lo: lo, Hi: lo}, rest, fail{}
 	}
-	hi, rest, failure := parsePort(afterDash)
-	if failure.Failed() {
-		return PortRange{}, s, failure
+	hi, rest, err := parsePort(afterDash)
+	if err.Failed() {
+		return PortRange{}, s, err
 	}
 	return PortRange{Lo: lo, Hi: hi}, rest, fail{}
 }
