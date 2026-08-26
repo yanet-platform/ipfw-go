@@ -16,7 +16,7 @@ step.
   list `.roadmap/` and stop.
 - Open `.roadmap/README.md` and check the status table:
   - the step must be `todo` (or `later` if the user explicitly asked for it);
-    if it is `done`, say so and stop;
+    if it is `done` (its file is gone by then), say so and stop;
   - every lower-numbered step must be `done`. If one is not, stop and report
     which — do not skip ahead.
 - `git status` must be clean (no staged or unstaged changes). If it is not,
@@ -91,9 +91,10 @@ assumption breaks), do **not** improvise silently:
 
 ## 7. Mark done and report
 
-- In `.roadmap/README.md` set the step's row to `done` with the short hash;
-  in the step file change `**Status:** todo` to `**Status:** done (<hash>)`.
-  These edits are local and are not committed.
+- In `.roadmap/README.md` set the step's row to `done` with the short hash
+  and drop the link from the row, then delete the step file (`git rm` is not
+  needed — the roadmap is untracked). A finished step leaves only its row
+  and its commit. These edits are local and are not committed.
 - Report to the user: the commit hash, what was implemented, how many tests
   were added, any plan change made in step 5, and anything the acceptance
   criteria left uncovered. Then stop — the next step is a new session.
