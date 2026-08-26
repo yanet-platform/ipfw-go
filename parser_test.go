@@ -2238,6 +2238,18 @@ func Benchmark_Parser_Next_AnyToAny(b *testing.B) {
 	benchmarkNext(b, "add pass ip from any to any\n")
 }
 
+func Benchmark_Parser_Next_TenNetworks(b *testing.B) {
+	benchmarkNext(b, "add pass ip from { 192.0.2.0/24 or 192.0.2.16/28 or 198.51.100.0/24 or"+
+		" 203.0.113.0/24 or 2001:db8::/32 } to { 192.0.2.1 or 198.51.100.1 or 203.0.113.1 or"+
+		" 2001:db8::1 or ::1 }\n")
+}
+
+func Benchmark_Parser_Next_TenOptions(b *testing.B) {
+	benchmarkNext(b, "add allow tcp from any 1024-65535 to any 22,80,443 in via vlan1?? established"+
+		" keep-state :flow proto tcp tcpflags syn,!ack dst-port 8080,8443 not frag antispoof"+
+		" { src-port 22 or out }\n")
+}
+
 func Benchmark_Parser_Next_Comment(b *testing.B) {
 	benchmarkNext(b, "# a comment line of an ordinary length\n")
 }
