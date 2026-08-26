@@ -796,6 +796,11 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 			input:    "add allow _ from any",
 			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedEitherIPOrProto, Line: 1, Column: 10, Text: "add allow _ from any"},
 		},
+		{
+			name:     "ip keyword then nothing after from",
+			input:    "add allow ip from",
+			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 17, Text: "add allow ip from"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -811,4 +816,9 @@ func Test_Parser_Next_BodyProtocolEmittedBeforeFailure(t *testing.T) {
 	_, err := ipfw.NewParser("add allow tcp x").Next(&state)
 	require.NotNil(t, err)
 	require.Equal(t, ipfw.CollectState{Protos: []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}}}, state)
+
+	state = ipfw.CollectState{}
+	_, err = ipfw.NewParser("add allow ip x").Next(&state)
+	require.NotNil(t, err)
+	require.Equal(t, ipfw.CollectState{IPProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}}}, state)
 }

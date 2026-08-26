@@ -40,29 +40,6 @@ func Test_ParseProto_Table(t *testing.T) {
 	}
 }
 
-// verifies that `not` negates a protocol only when whitespace follows it.
-func Test_ParseProtoMatch_Table(t *testing.T) {
-	cases := []struct {
-		name  string
-		input string
-		match ProtoMatch
-		kind  ErrorKind
-		rest  string
-	}{
-		{name: "negated", input: "not tcp from any to any", match: ProtoMatch{Neg: true, Proto: Proto{Name: "tcp"}}, rest: " from any to any"},
-		{name: "glued not is a name", input: "nottcp from any to any", match: ProtoMatch{Proto: Proto{Name: "nottcp"}}, rest: " from any to any"},
-		{name: "negation without a protocol", input: "not ", kind: ErrExpectedProto, rest: "not "},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			match, rest, kind := parseProtoMatch(tc.input)
-			require.Equal(t, tc.kind, kind)
-			require.Equal(t, tc.match, match)
-			require.Equal(t, tc.rest, rest)
-		})
-	}
-}
-
 // verifies that the exported protocol parser feeds the state, reports the
 // consumed length, and positions a failure at the element start.
 func Test_ParseProtocols_Table(t *testing.T) {
@@ -73,8 +50,60 @@ func Test_ParseProtocols_Table(t *testing.T) {
 		err   error
 		state CollectState
 	}{
-		{name: "name", input: "tcp from any to any", n: 3, state: CollectState{Protos: []ProtoMatch{{Proto: Proto{Name: "tcp"}}}}},
-		{name: "negated number", input: "not 17 x", n: 6, state: CollectState{Protos: []ProtoMatch{{Neg: true, Proto: Proto{Number: 17}}}}},
+		{
+			name:  "name",
+			input: "tcp from any to any",
+			n:     3,
+			state: CollectState{Protos: []ProtoMatch{{Proto: Proto{Name: "tcp"}}}},
+		},
+		{
+			name:  "negated name",
+			input: "not tcp from any to any",
+			n:     7,
+			state: CollectState{Protos: []ProtoMatch{{Neg: true, Proto: Proto{Name: "tcp"}}}},
+		},
+		{
+			name:  "glued not is a name",
+			input: "nottcp from any to any",
+			n:     6,
+			state: CollectState{Protos: []ProtoMatch{{Proto: Proto{Name: "nottcp"}}}},
+		},
+		{
+			name:  "negated number",
+			input: "not 17 x",
+			n:     6,
+			state: CollectState{Protos: []ProtoMatch{{Neg: true, Proto: Proto{Number: 17}}}},
+		},
+		{
+			name:  "ip keyword",
+			input: "ip from any to any",
+			n:     2,
+			state: CollectState{IPProtos: []ProtoIPMatch{{Proto: ProtoIPAny}}},
+		},
+		{
+			name:  "all keyword",
+			input: "all from",
+			n:     3,
+			state: CollectState{IPProtos: []ProtoIPMatch{{Proto: ProtoIPAny}}},
+		},
+		{
+			name:  "negated ip4 keyword",
+			input: "not ip4 from",
+			n:     7,
+			state: CollectState{IPProtos: []ProtoIPMatch{{Neg: true, Proto: ProtoIPv4}}},
+		},
+		{
+			name:  "ipv6 keyword",
+			input: "ipv6 from",
+			n:     4,
+			state: CollectState{IPProtos: []ProtoIPMatch{{Proto: ProtoIPv6}}},
+		},
+		{
+			name:  "keyword prefix is a transport name",
+			input: "ipencap from any to any",
+			n:     7,
+			state: CollectState{Protos: []ProtoMatch{{Proto: Proto{Name: "ipencap"}}}},
+		},
 		{name: "invalid", input: "_ from any to any", n: 0, err: ErrExpectedEitherIPOrProto},
 		{name: "negation without a protocol", input: "not _", n: 0, err: ErrExpectedEitherIPOrProto},
 	}
@@ -100,6 +129,11 @@ func (m rejectingState) Proto(ProtoMatch) error {
 	return m.err
 }
 
+// IPProto implements State.
+func (m rejectingState) IPProto(ProtoIPMatch) error {
+	return m.err
+}
+
 // verifies that an error from the state comes back as is, positioned at
 // the rejected token.
 func Test_ParseProtocols_StateError(t *testing.T) {
@@ -111,6 +145,37 @@ func Test_ParseProtocols_StateError(t *testing.T) {
 	n, err = ParseProtocols("tcp from", rejectingState{err: boom})
 	require.Equal(t, 0, n)
 	require.Equal(t, boom, err)
+
+	n, err = ParseProtocols("not ip from", rejectingState{err: boom})
+	require.Equal(t, 0, n)
+	require.Equal(t, boom, err)
+}
+
+// verifies that only the exact IP version keywords are recognized.
+func Test_ParseProtoIP_Table(t *testing.T) {
+	cases := []struct {
+		token string
+		proto ProtoIP
+		ok    bool
+	}{
+		{token: "ip", proto: ProtoIPAny, ok: true},
+		{token: "all", proto: ProtoIPAny, ok: true},
+		{token: "ip4", proto: ProtoIPv4, ok: true},
+		{token: "ipv4", proto: ProtoIPv4, ok: true},
+		{token: "ip6", proto: ProtoIPv6, ok: true},
+		{token: "ipv6", proto: ProtoIPv6, ok: true},
+		{token: "ipencap"},
+		{token: "IP"},
+		{token: "ip4x"},
+		{token: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.token, func(t *testing.T) {
+			proto, ok := ParseProtoIP(tc.token)
+			require.Equal(t, tc.ok, ok)
+			require.Equal(t, tc.proto, proto)
+		})
+	}
 }
 
 // verifies that every byte value formatted in decimal parses as a number.

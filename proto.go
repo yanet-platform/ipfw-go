@@ -10,6 +10,21 @@ const (
 	ProtoIPAny = ProtoIPv4 | ProtoIPv6
 )
 
+// ParseProtoIP recognizes the exact IP version keywords `ip`, `all`, `ip4`,
+// `ipv4`, `ip6` and `ipv6`.
+func ParseProtoIP(token string) (ProtoIP, bool) {
+	switch token {
+	case "ip", "all":
+		return ProtoIPAny, true
+	case "ip4", "ipv4":
+		return ProtoIPv4, true
+	case "ip6", "ipv6":
+		return ProtoIPv6, true
+	default:
+		return 0, false
+	}
+}
+
 // Contains reports whether every version in o is in m.
 func (m ProtoIP) Contains(o ProtoIP) bool {
 	return m&o == o
@@ -62,24 +77,25 @@ func parseProtocols(s string, state State) (string, fail) {
 
 // parseProtocolElement parses one protocol, a failure pointing at the
 // element start whatever went wrong inside it.
+//
+// The whole token decides between an IP version keyword and a transport
+// protocol, which is how `ip` and `ipencap` are told apart.
 func parseProtocolElement(s string, state State) (string, fail) {
-	match, rest, kind := parseProtoMatch(s)
-	if kind != 0 {
-		return s, fail{Kind: ErrExpectedEitherIPOrProto, At: s}
-	}
-	if err := failFrom(state.Proto(match), s); err.Failed() {
-		return s, err
-	}
-	return rest, fail{}
-}
-
-func parseProtoMatch(s string) (ProtoMatch, string, ErrorKind) {
 	rest, neg := notWS1(s)
 	proto, rest, kind := parseProto(rest)
 	if kind != 0 {
-		return ProtoMatch{}, s, kind
+		return s, fail{Kind: ErrExpectedEitherIPOrProto, At: s}
 	}
-	return ProtoMatch{Neg: neg, Proto: proto}, rest, 0
+	var err error
+	if version, ok := ParseProtoIP(proto.Name); ok {
+		err = state.IPProto(ProtoIPMatch{Neg: neg, Proto: version})
+	} else {
+		err = state.Proto(ProtoMatch{Neg: neg, Proto: proto})
+	}
+	if failure := failFrom(err, s); failure.Failed() {
+		return s, failure
+	}
+	return rest, fail{}
 }
 
 // parseProto reads a `[A-Za-z0-9-]+` token, a number only when every byte is
