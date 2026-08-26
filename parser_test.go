@@ -1008,6 +1008,43 @@ func Test_Parser_Next_Ports(t *testing.T) {
 			},
 		},
 		{
+			name:  "negated destination port list",
+			input: "add pass tcp from any to any not 11,22,33\n",
+			state: ipfw.CollectState{
+				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				DestinationPorts: []ipfw.PortMatch{
+					negated(portNumber(11)),
+					negated(portNumber(22)),
+					negated(portNumber(33)),
+				},
+			},
+		},
+		{
+			name:  "negated source port",
+			input: "add pass tcp from any not 22 to any\n",
+			state: ipfw.CollectState{
+				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				SourcePorts:  []ipfw.PortMatch{negated(portNumber(22))},
+			},
+		},
+		{
+			name:  "negated destination list with a range",
+			input: "add pass tcp from any to any not 22-23,80\n",
+			state: ipfw.CollectState{
+				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				DestinationPorts: []ipfw.PortMatch{
+					negated(portSpan(ipfw.Port{Number: 22}, ipfw.Port{Number: 23})),
+					negated(portNumber(80)),
+				},
+			},
+		},
+		{
 			name:    "destination port before an inline comment",
 			input:   "add allow tcp from any to any 80 // web\n",
 			comment: " web",

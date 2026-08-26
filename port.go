@@ -44,19 +44,20 @@ func ParseDestinationPorts(s string, state State) (int, error) {
 	return consumed(s, rest, err)
 }
 
-// parsePorts parses a comma list of port ranges into the source or the
-// destination side of the state, a failure pointing at the port.
+// parsePorts parses an optionally negated comma list of port ranges into
+// the source or the destination side of the state.
 //
-// Every range is emitted as soon as it is read, so the elements before a
+// A failure points at the port. The negation applies to every element, and
+// every range is emitted as soon as it is read, so the elements before a
 // failure stay in the state while the input comes back unchanged.
 func parsePorts(s string, state State, destination bool) (string, fail) {
-	rest := s
+	rest, neg := notWS1(s)
 	for {
 		portRange, afterRange, failure := parsePortRange(rest)
 		if failure.Failed() {
 			return s, failure
 		}
-		match := PortMatch{Range: portRange}
+		match := PortMatch{Neg: neg, Range: portRange}
 		var err error
 		if destination {
 			err = state.DestinationPort(match)

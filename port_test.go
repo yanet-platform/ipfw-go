@@ -28,6 +28,12 @@ func portSpan(lo, hi ipfw.Port) ipfw.PortMatch {
 	return ipfw.PortMatch{Range: ipfw.PortRange{Lo: lo, Hi: hi}}
 }
 
+// negated is the match with its negation set.
+func negated(match ipfw.PortMatch) ipfw.PortMatch {
+	match.Neg = true
+	return match
+}
+
 // SourcePort implements State.
 func (m rejectingState) SourcePort(ipfw.PortMatch) error {
 	return m.err
@@ -44,7 +50,7 @@ func (m rejectingState) DestinationPort(ipfw.PortMatch) error {
 // A port is a run of letters and digits up to a dash, a number when every
 // byte is a digit and the value fits sixteen bits, a name otherwise. A dash
 // makes a range of two ports and commas a list of ranges, each one emitted
-// as it is read.
+// as it is read. A `not` before the list negates every element.
 func Test_ParsePorts_Table(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -174,6 +180,39 @@ func Test_ParsePorts_Table(t *testing.T) {
 			ports: []ipfw.PortMatch{portNumber(22)},
 		},
 		{
+			name:  "negated port",
+			input: "not 22 x",
+			n:     6,
+			ports: []ipfw.PortMatch{negated(portNumber(22))},
+		},
+		{
+			name:  "negated list",
+			input: "not 22-23,80",
+			n:     12,
+			ports: []ipfw.PortMatch{
+				negated(portSpan(ipfw.Port{Number: 22}, ipfw.Port{Number: 23})),
+				negated(portNumber(80)),
+			},
+		},
+		{
+			name:  "not glued to a name is a name",
+			input: "notify x",
+			n:     6,
+			ports: []ipfw.PortMatch{portService("notify")},
+		},
+		{
+			name:  "bare not is a name",
+			input: "not",
+			n:     3,
+			ports: []ipfw.PortMatch{portService("not")},
+		},
+		{
+			name:  "nothing after not",
+			input: "not ",
+			n:     4,
+			err:   ipfw.ErrExpectedPort,
+		},
+		{
 			name:  "empty input",
 			input: "",
 			n:     0,
@@ -219,6 +258,9 @@ func Test_ParsePorts_StateError(t *testing.T) {
 	n, err = ipfw.ParseDestinationPorts("80", state)
 	require.Equal(t, 0, n)
 	require.Equal(t, ipfw.ErrUnknownOption, err)
+	n, err = ipfw.ParseDestinationPorts("not 80", state)
+	require.Equal(t, 4, n)
+	require.Equal(t, ipfw.ErrUnknownOption, err)
 }
 
 // verifies that any 16-bit number formatted in decimal parses back to
@@ -251,14 +293,14 @@ func Test_ParsePorts_OverflowIsName(t *testing.T) {
 
 // verifies that parsing a port into a warmed-up state allocates nothing.
 func Test_ParsePorts_NoAllocs(t *testing.T) {
-	input := "22,1024-65535,http to any"
+	input := "not 22,1024-65535,http to any"
 	var state ipfw.CollectState
 	_, _ = ipfw.ParseSourcePorts(input, &state)
 	ok := true
 	allocs := testing.AllocsPerRun(100, func() {
 		state.Reset()
 		n, err := ipfw.ParseSourcePorts(input, &state)
-		if err != nil || n != 18 {
+		if err != nil || n != 22 {
 			ok = false
 		}
 	})
