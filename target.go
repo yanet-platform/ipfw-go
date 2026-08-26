@@ -46,9 +46,21 @@ func ParseDestinationTargets(s string, state State) (int, error) {
 // parseTargets parses one target or a `{ a or b … }` group of them into the
 // source or the destination side of the state.
 func parseTargets(s string, state State, destination bool) (string, fail) {
-	return orDelimited(s, func(element string) (string, fail) {
-		return parseTargetElement(element, state, destination)
-	})
+	g, rest := openGroup(s)
+	for {
+		afterElement, err := parseTargetElement(rest, state, destination)
+		if err.Failed() {
+			return s, err
+		}
+		var more bool
+		rest, more, err = g.next(afterElement)
+		if err.Failed() {
+			return s, err
+		}
+		if !more {
+			return rest, fail{}
+		}
+	}
 }
 
 // parseTargetElement parses one optionally negated target, a failure

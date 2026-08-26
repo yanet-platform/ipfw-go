@@ -163,41 +163,41 @@ func parseUint(s string, max uint64) (uint64, string, bool) {
 	return value, s[idx:], true
 }
 
-// orDelimited parses a single element or a braced `{ a or b … }` group.
+// group is the state of one `{ a or b … }` list, or of a lone element.
 //
-// Any ASCII whitespace may surround the elements and the separators inside
-// the braces. On failure the whole input is returned and the failure carries
-// where it was detected.
-func orDelimited(s string, each func(string) (string, fail)) (string, fail) {
-	rest, ok := prefix(s, "{")
-	if !ok {
-		return orElement(s, each)
-	}
-	rest, err := orElement(skipSpace(rest), each)
-	if err.Failed() {
-		return s, err
-	}
-	rest = skipSpace(rest)
-	for {
-		if closed, done := prefix(rest, "}"); done {
-			return closed, fail{}
-		}
-		rest, ok = prefix(rest, "or")
-		if !ok {
-			return s, fail{Kind: ErrExpectedOr, At: rest}
-		}
-		rest, err = orElement(skipSpace(rest), each)
-		if err.Failed() {
-			return s, err
-		}
-		rest = skipSpace(rest)
-	}
+// The callers drive it with direct calls: an element parser passed as a
+// function value is an indirect call the compiler cannot inline.
+type group struct {
+	braced bool
 }
 
-func orElement(s string, each func(string) (string, fail)) (string, fail) {
-	rest, err := each(s)
-	if err.Failed() {
-		return s, err
+// openGroup consumes the opening brace and the spaces after it when there is
+// one, and leaves a lone element untouched.
+func openGroup(s string) (group, string) {
+	rest, ok := prefix(s, "{")
+	if !ok {
+		return group{}, s
 	}
-	return rest, fail{}
+	return group{braced: true}, skipSpace(rest)
+}
+
+// next reads what follows an element and reports whether another one comes.
+//
+// Inside braces `or` goes on with the next element, the spaces after it
+// skipped, and `}` ends the list. Anything else is ErrExpectedOr at the
+// first non-space byte, the input being returned unchanged. A lone element
+// ends the list with the input untouched.
+func (m group) next(s string) (string, bool, fail) {
+	if !m.braced {
+		return s, false, fail{}
+	}
+	rest := skipSpace(s)
+	if closed, ok := prefix(rest, "}"); ok {
+		return closed, false, fail{}
+	}
+	rest, ok := prefix(rest, "or")
+	if !ok {
+		return s, false, fail{Kind: ErrExpectedOr, At: rest}
+	}
+	return skipSpace(rest), true, fail{}
 }

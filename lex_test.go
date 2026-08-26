@@ -208,13 +208,100 @@ func Test_ParseU32_Table(t *testing.T) {
 	}
 }
 
-// verifies that or-delimited groups call the element parser once per element
-// and, on failure, return the whole input and point at the detection site.
+// verifies that a group opens on a brace, the spaces after it skipped, and
+// that anything else is a lone element left untouched.
+func Test_OpenGroup_Table(t *testing.T) {
+	cases := []struct {
+		name   string
+		input  string
+		braced bool
+		rest   string
+	}{
+		{name: "brace then space", input: "{ a or b }", braced: true, rest: "a or b }"},
+		{name: "tight brace", input: "{a or b}", braced: true, rest: "a or b}"},
+		{name: "newline after the brace", input: "{\n\ta }", braced: true, rest: "a }"},
+		{name: "brace at end of input", input: "{", braced: true, rest: ""},
+		{name: "lone element", input: "a rest", braced: false, rest: "a rest"},
+		{name: "lone element keeps its spaces", input: " a", braced: false, rest: " a"},
+		{name: "empty input", input: "", braced: false, rest: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g, rest := openGroup(tc.input)
+			require.Equal(t, tc.braced, g.braced)
+			require.Equal(t, tc.rest, rest)
+		})
+	}
+}
+
+// verifies that after an element a braced group goes on at `or` and ends at
+// `}`, fails with ErrExpectedOr otherwise, and a lone element just ends.
 //
-// Any ASCII whitespace inside the braces is skipped. The element parser here
-// consumes a run of letters, and an empty run is the element error whose
-// propagation the last cases check.
-func Test_OrDelimited_Table(t *testing.T) {
+// The spaces after `or` are skipped and the failure points at the first
+// non-space byte, the input coming back unchanged.
+func Test_Group_Next_Table(t *testing.T) {
+	cases := []struct {
+		name   string
+		braced bool
+		input  string
+		rest   string
+		more   bool
+		kind   ErrorKind
+		at     string
+	}{
+		{name: "or then space", braced: true, input: " or b }", rest: "b }", more: true},
+		{name: "tight or", braced: true, input: "or b}", rest: "b}", more: true},
+		{name: "newlines around or", braced: true, input: "\nor\n\tb }", rest: "b }", more: true},
+		{name: "or at end of input", braced: true, input: " or", rest: "", more: true},
+		{name: "closing brace", braced: true, input: " } rest", rest: " rest", more: false},
+		{name: "tight closing brace", braced: true, input: "}", rest: "", more: false},
+		{name: "closing brace after a newline", braced: true, input: "\n}", rest: "", more: false},
+		{
+			name:   "missing separator",
+			braced: true,
+			input:  " b }",
+			rest:   " b }",
+			kind:   ErrExpectedOr,
+			at:     "b }",
+		},
+		{
+			name:   "missing closing brace",
+			braced: true,
+			input:  "",
+			rest:   "",
+			kind:   ErrExpectedOr,
+			at:     "",
+		},
+		{
+			name:   "spaces then end of input",
+			braced: true,
+			input:  " \n",
+			rest:   " \n",
+			kind:   ErrExpectedOr,
+			at:     "",
+		},
+		{name: "lone element", braced: false, input: " rest", rest: " rest", more: false},
+		{name: "lone element before or", braced: false, input: " or b", rest: " or b", more: false},
+		{name: "lone element at end of input", braced: false, input: "", rest: "", more: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rest, more, err := group{braced: tc.braced}.next(tc.input)
+			require.Equal(t, tc.kind, err.Kind)
+			require.Equal(t, tc.at, err.At)
+			require.Equal(t, tc.more, more)
+			require.Equal(t, tc.rest, rest)
+		})
+	}
+}
+
+// verifies that a group driven the way the parsers drive theirs sees each
+// element once and on failure returns the whole input, pointing at the fault.
+//
+// Any ASCII whitespace inside the braces is skipped. The element here is a
+// run of letters, and an empty run is the element error whose propagation
+// the last cases check.
+func Test_Group_Loop_Table(t *testing.T) {
 	cases := []struct {
 		name     string
 		input    string
@@ -285,15 +372,7 @@ func Test_OrDelimited_Table(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var elements []string
-			rest, err := orDelimited(tc.input, func(s string) (string, fail) {
-				element, rest := takeWhile(s, isLetter)
-				if element == "" {
-					return s, fail{Kind: ErrExpectedToken, At: s}
-				}
-				elements = append(elements, element)
-				return rest, fail{}
-			})
+			rest, elements, err := groupLetters(tc.input)
 			require.Equal(t, tc.kind, err.Kind)
 			require.Equal(t, tc.at, err.At)
 			require.Equal(t, tc.elements, elements)
@@ -302,7 +381,30 @@ func Test_OrDelimited_Table(t *testing.T) {
 	}
 }
 
-// isLetter is the element shape the or-delimited tests use.
+// groupLetters drives a group of letter runs the way the parsers drive
+// theirs and collects the elements it saw.
+func groupLetters(s string) (string, []string, fail) {
+	var elements []string
+	g, rest := openGroup(s)
+	for {
+		element, afterElement := takeWhile(rest, isLetter)
+		if element == "" {
+			return s, elements, fail{Kind: ErrExpectedToken, At: rest}
+		}
+		elements = append(elements, element)
+		var more bool
+		var err fail
+		rest, more, err = g.next(afterElement)
+		if err.Failed() {
+			return s, elements, err
+		}
+		if !more {
+			return rest, elements, fail{}
+		}
+	}
+}
+
+// isLetter is the element shape the group loop test uses.
 func isLetter(c byte) bool {
 	return c >= 'a' && c <= 'z'
 }
@@ -360,31 +462,40 @@ func Test_TakeWhile_SplitsInput(t *testing.T) {
 	})
 }
 
-// verifies that the primitives, including an or-delimited group driven by
-// a closure that captures a local, allocate nothing.
-func Test_Lex_NoAllocs(t *testing.T) {
+// verifies that driving a braced group and its elements allocates nothing.
+func Test_Group_NoAllocs(t *testing.T) {
 	input := "{ not tcp or 42 } rest"
 	parsed := true
 	allocs := testing.AllocsPerRun(100, func() {
-		count := 0
-		rest, err := orDelimited(input, func(s string) (string, fail) {
-			s, _ = notWS1(s)
-			count++
-			if _, rest, kind := parseU8(s); kind == 0 {
-				return rest, fail{}
-			}
-			tok, rest := token(s)
-			if tok == "" {
-				return s, fail{Kind: ErrExpectedToken, At: s}
-			}
-			return rest, fail{}
-		})
+		rest, count, err := groupElements(input)
 		if err.Failed() || count != 2 || rest != " rest" {
 			parsed = false
 		}
 	})
 	require.True(t, parsed)
 	require.Zero(t, allocs)
+}
+
+// groupElements drives a group over benchElement the way the parsers drive
+// theirs and counts the elements.
+func groupElements(s string) (string, int, fail) {
+	count := 0
+	g, rest := openGroup(s)
+	for {
+		afterElement, err := benchElement(rest)
+		if err.Failed() {
+			return s, count, err
+		}
+		count++
+		var more bool
+		rest, more, err = g.next(afterElement)
+		if err.Failed() {
+			return s, count, err
+		}
+		if !more {
+			return rest, count, fail{}
+		}
+	}
 }
 
 // The benchmark results are sunk here so the compiler keeps the work.
@@ -394,8 +505,8 @@ var (
 	benchValue uint32
 )
 
-// benchElement is the element parser the group benchmark drives: an
-// optional negation, then a number or a token.
+// benchElement is the element the group benchmarks drive: an optional
+// negation, then a number or a token.
 func benchElement(s string) (string, fail) {
 	s, _ = notWS1(s)
 	if _, rest, kind := parseU8(s); kind == 0 {
@@ -408,20 +519,20 @@ func benchElement(s string) (string, fail) {
 	return rest, fail{}
 }
 
-func Benchmark_OrDelimited_Group(b *testing.B) {
+func Benchmark_Group_Braced(b *testing.B) {
 	input := "{ not tcp or udp or 42 } from any to any"
 	b.ReportAllocs()
 	for b.Loop() {
-		rest, err := orDelimited(input, benchElement)
+		rest, _, err := groupElements(input)
 		benchRest, benchKind = rest, err.Kind
 	}
 }
 
-func Benchmark_OrDelimited_Single(b *testing.B) {
+func Benchmark_Group_Lone(b *testing.B) {
 	input := "tcp from any to any"
 	b.ReportAllocs()
 	for b.Loop() {
-		rest, err := orDelimited(input, benchElement)
+		rest, _, err := groupElements(input)
 		benchRest, benchKind = rest, err.Kind
 	}
 }
