@@ -43,7 +43,8 @@ func (m rejectingState) DestinationPort(ipfw.PortMatch) error {
 //
 // A port is a run of letters and digits up to a dash, a number when every
 // byte is a digit and the value fits sixteen bits, a name otherwise. A dash
-// makes a range of two ports.
+// makes a range of two ports and commas a list of ranges, each one emitted
+// as it is read.
 func Test_ParsePorts_Table(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -131,6 +132,48 @@ func Test_ParsePorts_Table(t *testing.T) {
 			err:   ipfw.ErrExpectedPort,
 		},
 		{
+			name:  "list",
+			input: "22,80,443 x",
+			n:     9,
+			ports: []ipfw.PortMatch{portNumber(22), portNumber(80), portNumber(443)},
+		},
+		{
+			name:  "list with a range",
+			input: "22,80-90,443",
+			n:     12,
+			ports: []ipfw.PortMatch{
+				portNumber(22),
+				portSpan(ipfw.Port{Number: 80}, ipfw.Port{Number: 90}),
+				portNumber(443),
+			},
+		},
+		{
+			name:  "list of names",
+			input: "http,https x",
+			n:     10,
+			ports: []ipfw.PortMatch{portService("http"), portService("https")},
+		},
+		{
+			name:  "trailing comma keeps the elements before it",
+			input: "22,80,",
+			n:     6,
+			err:   ipfw.ErrExpectedPort,
+			ports: []ipfw.PortMatch{portNumber(22), portNumber(80)},
+		},
+		{
+			name:  "comma first",
+			input: ",22",
+			n:     0,
+			err:   ipfw.ErrExpectedPort,
+		},
+		{
+			name:  "space after the comma",
+			input: "22, 80",
+			n:     3,
+			err:   ipfw.ErrExpectedPort,
+			ports: []ipfw.PortMatch{portNumber(22)},
+		},
+		{
 			name:  "empty input",
 			input: "",
 			n:     0,
@@ -208,14 +251,14 @@ func Test_ParsePorts_OverflowIsName(t *testing.T) {
 
 // verifies that parsing a port into a warmed-up state allocates nothing.
 func Test_ParsePorts_NoAllocs(t *testing.T) {
-	input := "1024-65535 to any"
+	input := "22,1024-65535,http to any"
 	var state ipfw.CollectState
 	_, _ = ipfw.ParseSourcePorts(input, &state)
 	ok := true
 	allocs := testing.AllocsPerRun(100, func() {
 		state.Reset()
 		n, err := ipfw.ParseSourcePorts(input, &state)
-		if err != nil || n != 10 {
+		if err != nil || n != 18 {
 			ok = false
 		}
 	})

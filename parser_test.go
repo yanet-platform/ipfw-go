@@ -963,6 +963,51 @@ func Test_Parser_Next_Ports(t *testing.T) {
 			},
 		},
 		{
+			name:  "source port list",
+			input: "add pass tcp from any 11,22,33 to any\n",
+			state: ipfw.CollectState{
+				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				SourcePorts:  []ipfw.PortMatch{portNumber(11), portNumber(22), portNumber(33)},
+			},
+		},
+		{
+			name:  "destination port list",
+			input: "add pass tcp from any to any 11,22,33\n",
+			state: ipfw.CollectState{
+				Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+				Sources:          anyToAny,
+				Destinations:     anyToAny,
+				DestinationPorts: []ipfw.PortMatch{portNumber(11), portNumber(22), portNumber(33)},
+			},
+		},
+		{
+			name:  "lists on both sides",
+			input: "add pass tcp from any 11,22 to any 33,44\n",
+			state: ipfw.CollectState{
+				Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+				Sources:          anyToAny,
+				Destinations:     anyToAny,
+				SourcePorts:      []ipfw.PortMatch{portNumber(11), portNumber(22)},
+				DestinationPorts: []ipfw.PortMatch{portNumber(33), portNumber(44)},
+			},
+		},
+		{
+			name:  "destination list with a range",
+			input: "add pass tcp from any to any 22,80-90,443\n",
+			state: ipfw.CollectState{
+				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				DestinationPorts: []ipfw.PortMatch{
+					portNumber(22),
+					portSpan(ipfw.Port{Number: 80}, ipfw.Port{Number: 90}),
+					portNumber(443),
+				},
+			},
+		},
+		{
 			name:    "destination port before an inline comment",
 			input:   "add allow tcp from any to any 80 // web\n",
 			comment: " web",
@@ -991,6 +1036,44 @@ func Test_Parser_Next_Ports(t *testing.T) {
 			require.Equal(t, tc.state, state)
 		})
 	}
+}
+
+// verifies that a trailing comma fails a port list after its elements were
+// emitted.
+//
+// A source list fails the line at the missing port, a destination list is
+// abandoned and the comma becomes trailing content.
+func Test_Parser_Next_PortListTrailingComma(t *testing.T) {
+	var state ipfw.CollectState
+	_, err := ipfw.NewParser("add pass tcp from any 22, to any\n").Next(&state)
+	require.NotNil(t, err)
+	require.Equal(t, ipfw.ParseError{
+		Kind:   ipfw.ErrExpectedPort,
+		Line:   1,
+		Column: 25,
+		Text:   "add pass tcp from any 22, to any",
+	}, *err)
+	require.Equal(t, ipfw.CollectState{
+		Protos:      []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+		Sources:     []ipfw.Target{{Kind: ipfw.TargetAny}},
+		SourcePorts: []ipfw.PortMatch{portNumber(22)},
+	}, state)
+
+	state = ipfw.CollectState{}
+	_, err = ipfw.NewParser("add pass tcp from any to any 22,\n").Next(&state)
+	require.NotNil(t, err)
+	require.Equal(t, ipfw.ParseError{
+		Kind:   ipfw.ErrExpectedNewlineOrEOF,
+		Line:   1,
+		Column: 29,
+		Text:   "add pass tcp from any to any 22,",
+	}, *err)
+	require.Equal(t, ipfw.CollectState{
+		Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+		Sources:          []ipfw.Target{{Kind: ipfw.TargetAny}},
+		Destinations:     []ipfw.Target{{Kind: ipfw.TargetAny}},
+		DestinationPorts: []ipfw.PortMatch{portNumber(22)},
+	}, state)
 }
 
 // verifies that a token of no known shape reaches the state as a custom

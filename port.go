@@ -44,24 +44,34 @@ func ParseDestinationPorts(s string, state State) (int, error) {
 	return consumed(s, rest, err)
 }
 
-// parsePorts parses one port range into the source or the destination side
-// of the state, a failure pointing at the port.
+// parsePorts parses a comma list of port ranges into the source or the
+// destination side of the state, a failure pointing at the port.
+//
+// Every range is emitted as soon as it is read, so the elements before a
+// failure stay in the state while the input comes back unchanged.
 func parsePorts(s string, state State, destination bool) (string, fail) {
-	portRange, rest, failure := parsePortRange(s)
-	if failure.Failed() {
-		return s, failure
+	rest := s
+	for {
+		portRange, afterRange, failure := parsePortRange(rest)
+		if failure.Failed() {
+			return s, failure
+		}
+		match := PortMatch{Range: portRange}
+		var err error
+		if destination {
+			err = state.DestinationPort(match)
+		} else {
+			err = state.SourcePort(match)
+		}
+		if failure = failFrom(err, rest); failure.Failed() {
+			return s, failure
+		}
+		afterComma, ok := prefix(afterRange, ",")
+		if !ok {
+			return afterRange, fail{}
+		}
+		rest = afterComma
 	}
-	match := PortMatch{Range: portRange}
-	var err error
-	if destination {
-		err = state.DestinationPort(match)
-	} else {
-		err = state.SourcePort(match)
-	}
-	if failure = failFrom(err, s); failure.Failed() {
-		return s, failure
-	}
-	return rest, fail{}
 }
 
 // parsePortRange parses a port or a `lo-hi` range, a single port running
