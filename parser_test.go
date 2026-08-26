@@ -569,6 +569,16 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 			},
 		},
 		{
+			name:  "IPv4 network with a suffix is not a target",
+			input: "add allow ip from 192.0.2.0/24abc to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedTarget,
+				Line:   1,
+				Column: 18,
+				Text:   "add allow ip from 192.0.2.0/24abc to any",
+			},
+		},
+		{
 			name:     "to missing",
 			input:    "add allow ip from any x to any",
 			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedPrefix, Line: 1, Column: 22, Text: "add allow ip from any x to any"},
@@ -670,6 +680,61 @@ func Test_Parser_Next_MeToMe6(t *testing.T) {
 		IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
 		Sources:      []ipfw.Target{{Kind: ipfw.TargetMe}},
 		Destinations: []ipfw.Target{{Kind: ipfw.TargetMe6}},
+	}, state)
+}
+
+// verifies that IPv4 network text reaches the state as is on both sides.
+func Test_Parser_Next_Network4(t *testing.T) {
+	var state ipfw.CollectState
+	rec, err := ipfw.NewParser("add pass ip from 192.0.2.0/24 to 203.0.113.1\n").Next(&state)
+	require.Nil(t, err)
+	require.Equal(t, ipfw.Record{
+		Line:        1,
+		Text:        "add pass ip from 192.0.2.0/24 to 203.0.113.1",
+		Kind:        ipfw.RecordInstruction,
+		Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
+	}, *rec)
+	require.Equal(t, ipfw.CollectState{
+		IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+		Sources:      []ipfw.Target{{Kind: ipfw.TargetNetwork4, Text: "192.0.2.0/24"}},
+		Destinations: []ipfw.Target{{Kind: ipfw.TargetNetwork4, Text: "203.0.113.1"}},
+	}, state)
+}
+
+// verifies that the parser does not validate a network: text of the right
+// shape is handed to the state, which is where it gets rejected.
+func Test_Parser_Next_Network4Unvalidated(t *testing.T) {
+	var state ipfw.CollectState
+	rec, err := ipfw.NewParser("add allow ip4 from 300.1.1.1 to any\n").Next(&state)
+	require.Nil(t, err)
+	require.Equal(t, ipfw.Record{
+		Line:        1,
+		Text:        "add allow ip4 from 300.1.1.1 to any",
+		Kind:        ipfw.RecordInstruction,
+		Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
+	}, *rec)
+	require.Equal(t, ipfw.CollectState{
+		IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPv4}},
+		Sources:      []ipfw.Target{{Kind: ipfw.TargetNetwork4, Text: "300.1.1.1"}},
+		Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+	}, state)
+}
+
+// verifies that a comma list of networks is not supported: the first
+// network is emitted and the line fails at the comma.
+func Test_Parser_Next_Network4CommaList(t *testing.T) {
+	var state ipfw.CollectState
+	_, err := ipfw.NewParser("add allow ip from 192.0.2.1,203.0.113.1 to any").Next(&state)
+	require.NotNil(t, err)
+	require.Equal(t, ipfw.ParseError{
+		Kind:   ipfw.ErrExpectedWhitespace,
+		Line:   1,
+		Column: 27,
+		Text:   "add allow ip from 192.0.2.1,203.0.113.1 to any",
+	}, *err)
+	require.Equal(t, ipfw.CollectState{
+		IPProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+		Sources:  []ipfw.Target{{Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"}},
 	}, state)
 }
 

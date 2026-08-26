@@ -103,7 +103,20 @@ func classifyTarget(token string) (Target, ErrorKind) {
 		return Target{Kind: TargetMe6}, 0
 	case "me":
 		return Target{Kind: TargetMe}, 0
-	default:
-		return Target{}, ErrExpectedTarget
 	}
+	if isNetwork4Text(token) {
+		return Target{Kind: TargetNetwork4, Text: token}, 0
+	}
+	return Target{}, ErrExpectedTarget
+}
+
+// isNetwork4Text reports whether the token is made of digits, dots and
+// slashes only, the shape of an IPv4 address or network whatever the values.
+func isNetwork4Text(token string) bool {
+	_, rest := takeWhile(token, isNetwork4Byte)
+	return token != "" && rest == ""
+}
+
+func isNetwork4Byte(c byte) bool {
+	return c >= '0' && c <= '9' || c == '.' || c == '/'
 }
