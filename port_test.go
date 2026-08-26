@@ -34,13 +34,13 @@ func negated(match ipfw.PortMatch) ipfw.PortMatch {
 	return match
 }
 
-// SourcePort implements State.
-func (m rejectingState) SourcePort(ipfw.PortMatch) error {
+// OnSourcePort implements State.
+func (m rejectingState) OnSourcePort(ipfw.PortMatch) error {
 	return m.err
 }
 
-// DestinationPort implements State.
-func (m rejectingState) DestinationPort(ipfw.PortMatch) error {
+// OnDestinationPort implements State.
+func (m rejectingState) OnDestinationPort(ipfw.PortMatch) error {
 	return m.err
 }
 

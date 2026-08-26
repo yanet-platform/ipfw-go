@@ -101,9 +101,9 @@ func parseProtocolElement(s string, state State) (string, fail) {
 	}
 	var err error
 	if version, ok := ParseProtoIP(proto.Name); ok {
-		err = state.IPProto(ProtoIPMatch{Neg: neg, Proto: version})
+		err = state.OnIPProto(ProtoIPMatch{Neg: neg, Proto: version})
 	} else {
-		err = state.Proto(ProtoMatch{Neg: neg, Proto: proto})
+		err = state.OnProto(ProtoMatch{Neg: neg, Proto: proto})
 	}
 	if failure := failFrom(err, s); failure.Failed() {
 		return s, failure

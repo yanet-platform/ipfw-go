@@ -219,23 +219,23 @@ type rejectingState struct {
 	err error
 }
 
-// IPProto implements State.
-func (m rejectingState) IPProto(ipfw.ProtoIPMatch) error {
+// OnIPProto implements State.
+func (m rejectingState) OnIPProto(ipfw.ProtoIPMatch) error {
 	return m.err
 }
 
-// Proto implements State.
-func (m rejectingState) Proto(ipfw.ProtoMatch) error {
+// OnProto implements State.
+func (m rejectingState) OnProto(ipfw.ProtoMatch) error {
 	return m.err
 }
 
-// SourceTarget implements State.
-func (m rejectingState) SourceTarget(ipfw.Target) error {
+// OnSourceTarget implements State.
+func (m rejectingState) OnSourceTarget(ipfw.Target) error {
 	return m.err
 }
 
-// DestinationTarget implements State.
-func (m rejectingState) DestinationTarget(ipfw.Target) error {
+// OnDestinationTarget implements State.
+func (m rejectingState) OnDestinationTarget(ipfw.Target) error {
 	return m.err
 }
 

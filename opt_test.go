@@ -8,8 +8,8 @@ import (
 	"github.com/yanet-platform/ipfw"
 )
 
-// Option implements State.
-func (m rejectingState) Option(ipfw.Opt) error {
+// OnOption implements State.
+func (m rejectingState) OnOption(ipfw.Opt) error {
 	return m.err
 }
 

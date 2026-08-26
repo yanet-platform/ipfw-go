@@ -80,9 +80,9 @@ func parseTargetElement(s string, state State, destination bool) (string, fail) 
 	target.Neg = neg
 	var err error
 	if destination {
-		err = state.DestinationTarget(target)
+		err = state.OnDestinationTarget(target)
 	} else {
-		err = state.SourceTarget(target)
+		err = state.OnSourceTarget(target)
 	}
 	if failure := failFrom(err, rest); failure.Failed() {
 		return s, failure

@@ -270,16 +270,16 @@ func Test_Parser_All_EOFAndBreak(t *testing.T) {
 // empties it without giving up the capacity.
 func Test_CollectState_Reset(t *testing.T) {
 	var state ipfw.CollectState
-	require.NoError(t, state.IPProto(ipfw.ProtoIPMatch{Proto: ipfw.ProtoIPv4}))
-	require.NoError(t, state.Proto(ipfw.ProtoMatch{Proto: ipfw.Proto{Name: "tcp"}}))
-	require.NoError(t, state.SourceTarget(ipfw.Target{Kind: ipfw.TargetAny}))
-	require.NoError(t, state.DestinationTarget(ipfw.Target{Kind: ipfw.TargetMe}))
+	require.NoError(t, state.OnIPProto(ipfw.ProtoIPMatch{Proto: ipfw.ProtoIPv4}))
+	require.NoError(t, state.OnProto(ipfw.ProtoMatch{Proto: ipfw.Proto{Name: "tcp"}}))
+	require.NoError(t, state.OnSourceTarget(ipfw.Target{Kind: ipfw.TargetAny}))
+	require.NoError(t, state.OnDestinationTarget(ipfw.Target{Kind: ipfw.TargetMe}))
 	single := ipfw.PortRange{Lo: ipfw.Port{Number: 1}, Hi: ipfw.Port{Number: 1}}
 	span := ipfw.PortRange{Lo: ipfw.Port{Number: 2}, Hi: ipfw.Port{Number: 3}}
-	require.NoError(t, state.SourcePort(ipfw.PortMatch{Range: single}))
-	require.NoError(t, state.DestinationPort(ipfw.PortMatch{Neg: true, Range: span}))
-	require.NoError(t, state.Option(ipfw.Opt{Kind: ipfw.OptIn}))
-	require.NoError(t, state.Option(ipfw.Opt{Kind: ipfw.OptOut, Or: true}))
+	require.NoError(t, state.OnSourcePort(ipfw.PortMatch{Range: single}))
+	require.NoError(t, state.OnDestinationPort(ipfw.PortMatch{Neg: true, Range: span}))
+	require.NoError(t, state.OnOption(ipfw.Opt{Kind: ipfw.OptIn}))
+	require.NoError(t, state.OnOption(ipfw.Opt{Kind: ipfw.OptOut, Or: true}))
 	require.Equal(t, ipfw.CollectState{
 		IPProtos:         []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPv4}},
 		Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
@@ -304,13 +304,13 @@ func Test_CollectState_Reset(t *testing.T) {
 // verifies that the discarding state accepts every token.
 func Test_DiscardState_AcceptsEverything(t *testing.T) {
 	var state ipfw.DiscardState
-	require.NoError(t, state.IPProto(ipfw.ProtoIPMatch{}))
-	require.NoError(t, state.Proto(ipfw.ProtoMatch{}))
-	require.NoError(t, state.SourceTarget(ipfw.Target{}))
-	require.NoError(t, state.DestinationTarget(ipfw.Target{}))
-	require.NoError(t, state.SourcePort(ipfw.PortMatch{}))
-	require.NoError(t, state.DestinationPort(ipfw.PortMatch{}))
-	require.NoError(t, state.Option(ipfw.Opt{}))
+	require.NoError(t, state.OnIPProto(ipfw.ProtoIPMatch{}))
+	require.NoError(t, state.OnProto(ipfw.ProtoMatch{}))
+	require.NoError(t, state.OnSourceTarget(ipfw.Target{}))
+	require.NoError(t, state.OnDestinationTarget(ipfw.Target{}))
+	require.NoError(t, state.OnSourcePort(ipfw.PortMatch{}))
+	require.NoError(t, state.OnDestinationPort(ipfw.PortMatch{}))
+	require.NoError(t, state.OnOption(ipfw.Opt{}))
 }
 
 // verifies the version bit set: any contains both versions, a version

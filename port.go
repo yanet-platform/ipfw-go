@@ -60,9 +60,9 @@ func parsePorts(s string, state State, destination bool) (string, fail) {
 		match := PortMatch{Neg: neg, Range: portRange}
 		var err error
 		if destination {
-			err = state.DestinationPort(match)
+			err = state.OnDestinationPort(match)
 		} else {
-			err = state.SourcePort(match)
+			err = state.OnSourcePort(match)
 		}
 		if failure = failFrom(err, rest); failure.Failed() {
 			return s, failure
