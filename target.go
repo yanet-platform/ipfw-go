@@ -78,17 +78,21 @@ func parseTargetElement(s string, state State, side bodySide) (string, fail) {
 		return s, fail{Kind: kind, At: rest}
 	}
 	target.Neg = neg
-	var err error
-	switch side {
-	case sourceSide:
-		err = state.OnSourceTarget(target)
-	case destinationSide:
-		err = state.OnDestinationTarget(target)
-	}
-	if failure := failFrom(err, rest); failure.Failed() {
-		return s, failure
+	if err := failFrom(emitTarget(state, side, target), rest); err.Failed() {
+		return s, err
 	}
 	return afterToken, fail{}
+}
+
+// emitTarget hands the target to the callback of its side.
+func emitTarget(state State, side bodySide, target Target) error {
+	switch side {
+	case sourceSide:
+		return state.OnSourceTarget(target)
+	case destinationSide:
+		return state.OnDestinationTarget(target)
+	}
+	return nil
 }
 
 func scanTargetToken(s string) (string, string) {

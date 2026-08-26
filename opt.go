@@ -109,8 +109,8 @@ func parseOption(s string, state State, hook OptionHook) (string, fail) {
 	if !ok {
 		return s, fail{Kind: ErrUnknownOption, At: s}
 	}
-	if failure := failFrom(state.OnOption(Opt{Kind: OptEstablished}), s); failure.Failed() {
-		return s, failure
+	if err := failFrom(state.OnOption(Opt{Kind: OptEstablished}), s); err.Failed() {
+		return s, err
 	}
 	return rest, fail{}
 }

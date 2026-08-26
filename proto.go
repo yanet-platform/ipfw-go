@@ -99,16 +99,19 @@ func parseProtocolElement(s string, state State) (string, fail) {
 	if kind != 0 {
 		return s, fail{Kind: ErrExpectedEitherIPOrProto, At: s}
 	}
-	var err error
-	if version, ok := ParseProtoIP(proto.Name); ok {
-		err = state.OnIPProto(ProtoIPMatch{Neg: neg, Proto: version})
-	} else {
-		err = state.OnProto(ProtoMatch{Neg: neg, Proto: proto})
-	}
-	if failure := failFrom(err, s); failure.Failed() {
-		return s, failure
+	if err := failFrom(emitProto(state, neg, proto), s); err.Failed() {
+		return s, err
 	}
 	return rest, fail{}
+}
+
+// emitProto hands the protocol to the callback of its kind, an IP version
+// keyword going to OnIPProto and anything else to OnProto.
+func emitProto(state State, neg bool, proto Proto) error {
+	if version, ok := ParseProtoIP(proto.Name); ok {
+		return state.OnIPProto(ProtoIPMatch{Neg: neg, Proto: version})
+	}
+	return state.OnProto(ProtoMatch{Neg: neg, Proto: proto})
 }
 
 // parseProto reads a `[A-Za-z0-9-]+` token, a number only when every byte is

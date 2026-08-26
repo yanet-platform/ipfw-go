@@ -52,28 +52,32 @@ func ParseDestinationPorts(s string, state State) (int, error) {
 // failure stay in the state while the input comes back unchanged.
 func parsePorts(s string, state State, side bodySide) (string, fail) {
 	rest, neg := notWS1(s)
+	var ok bool
 	for {
-		portRange, afterRange, failure := parsePortRange(rest)
-		if failure.Failed() {
-			return s, failure
+		portRange, buf, err := parsePortRange(rest)
+		if err.Failed() {
+			return s, err
 		}
 		match := PortMatch{Neg: neg, Range: portRange}
-		var err error
-		switch side {
-		case sourceSide:
-			err = state.OnSourcePort(match)
-		case destinationSide:
-			err = state.OnDestinationPort(match)
+		if err = failFrom(emitPort(state, side, match), rest); err.Failed() {
+			return s, err
 		}
-		if failure = failFrom(err, rest); failure.Failed() {
-			return s, failure
+		if buf, ok = prefix(buf, ","); !ok {
+			return buf, fail{}
 		}
-		afterComma, ok := prefix(afterRange, ",")
-		if !ok {
-			return afterRange, fail{}
-		}
-		rest = afterComma
+		rest = buf
 	}
+}
+
+// emitPort hands the match to the callback of its side.
+func emitPort(state State, side bodySide, match PortMatch) error {
+	switch side {
+	case sourceSide:
+		return state.OnSourcePort(match)
+	case destinationSide:
+		return state.OnDestinationPort(match)
+	}
+	return nil
 }
 
 // parsePortRange parses a port or a `lo-hi` range, a single port running
