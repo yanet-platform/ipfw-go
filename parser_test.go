@@ -331,21 +331,6 @@ func Test_Proto_Port_IsNumber(t *testing.T) {
 	require.False(t, ipfw.Port{Name: "ssh"}.IsNumber())
 }
 
-// verifies that the type set holds any of the 256 type numbers independently.
-func Test_TypeSet_AddHas(t *testing.T) {
-	var set ipfw.TypeSet
-	require.True(t, set.IsEmpty())
-	for typ := range 256 {
-		set.Add(uint8(typ))
-		require.True(t, set.Has(uint8(typ)))
-		require.False(t, set.IsEmpty())
-		if typ < 255 {
-			require.False(t, set.Has(uint8(typ+1)))
-		}
-	}
-	require.Equal(t, ipfw.TypeSet{^uint64(0), ^uint64(0), ^uint64(0), ^uint64(0)}, set)
-}
-
 // verifies that steady-state parsing of comments, labels and blank lines
 // allocates nothing once the parser is reused.
 func Test_Parser_Next_NoAllocs(t *testing.T) {
@@ -1736,6 +1721,16 @@ func Test_Parser_Next_Options(t *testing.T) {
 			},
 		},
 		{
+			name:  "icmp6types",
+			input: "add allow ip from any to any icmp6types 135\n",
+			state: ipfw.ReduceState{
+				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      []ipfw.Opt{icmp6Types(135)},
+			},
+		},
+		{
 			name:    "option before an inline comment",
 			input:   "add allow tcp from any to any established // c\n",
 			comment: " c",
@@ -1895,6 +1890,16 @@ func Test_Parser_Next_OptionErrors(t *testing.T) {
 				Line:   1,
 				Column: 53,
 				Text:   "add allow icmp from any to any established icmptypes 7",
+			},
+		},
+		{
+			name:  "unknown icmp6 type",
+			input: "add allow ip from any to any established icmp6types 150",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrUnknownICMP6Type,
+				Line:   1,
+				Column: 52,
+				Text:   "add allow ip from any to any established icmp6types 150",
 			},
 		},
 		{

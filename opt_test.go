@@ -34,6 +34,11 @@ func icmpTypes(types ...uint8) ipfw.Opt {
 	return ipfw.Opt{Kind: ipfw.OptICMPTypes, Types: typeSet(types...)}
 }
 
+// icmp6Types is an icmp6types option for the given type numbers.
+func icmp6Types(types ...uint8) ipfw.Opt {
+	return ipfw.Opt{Kind: ipfw.OptICMP6Types, Types: typeSet(types...)}
+}
+
 // notOpt is the option with its negation set.
 func notOpt(opt ipfw.Opt) ipfw.Opt {
 	opt.Neg = true
@@ -417,6 +422,30 @@ func Test_ParseOptions_Table(t *testing.T) {
 			input: "icmptypes",
 			n:     9,
 			err:   ipfw.ErrExpectedWhitespace,
+		},
+		{
+			name:    "icmp6types list",
+			input:   "icmp6types 128,135",
+			n:       18,
+			options: []ipfw.Opt{icmp6Types(128, 135)},
+		},
+		{
+			name:    "icmp6types at the bounds",
+			input:   "icmp6types 1,4,149,151,161",
+			n:       26,
+			options: []ipfw.Opt{icmp6Types(1, 4, 149, 151, 161)},
+		},
+		{
+			name:  "unknown icmp6 type in the gap",
+			input: "icmp6types 150",
+			n:     11,
+			err:   ipfw.ErrUnknownICMP6Type,
+		},
+		{
+			name:  "unknown icmp6 type below the range",
+			input: "icmp6types 5",
+			n:     11,
+			err:   ipfw.ErrUnknownICMP6Type,
 		},
 		{
 			name:    "in with a suffix is in",

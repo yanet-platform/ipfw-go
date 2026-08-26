@@ -146,6 +146,8 @@ func parseOption(s string, state State, hook OptionHook, place optionPlace) (str
 		buf, err = parseTypesOption(rest[len("icmptypes"):], state, OptICMPTypes, neg, place)
 	case strings.HasPrefix(rest, "icmptype"):
 		buf, err = parseTypesOption(rest[len("icmptype"):], state, OptICMPTypes, neg, place)
+	case strings.HasPrefix(rest, "icmp6types"):
+		buf, err = parseTypesOption(rest[len("icmp6types"):], state, OptICMP6Types, neg, place)
 	case strings.HasPrefix(rest, "keep-state"):
 		buf, err = parseKeepStateOption(rest[len("keep-state"):], state, neg, place)
 	case strings.HasPrefix(rest, "proto"):
