@@ -506,6 +506,26 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 22, Text: "add allow tcp from any"},
 		},
 		{
+			name:  "targets without or",
+			input: "add pass ip from { any any } to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedOr,
+				Line:   1,
+				Column: 23,
+				Text:   "add pass ip from { any any } to any",
+			},
+		},
+		{
+			name:  "target group left open",
+			input: "add pass ip from { any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedOr,
+				Line:   1,
+				Column: 22,
+				Text:   "add pass ip from { any",
+			},
+		},
+		{
 			name:  "quoted hostname left open",
 			input: "add allow ip from `x.y to any",
 			expected: ipfw.ParseError{
@@ -722,6 +742,58 @@ func Test_Parser_Next_Table(t *testing.T) {
 		Sources:      []ipfw.Target{{Kind: ipfw.TargetTable, Text: "_SRV_"}},
 		Destinations: []ipfw.Target{{Kind: ipfw.TargetTable, Text: "_DST_"}},
 	}, state)
+}
+
+// verifies that braced groups and negations on both sides of the body
+// reach the state element by element, in order.
+func Test_Parser_Next_TargetGroups(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		state ipfw.CollectState
+	}{
+		{
+			name:  "protocol and source groups",
+			input: "add pass { tcp or udp } from { 192.0.2.0/24 or ::1 } to any\n",
+			state: ipfw.CollectState{
+				Protos: []ipfw.ProtoMatch{
+					{Proto: ipfw.Proto{Name: "tcp"}},
+					{Proto: ipfw.Proto{Name: "udp"}},
+				},
+				Sources: []ipfw.Target{
+					{Kind: ipfw.TargetNetwork4, Text: "192.0.2.0/24"},
+					{Kind: ipfw.TargetNetwork6, Text: "::1"},
+				},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+			},
+		},
+		{
+			name:  "negated source and negation inside the destination group",
+			input: "add pass ip from not 192.0.2.0/24 to { me or not me6 }\n",
+			state: ipfw.CollectState{
+				IPProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:  []ipfw.Target{{Neg: true, Kind: ipfw.TargetNetwork4, Text: "192.0.2.0/24"}},
+				Destinations: []ipfw.Target{
+					{Kind: ipfw.TargetMe},
+					{Neg: true, Kind: ipfw.TargetMe6},
+				},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var state ipfw.CollectState
+			rec, err := ipfw.NewParser(tc.input).Next(&state)
+			require.Nil(t, err)
+			require.Equal(t, ipfw.Record{
+				Line:        1,
+				Text:        strings.TrimSuffix(tc.input, "\n"),
+				Kind:        ipfw.RecordInstruction,
+				Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
+			}, *rec)
+			require.Equal(t, tc.state, state)
+		})
+	}
 }
 
 // verifies that a token of no known shape reaches the state as a custom

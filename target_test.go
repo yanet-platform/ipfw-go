@@ -392,6 +392,45 @@ func Test_ParseTargets_Table(t *testing.T) {
 		{name: "empty input", input: "", n: 0, err: ipfw.ErrExpectedTarget},
 		{name: "empty group", input: "{ } x", n: 2, err: ipfw.ErrExpectedTarget},
 		{name: "closing brace alone", input: "} x", n: 0, err: ipfw.ErrExpectedTarget},
+		{
+			name:  "group of three shapes",
+			input: "{ host.example.com or _X_ or table(t) } x",
+			n:     39,
+			state: ipfw.CollectState{Sources: []ipfw.Target{
+				{Kind: ipfw.TargetHostname, Text: "host.example.com"},
+				{Kind: ipfw.TargetCustom, Text: "_X_"},
+				{Kind: ipfw.TargetTable, Text: "t"},
+			}},
+		},
+		{
+			name:  "negation inside a group",
+			input: "{ me or not me6 } x",
+			n:     17,
+			state: ipfw.CollectState{Sources: []ipfw.Target{
+				{Kind: ipfw.TargetMe},
+				{Neg: true, Kind: ipfw.TargetMe6},
+			}},
+		},
+		{
+			name:  "not glued to a keyword is custom",
+			input: "notany x",
+			n:     6,
+			state: ipfw.CollectState{Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "notany"}}},
+		},
+		{
+			name:  "missing or keeps the first element",
+			input: "{ any any }",
+			n:     6,
+			err:   ipfw.ErrExpectedOr,
+			state: ipfw.CollectState{Sources: []ipfw.Target{{Kind: ipfw.TargetAny}}},
+		},
+		{
+			name:  "unclosed group keeps the first element",
+			input: "{ any",
+			n:     5,
+			err:   ipfw.ErrExpectedOr,
+			state: ipfw.CollectState{Sources: []ipfw.Target{{Kind: ipfw.TargetAny}}},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -422,8 +461,9 @@ func Test_ParseTargets_StateError(t *testing.T) {
 	require.Equal(t, ipfw.ErrUnknownOption, err)
 }
 
-// verifies that classifying network text allocates nothing.
-func Test_ParseTargets_NoAllocs(t *testing.T) {
+// verifies that a braced group of every shape, negations included,
+// allocates nothing.
+func Test_ParseTargets_Group_NoAllocs(t *testing.T) {
 	input := "{ 192.0.2.0/24 or not 2001:db8::/32 or `host.example.com' or table(t) or _M_ } to any"
 	var state ipfw.CollectState
 	_, _ = ipfw.ParseSourceTargets(input, &state)
