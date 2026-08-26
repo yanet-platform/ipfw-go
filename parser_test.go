@@ -391,3 +391,8 @@ func Test_Parser_Next_ActionDeny(t *testing.T) {
 	nextError(t, ipfw.NewParser("add drop ip"), ipfw.ParseError{Kind: ipfw.ErrExpectedEitherIPOrProto, Line: 1, Column: 9, Text: "add drop ip"})
 	nextError(t, ipfw.NewParser("add denyall ip"), ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 8, Text: "add denyall ip"})
 }
+
+// verifies that a count action hands over to the body.
+func Test_Parser_Next_ActionCount(t *testing.T) {
+	nextError(t, ipfw.NewParser("add count ip"), ipfw.ParseError{Kind: ipfw.ErrExpectedEitherIPOrProto, Line: 1, Column: 10, Text: "add count ip"})
+}

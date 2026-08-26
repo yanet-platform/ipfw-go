@@ -68,3 +68,12 @@ func Test_ParseAction_Deny(t *testing.T) {
 	}
 	require.Equal(t, "deny", Action{Kind: ActionDeny}.String())
 }
+
+// verifies that the count action is recognized and prints as count.
+func Test_ParseAction_Count(t *testing.T) {
+	action, rest, err := parseAction("count ip from any to any")
+	require.Equal(t, ErrorKind(0), err.Kind)
+	require.Equal(t, Action{Kind: ActionCount}, action)
+	require.Equal(t, " ip from any to any", rest)
+	require.Equal(t, "count", Action{Kind: ActionCount}.String())
+}

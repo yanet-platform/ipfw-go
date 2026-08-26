@@ -3,8 +3,11 @@ package ipfw
 // ActionKind is what a rule does with a matching packet.
 type ActionKind uint8
 
-// The actions. Pass and deny terminate the search, count continues it,
-// skipto jumps, check-state consults the dynamic state.
+// The actions.
+//
+// Pass and deny terminate the search, count only bumps the rule counters and
+// continues with the next rule, skipto jumps, check-state consults the
+// dynamic state.
 const (
 	_ ActionKind = iota
 	ActionPass
@@ -32,6 +35,8 @@ func (m Action) String() string {
 		return "pass"
 	case ActionDeny:
 		return "deny"
+	case ActionCount:
+		return "count"
 	default:
 		return ""
 	}
@@ -70,6 +75,7 @@ var actionKeywords = [...]struct {
 	{"permit", ActionPass},
 	{"deny", ActionDeny},
 	{"drop", ActionDeny},
+	{"count", ActionCount},
 }
 
 // parseAction recognizes the action keyword by prefix.
