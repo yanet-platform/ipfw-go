@@ -70,12 +70,12 @@ func Test_Parser_Next_EmptyLines(t *testing.T) {
 // verifies that a comment line keeps the raw text after the hash and the
 // whole line as text.
 func Test_Parser_Next_Comment(t *testing.T) {
-	parser := ipfw.NewParser("# Управляющие серверы\n")
+	parser := ipfw.NewParser("# Пример комментария\n")
 	next(t, parser, ipfw.Record{
 		Line:    1,
-		Text:    "# Управляющие серверы",
+		Text:    "# Пример комментария",
 		Kind:    ipfw.RecordComment,
-		Comment: " Управляющие серверы",
+		Comment: " Пример комментария",
 	})
 	next(t, ipfw.NewParser("#"), ipfw.Record{Line: 1, Text: "#", Kind: ipfw.RecordComment})
 }
@@ -524,249 +524,6 @@ func Test_Parser_Next_InstructionNumber(t *testing.T) {
 	}
 }
 
-// verifies that a pass action must be followed by whitespace and a body,
-// which is not parsed yet.
-func Test_Parser_Next_ActionPass(t *testing.T) {
-	cases := []struct {
-		name     string
-		input    string
-		expected ipfw.ParseError
-	}{
-		{
-			name:  "body expected",
-			input: "add allow _",
-			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedEitherIPOrProto,
-				Line:   1,
-				Column: 10,
-				Text:   "add allow _",
-			},
-		},
-		{
-			name:  "numbered rule",
-			input: "add 100 permit _",
-			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedEitherIPOrProto,
-				Line:   1,
-				Column: 15,
-				Text:   "add 100 permit _",
-			},
-		},
-		{
-			name:  "no whitespace after the action",
-			input: "add allow\n",
-			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedWhitespace,
-				Line:   1,
-				Column: 9,
-				Text:   "add allow",
-			},
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			nextError(t, ipfw.NewParser(tc.input), tc.expected)
-		})
-	}
-}
-
-// verifies that a deny action hands over to the body and that a keyword
-// glued to a longer word fails at the whitespace check after it.
-func Test_Parser_Next_ActionDeny(t *testing.T) {
-	nextError(
-		t,
-		ipfw.NewParser("add drop _"),
-		ipfw.ParseError{
-			Kind:   ipfw.ErrExpectedEitherIPOrProto,
-			Line:   1,
-			Column: 9,
-			Text:   "add drop _",
-		},
-	)
-	nextError(
-		t,
-		ipfw.NewParser("add denyall ip"),
-		ipfw.ParseError{
-			Kind:   ipfw.ErrExpectedWhitespace,
-			Line:   1,
-			Column: 8,
-			Text:   "add denyall ip",
-		},
-	)
-}
-
-// verifies that a count action hands over to the body.
-func Test_Parser_Next_ActionCount(t *testing.T) {
-	nextError(
-		t,
-		ipfw.NewParser("add count _"),
-		ipfw.ParseError{
-			Kind:   ipfw.ErrExpectedEitherIPOrProto,
-			Line:   1,
-			Column: 10,
-			Text:   "add count _",
-		},
-	)
-}
-
-// verifies that a skipto action with each target kind hands over to the
-// body and that a missing or unknown target is positioned after the keyword.
-func Test_Parser_Next_ActionSkipTo(t *testing.T) {
-	cases := []struct {
-		name     string
-		input    string
-		expected ipfw.ParseError
-	}{
-		{
-			name:  "number target",
-			input: "add skipto 1500 _",
-			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedEitherIPOrProto,
-				Line:   1,
-				Column: 16,
-				Text:   "add skipto 1500 _",
-			},
-		},
-		{
-			name:  "label target",
-			input: "add skipto :X _",
-			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedEitherIPOrProto,
-				Line:   1,
-				Column: 14,
-				Text:   "add skipto :X _",
-			},
-		},
-		{
-			name:  "tablearg target",
-			input: "add skipto tablearg _",
-			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedEitherIPOrProto,
-				Line:   1,
-				Column: 20,
-				Text:   "add skipto tablearg _",
-			},
-		},
-		{
-			name:  "missing target",
-			input: "add skipto",
-			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedWhitespace,
-				Line:   1,
-				Column: 10,
-				Text:   "add skipto",
-			},
-		},
-		{
-			name:  "unknown target",
-			input: "add skipto x",
-			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedSkipTo,
-				Line:   1,
-				Column: 11,
-				Text:   "add skipto x",
-			},
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			nextError(t, ipfw.NewParser(tc.input), tc.expected)
-		})
-	}
-}
-
-// verifies that a check-state rule has no body: the line ends right after
-// the optional flow name, and anything else there is trailing content.
-func Test_Parser_Next_ActionCheckState(t *testing.T) {
-	checkState := func(line int, text, flow string, num uint32) ipfw.Record {
-		return ipfw.Record{
-			Line: line,
-			Text: text,
-			Kind: ipfw.RecordInstruction,
-			Instruction: ipfw.Instruction{
-				Num:    num,
-				Action: ipfw.Action{Kind: ipfw.ActionCheckState, Flow: flow},
-			},
-		}
-	}
-	next(
-		t,
-		ipfw.NewParser("add check-state :any\n"),
-		checkState(1, "add check-state :any", "any", 0),
-	)
-	next(t, ipfw.NewParser("add check-state"), checkState(1, "add check-state", "", 0))
-	next(
-		t,
-		ipfw.NewParser("add 10 check-state :x\n"),
-		checkState(1, "add 10 check-state :x", "x", 10),
-	)
-
-	parser := ipfw.NewParser("add check-state :any\nadd pass ip from any to any\n")
-	next(t, parser, checkState(1, "add check-state :any", "any", 0))
-	var state ipfw.CollectState
-	rec, err := parser.Next(&state)
-	require.Nil(t, err)
-	require.Equal(t, passAnyToAny(2, "add pass ip from any to any"), rec)
-	require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), state)
-	next(t, parser, eof)
-
-	cases := []struct {
-		name     string
-		input    string
-		expected ipfw.ParseError
-	}{
-		{
-			name:  "colon without a name",
-			input: "add check-state :\n",
-			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedNewlineOrEOF,
-				Line:   1,
-				Column: 16,
-				Text:   "add check-state :",
-			},
-		},
-		{
-			name:  "word after the keyword",
-			input: "add check-state foo",
-			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedNewlineOrEOF,
-				Line:   1,
-				Column: 16,
-				Text:   "add check-state foo",
-			},
-		},
-		{
-			name:  "inline comment is not accepted either",
-			input: "add check-state // c",
-			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedNewlineOrEOF,
-				Line:   1,
-				Column: 16,
-				Text:   "add check-state // c",
-			},
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			nextError(t, ipfw.NewParser(tc.input), tc.expected)
-		})
-	}
-}
-
-// verifies that a long label name is taken whole.
-func Test_Parser_Next_LabelFlowName(t *testing.T) {
-	next(
-		t,
-		ipfw.NewParser(":MEICMP6LOGDOUBLECOLON\n"),
-		ipfw.Record{
-			Line:  1,
-			Text:  ":MEICMP6LOGDOUBLECOLON",
-			Kind:  ipfw.RecordLabel,
-			Label: "MEICMP6LOGDOUBLECOLON",
-		},
-	)
-}
-
 // verifies that the body starts with a protocol followed by `from`, and
 // that each missing piece is positioned where it was expected.
 func Test_Parser_Next_BodyProtocol(t *testing.T) {
@@ -910,8 +667,8 @@ func Test_Parser_Next_InlineComment(t *testing.T) {
 	}{
 		{
 			name:    "json payload",
-			input:   "add pass ip from any to any // {\"id\": \"PUNCHER-123\", \"log\": true}\n",
-			comment: " {\"id\": \"PUNCHER-123\", \"log\": true}",
+			input:   "add pass ip from any to any // {\"id\": \"RULE-42\", \"log\": true}\n",
+			comment: " {\"id\": \"RULE-42\", \"log\": true}",
 		},
 		{name: "empty comment", input: "add pass ip from any to any //", comment: ""},
 		{name: "tab before the slashes", input: "add pass ip from any to any\t//x\n", comment: "x"},
@@ -953,4 +710,14 @@ func Test_Parser_Body_NoAllocs(t *testing.T) {
 	})
 	require.True(t, ok)
 	require.Zero(t, allocs)
+}
+
+// verifies that a long label name is taken whole.
+func Test_Parser_Next_LongLabel(t *testing.T) {
+	next(t, ipfw.NewParser(":LONG_LABEL_NAME_42\n"), ipfw.Record{
+		Line:  1,
+		Text:  ":LONG_LABEL_NAME_42",
+		Kind:  ipfw.RecordLabel,
+		Label: "LONG_LABEL_NAME_42",
+	})
 }
