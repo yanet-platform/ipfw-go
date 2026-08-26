@@ -72,7 +72,7 @@ func Test_Parser_Next_ActionPass(t *testing.T) {
 			nextError(t, ipfw.NewParser(tc.input), tc.expected)
 		})
 	}
-	var state ipfw.CollectState
+	var state ipfw.ReduceState
 	rec, err := ipfw.NewParser("add accept ip from any to any\n").Next(&state)
 	require.Nil(t, err)
 	require.Equal(t, passAnyToAny(1, "add accept ip from any to any"), *rec)
@@ -113,7 +113,7 @@ func Test_Parser_Next_ActionDeny(t *testing.T) {
 			nextError(t, ipfw.NewParser(tc.input), tc.expected)
 		})
 	}
-	var state ipfw.CollectState
+	var state ipfw.ReduceState
 	rec, err := ipfw.NewParser("add deny ip from any to any").Next(&state)
 	require.Nil(t, err)
 	expected := passAnyToAny(1, "add deny ip from any to any")
@@ -124,7 +124,7 @@ func Test_Parser_Next_ActionDeny(t *testing.T) {
 // verifies that the count action is recognized.
 func Test_Parser_Next_ActionCount(t *testing.T) {
 	nextError(t, ipfw.NewParser("add count _"), bodyError("add count _", 10))
-	var state ipfw.CollectState
+	var state ipfw.ReduceState
 	rec, err := ipfw.NewParser("add count ip from any to any").Next(&state)
 	require.Nil(t, err)
 	expected := passAnyToAny(1, "add count ip from any to any")
@@ -233,7 +233,7 @@ func Test_Parser_Next_ActionSkipTo(t *testing.T) {
 	}
 	for _, tc := range targets {
 		t.Run(tc.name, func(t *testing.T) {
-			var state ipfw.CollectState
+			var state ipfw.ReduceState
 			rec, err := ipfw.NewParser(tc.input).Next(&state)
 			require.Nil(t, err)
 			expected := passAnyToAny(1, tc.input)
@@ -273,7 +273,7 @@ func Test_Parser_Next_ActionCheckState(t *testing.T) {
 
 	parser := ipfw.NewParser("add check-state :any\nadd pass ip from any to any\n")
 	next(t, parser, checkState(1, "add check-state :any", "any", 0))
-	var state ipfw.CollectState
+	var state ipfw.ReduceState
 	rec, err := parser.Next(&state)
 	require.Nil(t, err)
 	require.Equal(t, passAnyToAny(2, "add pass ip from any to any"), *rec)

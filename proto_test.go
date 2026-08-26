@@ -12,8 +12,8 @@ import (
 )
 
 // protos is the state of a body with the given transport protocols.
-func protos(matches ...ipfw.ProtoMatch) ipfw.CollectState {
-	return ipfw.CollectState{Protos: matches}
+func protos(matches ...ipfw.ProtoMatch) ipfw.ReduceState {
+	return ipfw.ReduceState{Protos: matches}
 }
 
 // verifies that the protocol parser feeds the state, reports the consumed
@@ -27,7 +27,7 @@ func Test_ParseProtocols_Table(t *testing.T) {
 		input string
 		n     int
 		err   error
-		state ipfw.CollectState
+		state ipfw.ReduceState
 	}{
 		{
 			name:  "number",
@@ -99,19 +99,19 @@ func Test_ParseProtocols_Table(t *testing.T) {
 			name:  "ip keyword",
 			input: "ip from any to any",
 			n:     2,
-			state: ipfw.CollectState{IPProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}}},
+			state: ipfw.ReduceState{IPProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}}},
 		},
 		{
 			name:  "all keyword",
 			input: "all from",
 			n:     3,
-			state: ipfw.CollectState{IPProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}}},
+			state: ipfw.ReduceState{IPProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}}},
 		},
 		{
 			name:  "negated ip4 keyword",
 			input: "not ip4 from",
 			n:     7,
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				IPProtos: []ipfw.ProtoIPMatch{{Neg: true, Proto: ipfw.ProtoIPv4}},
 			},
 		},
@@ -119,7 +119,7 @@ func Test_ParseProtocols_Table(t *testing.T) {
 			name:  "ipv6 keyword",
 			input: "ipv6 from",
 			n:     4,
-			state: ipfw.CollectState{IPProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPv6}}},
+			state: ipfw.ReduceState{IPProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPv6}}},
 		},
 		{
 			name:  "keyword prefix is a transport name",
@@ -166,7 +166,7 @@ func Test_ParseProtocols_Table(t *testing.T) {
 			name:  "group mixing an IP keyword and a transport name",
 			input: "{ ip or tcp } x",
 			n:     13,
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				IPProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
 				Protos:   []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 			},
@@ -204,7 +204,7 @@ func Test_ParseProtocols_Table(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var state ipfw.CollectState
+			var state ipfw.ReduceState
 			n, err := ipfw.ParseProtocols(tc.input, &state)
 			require.Equal(t, tc.err, err)
 			require.Equal(t, tc.n, n)
@@ -288,7 +288,7 @@ func Test_ParseProtocols_NumberRoundTrip(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		number := rapid.Uint8().Draw(t, "number")
 		text := strconv.FormatUint(uint64(number), 10)
-		var state ipfw.CollectState
+		var state ipfw.ReduceState
 		n, err := ipfw.ParseProtocols(text+" x", &state)
 		require.NoError(t, err)
 		require.Equal(t, len(text), n)
@@ -304,7 +304,7 @@ func Test_ParseProtocols_NameRoundTrip(t *testing.T) {
 		if _, keyword := ipfw.ParseProtoIP(name); keyword {
 			t.Skip("an IP version keyword")
 		}
-		var state ipfw.CollectState
+		var state ipfw.ReduceState
 		n, err := ipfw.ParseProtocols(name+" x", &state)
 		require.NoError(t, err)
 		require.Equal(t, len(name), n)
@@ -316,7 +316,7 @@ func Test_ParseProtocols_NameRoundTrip(t *testing.T) {
 // groups included.
 func Test_ParseProtocols_NoAllocs(t *testing.T) {
 	for _, input := range []string{"not tcp from", "{ not ip or tcp or 17 } from"} {
-		var state ipfw.CollectState
+		var state ipfw.ReduceState
 		_, _ = ipfw.ParseProtocols(input, &state)
 		ok := true
 		allocs := testing.AllocsPerRun(100, func() {

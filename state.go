@@ -45,8 +45,8 @@ func (DiscardState) OnDestinationPort(PortMatch) error { return nil }
 // OnOption implements State.
 func (DiscardState) OnOption(Opt) error { return nil }
 
-// CollectState appends every token to the slice of its kind, in order.
-type CollectState struct {
+// ReduceState appends every token to the slice of its kind, in order.
+type ReduceState struct {
 	// IPProtos holds the IP version keywords.
 	IPProtos []ProtoIPMatch
 	// Protos holds the transport protocols.
@@ -64,7 +64,7 @@ type CollectState struct {
 }
 
 // Reset empties every slice and keeps its capacity for the next line.
-func (m *CollectState) Reset() {
+func (m *ReduceState) Reset() {
 	m.IPProtos = m.IPProtos[:0]
 	m.Protos = m.Protos[:0]
 	m.Sources = m.Sources[:0]
@@ -75,43 +75,43 @@ func (m *CollectState) Reset() {
 }
 
 // OnIPProto implements State.
-func (m *CollectState) OnIPProto(match ProtoIPMatch) error {
+func (m *ReduceState) OnIPProto(match ProtoIPMatch) error {
 	m.IPProtos = append(m.IPProtos, match)
 	return nil
 }
 
 // OnProto implements State.
-func (m *CollectState) OnProto(match ProtoMatch) error {
+func (m *ReduceState) OnProto(match ProtoMatch) error {
 	m.Protos = append(m.Protos, match)
 	return nil
 }
 
 // OnSourceTarget implements State.
-func (m *CollectState) OnSourceTarget(target Target) error {
+func (m *ReduceState) OnSourceTarget(target Target) error {
 	m.Sources = append(m.Sources, target)
 	return nil
 }
 
 // OnDestinationTarget implements State.
-func (m *CollectState) OnDestinationTarget(target Target) error {
+func (m *ReduceState) OnDestinationTarget(target Target) error {
 	m.Destinations = append(m.Destinations, target)
 	return nil
 }
 
 // OnSourcePort implements State.
-func (m *CollectState) OnSourcePort(match PortMatch) error {
+func (m *ReduceState) OnSourcePort(match PortMatch) error {
 	m.SourcePorts = append(m.SourcePorts, match)
 	return nil
 }
 
 // OnDestinationPort implements State.
-func (m *CollectState) OnDestinationPort(match PortMatch) error {
+func (m *ReduceState) OnDestinationPort(match PortMatch) error {
 	m.DestinationPorts = append(m.DestinationPorts, match)
 	return nil
 }
 
 // OnOption implements State.
-func (m *CollectState) OnOption(opt Opt) error {
+func (m *ReduceState) OnOption(opt Opt) error {
 	m.Options = append(m.Options, opt)
 	return nil
 }

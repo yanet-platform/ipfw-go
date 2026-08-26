@@ -113,7 +113,7 @@ has every dependency: use `GOPROXY=off go get …` / `GOPROXY=off go mod tidy`.
 - Each test carries a one-line `// verifies that …` brief.
 - `require` by default, `assert` for several independent checks;
   `(t, expected, actual)` order. Table cases have self-describing `name:`s.
-- Assert the **full** collected state (`CollectState`/`RuleState` literal)
+- Assert the **full** collected state (`ReduceState`/`RuleState` literal)
   and the exact remaining input / consumed length — the Rust tests do, and it
   is what catches silent token drops.
 - `rapid.Check` for properties with simple oracles; native fuzzing for the

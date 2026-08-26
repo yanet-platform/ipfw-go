@@ -12,24 +12,24 @@ import (
 
 var (
 	_ ipfw.State = ipfw.DiscardState{}
-	_ ipfw.State = (*ipfw.CollectState)(nil)
+	_ ipfw.State = (*ipfw.ReduceState)(nil)
 )
 
 // next parses one line and requires it to succeed with the given record and
 // an untouched state.
 func next(t *testing.T, parser *ipfw.Parser, expected ipfw.Record) {
 	t.Helper()
-	var state ipfw.CollectState
+	var state ipfw.ReduceState
 	rec, err := parser.Next(&state)
 	require.Nil(t, err)
 	require.Equal(t, expected, *rec)
-	require.Equal(t, ipfw.CollectState{}, state)
+	require.Equal(t, ipfw.ReduceState{}, state)
 }
 
 // nextError parses one line and requires the given positioned failure.
 func nextError(t *testing.T, parser *ipfw.Parser, expected ipfw.ParseError) {
 	t.Helper()
-	var state ipfw.CollectState
+	var state ipfw.ReduceState
 	_, err := parser.Next(&state)
 	require.NotNil(t, err)
 	require.Equal(t, expected, *err)
@@ -268,8 +268,8 @@ func Test_Parser_All_EOFAndBreak(t *testing.T) {
 
 // verifies that the collecting state keeps tokens in order and that a reset
 // empties it without giving up the capacity.
-func Test_CollectState_Reset(t *testing.T) {
-	var state ipfw.CollectState
+func Test_ReduceState_Reset(t *testing.T) {
+	var state ipfw.ReduceState
 	require.NoError(t, state.OnIPProto(ipfw.ProtoIPMatch{Proto: ipfw.ProtoIPv4}))
 	require.NoError(t, state.OnProto(ipfw.ProtoMatch{Proto: ipfw.Proto{Name: "tcp"}}))
 	require.NoError(t, state.OnSourceTarget(ipfw.Target{Kind: ipfw.TargetAny}))
@@ -280,7 +280,7 @@ func Test_CollectState_Reset(t *testing.T) {
 	require.NoError(t, state.OnDestinationPort(ipfw.PortMatch{Neg: true, Range: span}))
 	require.NoError(t, state.OnOption(ipfw.Opt{Kind: ipfw.OptIn}))
 	require.NoError(t, state.OnOption(ipfw.Opt{Kind: ipfw.OptOut, Or: true}))
-	require.Equal(t, ipfw.CollectState{
+	require.Equal(t, ipfw.ReduceState{
 		IPProtos:         []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPv4}},
 		Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 		Sources:          []ipfw.Target{{Kind: ipfw.TargetAny}},
@@ -351,7 +351,7 @@ func Test_TypeSet_AddHas(t *testing.T) {
 func Test_Parser_Next_NoAllocs(t *testing.T) {
 	src := "# c\n:L\n\n"
 	parser := ipfw.NewParser(src)
-	var state ipfw.CollectState
+	var state ipfw.ReduceState
 	ok := true
 	allocs := testing.AllocsPerRun(100, func() {
 		parser.Reset(src)
@@ -389,7 +389,7 @@ func Fuzz_Parser_Next(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, input string) {
 		parser := ipfw.NewParser(input)
-		var state ipfw.CollectState
+		var state ipfw.ReduceState
 		for calls := 0; ; calls++ {
 			require.LessOrEqual(
 				t,
@@ -677,17 +677,17 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 // verifies that a token handed to the state stays there when the line fails
 // later on: the state is not rolled back.
 func Test_Parser_Next_BodyProtocolEmittedBeforeFailure(t *testing.T) {
-	var state ipfw.CollectState
+	var state ipfw.ReduceState
 	_, err := ipfw.NewParser("add allow tcp x").Next(&state)
 	require.NotNil(t, err)
-	require.Equal(t, ipfw.CollectState{
+	require.Equal(t, ipfw.ReduceState{
 		Protos: []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 	}, state)
 
-	state = ipfw.CollectState{}
+	state = ipfw.ReduceState{}
 	_, err = ipfw.NewParser("add allow ip x").Next(&state)
 	require.NotNil(t, err)
-	require.Equal(t, ipfw.CollectState{
+	require.Equal(t, ipfw.ReduceState{
 		IPProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
 	}, state)
 }
@@ -703,8 +703,8 @@ func passAnyToAny(line int, text string) ipfw.Record {
 }
 
 // anyToAnyState is the state of a `VERSION from any to any` body.
-func anyToAnyState(version ipfw.ProtoIP) ipfw.CollectState {
-	return ipfw.CollectState{
+func anyToAnyState(version ipfw.ProtoIP) ipfw.ReduceState {
+	return ipfw.ReduceState{
 		IPProtos:     []ipfw.ProtoIPMatch{{Proto: version}},
 		Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
 		Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
@@ -714,7 +714,7 @@ func anyToAnyState(version ipfw.ProtoIP) ipfw.CollectState {
 // verifies the simplest complete rule end to end: the record and every
 // token of the body in the state.
 func Test_Parser_Next_AnyToAny(t *testing.T) {
-	var state ipfw.CollectState
+	var state ipfw.ReduceState
 	rec, err := ipfw.NewParser("add pass ip from any to any\n").Next(&state)
 	require.Nil(t, err)
 	require.Equal(t, passAnyToAny(1, "add pass ip from any to any"), *rec)
@@ -724,7 +724,7 @@ func Test_Parser_Next_AnyToAny(t *testing.T) {
 // verifies that me and me6 reach the state as targets without text, the
 // whole token telling me6 from me.
 func Test_Parser_Next_MeToMe6(t *testing.T) {
-	var state ipfw.CollectState
+	var state ipfw.ReduceState
 	rec, err := ipfw.NewParser("add pass ip from me to me6\n").Next(&state)
 	require.Nil(t, err)
 	require.Equal(t, ipfw.Record{
@@ -733,7 +733,7 @@ func Test_Parser_Next_MeToMe6(t *testing.T) {
 		Kind:        ipfw.RecordInstruction,
 		Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
 	}, *rec)
-	require.Equal(t, ipfw.CollectState{
+	require.Equal(t, ipfw.ReduceState{
 		IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
 		Sources:      []ipfw.Target{{Kind: ipfw.TargetMe}},
 		Destinations: []ipfw.Target{{Kind: ipfw.TargetMe6}},
@@ -742,7 +742,7 @@ func Test_Parser_Next_MeToMe6(t *testing.T) {
 
 // verifies that IPv4 network text reaches the state as is on both sides.
 func Test_Parser_Next_Network4(t *testing.T) {
-	var state ipfw.CollectState
+	var state ipfw.ReduceState
 	rec, err := ipfw.NewParser("add pass ip from 192.0.2.0/24 to 203.0.113.1\n").Next(&state)
 	require.Nil(t, err)
 	require.Equal(t, ipfw.Record{
@@ -751,7 +751,7 @@ func Test_Parser_Next_Network4(t *testing.T) {
 		Kind:        ipfw.RecordInstruction,
 		Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
 	}, *rec)
-	require.Equal(t, ipfw.CollectState{
+	require.Equal(t, ipfw.ReduceState{
 		IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
 		Sources:      []ipfw.Target{{Kind: ipfw.TargetNetwork4, Text: "192.0.2.0/24"}},
 		Destinations: []ipfw.Target{{Kind: ipfw.TargetNetwork4, Text: "203.0.113.1"}},
@@ -760,7 +760,7 @@ func Test_Parser_Next_Network4(t *testing.T) {
 
 // verifies that IPv6 network text reaches the state as is on both sides.
 func Test_Parser_Next_Network6(t *testing.T) {
-	var state ipfw.CollectState
+	var state ipfw.ReduceState
 	rec, err := ipfw.NewParser("add pass ip6 from 2001:db8::/32 to ::1\n").Next(&state)
 	require.Nil(t, err)
 	require.Equal(t, ipfw.Record{
@@ -769,7 +769,7 @@ func Test_Parser_Next_Network6(t *testing.T) {
 		Kind:        ipfw.RecordInstruction,
 		Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
 	}, *rec)
-	require.Equal(t, ipfw.CollectState{
+	require.Equal(t, ipfw.ReduceState{
 		IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPv6}},
 		Sources:      []ipfw.Target{{Kind: ipfw.TargetNetwork6, Text: "2001:db8::/32"}},
 		Destinations: []ipfw.Target{{Kind: ipfw.TargetNetwork6, Text: "::1"}},
@@ -779,7 +779,7 @@ func Test_Parser_Next_Network6(t *testing.T) {
 // verifies that a colon makes text with dots IPv6, so an IPv4-mapped
 // address is not mistaken for the IPv4 text it ends with.
 func Test_Parser_Next_Network6MappedIPv4(t *testing.T) {
-	var state ipfw.CollectState
+	var state ipfw.ReduceState
 	rec, err := ipfw.NewParser("add pass ip from ::ffff:192.0.2.1 to 192.0.2.1\n").Next(&state)
 	require.Nil(t, err)
 	require.Equal(t, ipfw.Record{
@@ -788,7 +788,7 @@ func Test_Parser_Next_Network6MappedIPv4(t *testing.T) {
 		Kind:        ipfw.RecordInstruction,
 		Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
 	}, *rec)
-	require.Equal(t, ipfw.CollectState{
+	require.Equal(t, ipfw.ReduceState{
 		IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
 		Sources:      []ipfw.Target{{Kind: ipfw.TargetNetwork6, Text: "::ffff:192.0.2.1"}},
 		Destinations: []ipfw.Target{{Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"}},
@@ -798,7 +798,7 @@ func Test_Parser_Next_Network6MappedIPv4(t *testing.T) {
 // verifies that a plain and a quoted hostname reach the state by name,
 // the quotes stripped.
 func Test_Parser_Next_Hostname(t *testing.T) {
-	var state ipfw.CollectState
+	var state ipfw.ReduceState
 	rec, err := ipfw.NewParser(
 		"add allow tcp from { host.example.com } to `node-1.example.net'\n",
 	).Next(&state)
@@ -809,7 +809,7 @@ func Test_Parser_Next_Hostname(t *testing.T) {
 		Kind:        ipfw.RecordInstruction,
 		Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
 	}, *rec)
-	require.Equal(t, ipfw.CollectState{
+	require.Equal(t, ipfw.ReduceState{
 		Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 		Sources:      []ipfw.Target{{Kind: ipfw.TargetHostname, Text: "host.example.com"}},
 		Destinations: []ipfw.Target{{Kind: ipfw.TargetHostname, Text: "node-1.example.net"}},
@@ -818,7 +818,7 @@ func Test_Parser_Next_Hostname(t *testing.T) {
 
 // verifies that table targets reach the state by name on both sides.
 func Test_Parser_Next_Table(t *testing.T) {
-	var state ipfw.CollectState
+	var state ipfw.ReduceState
 	rec, err := ipfw.NewParser("add allow tcp from { table(_SRV_) } to table(_DST_)\n").Next(&state)
 	require.Nil(t, err)
 	require.Equal(t, ipfw.Record{
@@ -827,7 +827,7 @@ func Test_Parser_Next_Table(t *testing.T) {
 		Kind:        ipfw.RecordInstruction,
 		Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
 	}, *rec)
-	require.Equal(t, ipfw.CollectState{
+	require.Equal(t, ipfw.ReduceState{
 		Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 		Sources:      []ipfw.Target{{Kind: ipfw.TargetTable, Text: "_SRV_"}},
 		Destinations: []ipfw.Target{{Kind: ipfw.TargetTable, Text: "_DST_"}},
@@ -840,12 +840,12 @@ func Test_Parser_Next_TargetGroups(t *testing.T) {
 	cases := []struct {
 		name  string
 		input string
-		state ipfw.CollectState
+		state ipfw.ReduceState
 	}{
 		{
 			name:  "protocol and source groups",
 			input: "add pass { tcp or udp } from { 192.0.2.0/24 or ::1 } to any\n",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				Protos: []ipfw.ProtoMatch{
 					{Proto: ipfw.Proto{Name: "tcp"}},
 					{Proto: ipfw.Proto{Name: "udp"}},
@@ -860,7 +860,7 @@ func Test_Parser_Next_TargetGroups(t *testing.T) {
 		{
 			name:  "negated source and negation inside the destination group",
 			input: "add pass ip from not 192.0.2.0/24 to { me or not me6 }\n",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				IPProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
 				Sources: []ipfw.Target{
 					{Neg: true, Kind: ipfw.TargetNetwork4, Text: "192.0.2.0/24"},
@@ -874,7 +874,7 @@ func Test_Parser_Next_TargetGroups(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var state ipfw.CollectState
+			var state ipfw.ReduceState
 			rec, err := ipfw.NewParser(tc.input).Next(&state)
 			require.Nil(t, err)
 			require.Equal(t, ipfw.Record{
@@ -899,12 +899,12 @@ func Test_Parser_Next_Ports(t *testing.T) {
 		name    string
 		input   string
 		comment string
-		state   ipfw.CollectState
+		state   ipfw.ReduceState
 	}{
 		{
 			name:  "source port starting with to",
 			input: "add pass ip from any topx to any\n",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
 				Sources:      anyToAny,
 				Destinations: anyToAny,
@@ -914,7 +914,7 @@ func Test_Parser_Next_Ports(t *testing.T) {
 		{
 			name:  "source port starting with not",
 			input: "add pass ip from any notify to any\n",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
 				Sources:      anyToAny,
 				Destinations: anyToAny,
@@ -924,7 +924,7 @@ func Test_Parser_Next_Ports(t *testing.T) {
 		{
 			name:  "numbers on both sides",
 			input: "add allow tcp from any 22 to any 80\n",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 				Sources:          anyToAny,
 				Destinations:     anyToAny,
@@ -935,7 +935,7 @@ func Test_Parser_Next_Ports(t *testing.T) {
 		{
 			name:  "destination service",
 			input: "add allow tcp from any to any domain\n",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 				Sources:          anyToAny,
 				Destinations:     anyToAny,
@@ -945,7 +945,7 @@ func Test_Parser_Next_Ports(t *testing.T) {
 		{
 			name:  "source service",
 			input: "add allow tcp from any http to any\n",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 				Sources:      anyToAny,
 				Destinations: anyToAny,
@@ -955,7 +955,7 @@ func Test_Parser_Next_Ports(t *testing.T) {
 		{
 			name:  "source port range and destination service",
 			input: "add allow tcp from 2001:db8::/32 1024-65535 to any domain\n",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 				Sources:          []ipfw.Target{{Kind: ipfw.TargetNetwork6, Text: "2001:db8::/32"}},
 				Destinations:     anyToAny,
@@ -966,7 +966,7 @@ func Test_Parser_Next_Ports(t *testing.T) {
 		{
 			name:  "whole range on the destination",
 			input: "add allow tcp from any to any 1-65535\n",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 				Sources:          anyToAny,
 				Destinations:     anyToAny,
@@ -976,7 +976,7 @@ func Test_Parser_Next_Ports(t *testing.T) {
 		{
 			name:  "source port list",
 			input: "add pass tcp from any 11,22,33 to any\n",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 				Sources:      anyToAny,
 				Destinations: anyToAny,
@@ -986,7 +986,7 @@ func Test_Parser_Next_Ports(t *testing.T) {
 		{
 			name:  "destination port list",
 			input: "add pass tcp from any to any 11,22,33\n",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 				Sources:          anyToAny,
 				Destinations:     anyToAny,
@@ -996,7 +996,7 @@ func Test_Parser_Next_Ports(t *testing.T) {
 		{
 			name:  "lists on both sides",
 			input: "add pass tcp from any 11,22 to any 33,44\n",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 				Sources:          anyToAny,
 				Destinations:     anyToAny,
@@ -1007,7 +1007,7 @@ func Test_Parser_Next_Ports(t *testing.T) {
 		{
 			name:  "destination list with a range",
 			input: "add pass tcp from any to any 22,80-90,443\n",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 				Sources:      anyToAny,
 				Destinations: anyToAny,
@@ -1021,7 +1021,7 @@ func Test_Parser_Next_Ports(t *testing.T) {
 		{
 			name:  "negated destination port list",
 			input: "add pass tcp from any to any not 11,22,33\n",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 				Sources:      anyToAny,
 				Destinations: anyToAny,
@@ -1035,7 +1035,7 @@ func Test_Parser_Next_Ports(t *testing.T) {
 		{
 			name:  "negated source port",
 			input: "add pass tcp from any not 22 to any\n",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 				Sources:      anyToAny,
 				Destinations: anyToAny,
@@ -1045,7 +1045,7 @@ func Test_Parser_Next_Ports(t *testing.T) {
 		{
 			name:  "negated destination list with a range",
 			input: "add pass tcp from any to any not 22-23,80\n",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 				Sources:      anyToAny,
 				Destinations: anyToAny,
@@ -1058,7 +1058,7 @@ func Test_Parser_Next_Ports(t *testing.T) {
 		{
 			name:  "escaped service name",
 			input: "add pass tcp from any ftp\\-data to any\n",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 				Sources:      anyToAny,
 				Destinations: anyToAny,
@@ -1069,7 +1069,7 @@ func Test_Parser_Next_Ports(t *testing.T) {
 			name:    "destination port before an inline comment",
 			input:   "add allow tcp from any to any 80 // web\n",
 			comment: " web",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 				Sources:          anyToAny,
 				Destinations:     anyToAny,
@@ -1079,7 +1079,7 @@ func Test_Parser_Next_Ports(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var state ipfw.CollectState
+			var state ipfw.ReduceState
 			rec, err := ipfw.NewParser(tc.input).Next(&state)
 			require.Nil(t, err)
 			require.Equal(t, ipfw.Record{
@@ -1102,7 +1102,7 @@ func Test_Parser_Next_Ports(t *testing.T) {
 // A source list fails the line at the missing port, a destination list is
 // abandoned and its first element is then an unknown option.
 func Test_Parser_Next_PortListTrailingComma(t *testing.T) {
-	var state ipfw.CollectState
+	var state ipfw.ReduceState
 	_, err := ipfw.NewParser("add pass tcp from any 22, to any\n").Next(&state)
 	require.NotNil(t, err)
 	require.Equal(t, ipfw.ParseError{
@@ -1111,13 +1111,13 @@ func Test_Parser_Next_PortListTrailingComma(t *testing.T) {
 		Column: 25,
 		Text:   "add pass tcp from any 22, to any",
 	}, *err)
-	require.Equal(t, ipfw.CollectState{
+	require.Equal(t, ipfw.ReduceState{
 		Protos:      []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 		Sources:     []ipfw.Target{{Kind: ipfw.TargetAny}},
 		SourcePorts: []ipfw.PortMatch{portNumber(22)},
 	}, state)
 
-	state = ipfw.CollectState{}
+	state = ipfw.ReduceState{}
 	_, err = ipfw.NewParser("add pass tcp from any to any 22,\n").Next(&state)
 	require.NotNil(t, err)
 	require.Equal(t, ipfw.ParseError{
@@ -1126,7 +1126,7 @@ func Test_Parser_Next_PortListTrailingComma(t *testing.T) {
 		Column: 29,
 		Text:   "add pass tcp from any to any 22,",
 	}, *err)
-	require.Equal(t, ipfw.CollectState{
+	require.Equal(t, ipfw.ReduceState{
 		Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 		Sources:          []ipfw.Target{{Kind: ipfw.TargetAny}},
 		Destinations:     []ipfw.Target{{Kind: ipfw.TargetAny}},
@@ -1141,7 +1141,7 @@ func Test_Parser_Next_Log(t *testing.T) {
 		name        string
 		input       string
 		instruction ipfw.Instruction
-		state       ipfw.CollectState
+		state       ipfw.ReduceState
 	}{
 		{
 			name:  "log",
@@ -1150,7 +1150,7 @@ func Test_Parser_Next_Log(t *testing.T) {
 				Action: ipfw.Action{Kind: ipfw.ActionDeny},
 				Log:    ipfw.Log{Enabled: true},
 			},
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
 				Sources:      []ipfw.Target{{Kind: ipfw.TargetNetwork4, Text: "192.0.2.0/24"}},
 				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
@@ -1163,7 +1163,7 @@ func Test_Parser_Next_Log(t *testing.T) {
 				Action: ipfw.Action{Kind: ipfw.ActionDeny},
 				Log:    ipfw.Log{Enabled: true, HasAmount: true, Amount: 500},
 			},
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
 				Sources:      []ipfw.Target{{Kind: ipfw.TargetNetwork4, Text: "192.0.2.0/24"}},
 				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
@@ -1198,7 +1198,7 @@ func Test_Parser_Next_Log(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var state ipfw.CollectState
+			var state ipfw.ReduceState
 			rec, err := ipfw.NewParser(tc.input).Next(&state)
 			require.Nil(t, err)
 			require.Equal(t, ipfw.Record{
@@ -1219,7 +1219,7 @@ func Test_Parser_Next_Tag(t *testing.T) {
 		name        string
 		input       string
 		instruction ipfw.Instruction
-		state       ipfw.CollectState
+		state       ipfw.ReduceState
 	}{
 		{
 			name:  "tag",
@@ -1269,7 +1269,7 @@ func Test_Parser_Next_Tag(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var state ipfw.CollectState
+			var state ipfw.ReduceState
 			rec, err := ipfw.NewParser(tc.input).Next(&state)
 			require.Nil(t, err)
 			require.Equal(t, ipfw.Record{
@@ -1450,12 +1450,12 @@ func Test_Parser_Next_Options(t *testing.T) {
 		name    string
 		input   string
 		comment string
-		state   ipfw.CollectState
+		state   ipfw.ReduceState
 	}{
 		{
 			name:  "established",
 			input: "add allow tcp from any to any established\n",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				Protos:       tcp,
 				Sources:      anyToAny,
 				Destinations: anyToAny,
@@ -1465,7 +1465,7 @@ func Test_Parser_Next_Options(t *testing.T) {
 		{
 			name:  "destination port then option",
 			input: "add allow tcp from any to any 22 established\n",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				Protos:           tcp,
 				Sources:          anyToAny,
 				Destinations:     anyToAny,
@@ -1476,7 +1476,7 @@ func Test_Parser_Next_Options(t *testing.T) {
 		{
 			name:  "source port then option",
 			input: "add allow tcp from any 22 to any established\n",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				Protos:       tcp,
 				Sources:      anyToAny,
 				Destinations: anyToAny,
@@ -1487,7 +1487,7 @@ func Test_Parser_Next_Options(t *testing.T) {
 		{
 			name:  "token that is not an option is a port",
 			input: "add allow tcp from any to any foo\n",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				Protos:           tcp,
 				Sources:          anyToAny,
 				Destinations:     anyToAny,
@@ -1498,7 +1498,7 @@ func Test_Parser_Next_Options(t *testing.T) {
 			name:    "option before an inline comment",
 			input:   "add allow tcp from any to any established // c\n",
 			comment: " c",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				Protos:       tcp,
 				Sources:      anyToAny,
 				Destinations: anyToAny,
@@ -1508,7 +1508,7 @@ func Test_Parser_Next_Options(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var state ipfw.CollectState
+			var state ipfw.ReduceState
 			rec, err := ipfw.NewParser(tc.input).Next(&state)
 			require.Nil(t, err)
 			require.Equal(t, ipfw.Record{
@@ -1620,7 +1620,7 @@ func Test_Parser_Next_StateError(t *testing.T) {
 func Test_Parser_Next_OptionsNoAllocs(t *testing.T) {
 	src := "add pass tcp from any to any 22 established\nadd pass tcp from any to any established\n"
 	parser := ipfw.NewParser(src)
-	var state ipfw.CollectState
+	var state ipfw.ReduceState
 	for _, err := range parser.All(&state) {
 		require.Nil(t, err)
 	}
@@ -1644,12 +1644,12 @@ func Test_Parser_Next_CustomTarget(t *testing.T) {
 	cases := []struct {
 		name  string
 		input string
-		state ipfw.CollectState
+		state ipfw.ReduceState
 	}{
 		{
 			name:  "inet keyword of the extra syntax",
 			input: "add allow tcp from any to inet\n",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
 				Destinations: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "inet"}},
@@ -1658,7 +1658,7 @@ func Test_Parser_Next_CustomTarget(t *testing.T) {
 		{
 			name:  "macro name in a braced group",
 			input: "add allow tcp from { host.example.com } to { _TEST_SERVERS_ }\n",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 				Sources:      []ipfw.Target{{Kind: ipfw.TargetHostname, Text: "host.example.com"}},
 				Destinations: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "_TEST_SERVERS_"}},
@@ -1667,7 +1667,7 @@ func Test_Parser_Next_CustomTarget(t *testing.T) {
 		{
 			name:  "keyword with a suffix",
 			input: "add allow ip from mex to any\n",
-			state: ipfw.CollectState{
+			state: ipfw.ReduceState{
 				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
 				Sources:      []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "mex"}},
 				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
@@ -1676,7 +1676,7 @@ func Test_Parser_Next_CustomTarget(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var state ipfw.CollectState
+			var state ipfw.ReduceState
 			rec, err := ipfw.NewParser(tc.input).Next(&state)
 			require.Nil(t, err)
 			require.Equal(t, ipfw.Record{
@@ -1693,7 +1693,7 @@ func Test_Parser_Next_CustomTarget(t *testing.T) {
 // verifies that the parser does not validate a network: text of the right
 // shape is handed to the state, which is where it gets rejected.
 func Test_Parser_Next_Network4Unvalidated(t *testing.T) {
-	var state ipfw.CollectState
+	var state ipfw.ReduceState
 	rec, err := ipfw.NewParser("add allow ip4 from 300.1.1.1 to any\n").Next(&state)
 	require.Nil(t, err)
 	require.Equal(t, ipfw.Record{
@@ -1702,7 +1702,7 @@ func Test_Parser_Next_Network4Unvalidated(t *testing.T) {
 		Kind:        ipfw.RecordInstruction,
 		Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
 	}, *rec)
-	require.Equal(t, ipfw.CollectState{
+	require.Equal(t, ipfw.ReduceState{
 		IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPv4}},
 		Sources:      []ipfw.Target{{Kind: ipfw.TargetNetwork4, Text: "300.1.1.1"}},
 		Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
@@ -1712,7 +1712,7 @@ func Test_Parser_Next_Network4Unvalidated(t *testing.T) {
 // verifies that a comma list of networks is not supported: the first
 // network is emitted and the line fails at the comma.
 func Test_Parser_Next_Network4CommaList(t *testing.T) {
-	var state ipfw.CollectState
+	var state ipfw.ReduceState
 	_, err := ipfw.NewParser("add allow ip from 192.0.2.1,203.0.113.1 to any").Next(&state)
 	require.NotNil(t, err)
 	require.Equal(t, ipfw.ParseError{
@@ -1721,7 +1721,7 @@ func Test_Parser_Next_Network4CommaList(t *testing.T) {
 		Column: 27,
 		Text:   "add allow ip from 192.0.2.1,203.0.113.1 to any",
 	}, *err)
-	require.Equal(t, ipfw.CollectState{
+	require.Equal(t, ipfw.ReduceState{
 		IPProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
 		Sources:  []ipfw.Target{{Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"}},
 	}, state)
@@ -1730,11 +1730,11 @@ func Test_Parser_Next_Network4CommaList(t *testing.T) {
 // verifies that a braced single target and trailing whitespace parse, the
 // text being trimmed.
 func Test_Parser_Next_TrailingWhitespace(t *testing.T) {
-	var state ipfw.CollectState
+	var state ipfw.ReduceState
 	rec, err := ipfw.NewParser("add allow tcp from any to { any } \n").Next(&state)
 	require.Nil(t, err)
 	require.Equal(t, passAnyToAny(1, "add allow tcp from any to { any }"), *rec)
-	require.Equal(t, ipfw.CollectState{
+	require.Equal(t, ipfw.ReduceState{
 		Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 		Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
 		Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
@@ -1760,7 +1760,7 @@ func Test_Parser_Next_InlineComment(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var state ipfw.CollectState
+			var state ipfw.ReduceState
 			rec, err := ipfw.NewParser(tc.input).Next(&state)
 			require.Nil(t, err)
 			expected := passAnyToAny(1, strings.TrimSpace(tc.input))
@@ -1782,7 +1782,7 @@ func Test_Parser_Next_InlineComment(t *testing.T) {
 func Test_Parser_Body_NoAllocs(t *testing.T) {
 	src := "add pass ip from any to any\n"
 	parser := ipfw.NewParser(src)
-	var state ipfw.CollectState
+	var state ipfw.ReduceState
 	_, _ = parser.Next(&state)
 	ok := true
 	allocs := testing.AllocsPerRun(100, func() {
@@ -1817,7 +1817,7 @@ var (
 func benchmarkNext(b *testing.B, line string) {
 	b.Helper()
 	parser := ipfw.NewParser(line)
-	var state ipfw.CollectState
+	var state ipfw.ReduceState
 	_, _ = parser.Next(&state)
 	b.SetBytes(int64(len(line)))
 	b.ReportAllocs()

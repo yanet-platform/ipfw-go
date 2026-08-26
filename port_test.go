@@ -276,17 +276,17 @@ func Test_ParsePorts_Table(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var state ipfw.CollectState
+			var state ipfw.ReduceState
 			n, err := ipfw.ParseSourcePorts(tc.input, &state)
 			require.Equal(t, tc.err, err)
 			require.Equal(t, tc.n, n)
-			require.Equal(t, ipfw.CollectState{SourcePorts: tc.ports}, state)
+			require.Equal(t, ipfw.ReduceState{SourcePorts: tc.ports}, state)
 
-			state = ipfw.CollectState{}
+			state = ipfw.ReduceState{}
 			n, err = ipfw.ParseDestinationPorts(tc.input, &state)
 			require.Equal(t, tc.err, err)
 			require.Equal(t, tc.n, n)
-			require.Equal(t, ipfw.CollectState{DestinationPorts: tc.ports}, state)
+			require.Equal(t, ipfw.ReduceState{DestinationPorts: tc.ports}, state)
 		})
 	}
 }
@@ -312,11 +312,11 @@ func Test_ParsePorts_NumberRoundTrip(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		port := rapid.Uint16().Draw(t, "port")
 		input := strconv.FormatUint(uint64(port), 10)
-		var state ipfw.CollectState
+		var state ipfw.ReduceState
 		n, err := ipfw.ParseSourcePorts(input, &state)
 		require.NoError(t, err)
 		require.Equal(t, len(input), n)
-		require.Equal(t, ipfw.CollectState{SourcePorts: []ipfw.PortMatch{portNumber(port)}}, state)
+		require.Equal(t, ipfw.ReduceState{SourcePorts: []ipfw.PortMatch{portNumber(port)}}, state)
 	})
 }
 
@@ -326,18 +326,18 @@ func Test_ParsePorts_OverflowIsName(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		value := rapid.Uint64Range(math.MaxUint16+1, math.MaxUint64).Draw(t, "value")
 		input := strconv.FormatUint(value, 10)
-		var state ipfw.CollectState
+		var state ipfw.ReduceState
 		n, err := ipfw.ParseSourcePorts(input, &state)
 		require.NoError(t, err)
 		require.Equal(t, len(input), n)
-		require.Equal(t, ipfw.CollectState{SourcePorts: []ipfw.PortMatch{portService(input)}}, state)
+		require.Equal(t, ipfw.ReduceState{SourcePorts: []ipfw.PortMatch{portService(input)}}, state)
 	})
 }
 
 // verifies that parsing a port into a warmed-up state allocates nothing.
 func Test_ParsePorts_NoAllocs(t *testing.T) {
 	input := "not 22,1024-65535,ftp\\-data to any"
-	var state ipfw.CollectState
+	var state ipfw.ReduceState
 	_, _ = ipfw.ParseSourcePorts(input, &state)
 	ok := true
 	allocs := testing.AllocsPerRun(100, func() {

@@ -105,11 +105,11 @@ func Test_ParseOptions_Table(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var state ipfw.CollectState
+			var state ipfw.ReduceState
 			n, err := ipfw.ParseOptions(tc.input, &state, nil)
 			require.Equal(t, tc.err, err)
 			require.Equal(t, tc.n, n)
-			require.Equal(t, ipfw.CollectState{Options: tc.options}, state)
+			require.Equal(t, ipfw.ReduceState{Options: tc.options}, state)
 		})
 	}
 }
@@ -127,7 +127,7 @@ func Test_ParseOptions_StateError(t *testing.T) {
 // nothing.
 func Test_ParseOptions_NoAllocs(t *testing.T) {
 	input := "established established\n"
-	var state ipfw.CollectState
+	var state ipfw.ReduceState
 	_, _ = ipfw.ParseOptions(input, &state, nil)
 	ok := true
 	allocs := testing.AllocsPerRun(100, func() {
