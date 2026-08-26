@@ -1,6 +1,7 @@
 package ipfw_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -899,17 +900,40 @@ func Test_Parser_Next_TrailingWhitespace(t *testing.T) {
 	}, state)
 }
 
-// verifies that an inline comment after the body is kept raw and is part
-// of the line text.
+// verifies that an inline comment after the body is the raw text after the
+// slashes, part of the line text, and that a lone slash is trailing content.
 func Test_Parser_Next_InlineComment(t *testing.T) {
-	var state ipfw.CollectState
-	input := "add pass ip from any to any // {\"id\": \"PUNCHER-123\", \"log\": true}\n"
-	rec, err := ipfw.NewParser(input).Next(&state)
-	require.Nil(t, err)
-	expected := passAnyToAny(1, "add pass ip from any to any // {\"id\": \"PUNCHER-123\", \"log\": true}")
-	expected.Instruction.InlineComment = " {\"id\": \"PUNCHER-123\", \"log\": true}"
-	require.Equal(t, expected, rec)
-	require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), state)
+	cases := []struct {
+		name    string
+		input   string
+		comment string
+	}{
+		{
+			name:    "json payload",
+			input:   "add pass ip from any to any // {\"id\": \"PUNCHER-123\", \"log\": true}\n",
+			comment: " {\"id\": \"PUNCHER-123\", \"log\": true}",
+		},
+		{name: "empty comment", input: "add pass ip from any to any //", comment: ""},
+		{name: "tab before the slashes", input: "add pass ip from any to any\t//x\n", comment: "x"},
+		{name: "no comment", input: "add pass ip from any to any\n", comment: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var state ipfw.CollectState
+			rec, err := ipfw.NewParser(tc.input).Next(&state)
+			require.Nil(t, err)
+			expected := passAnyToAny(1, strings.TrimSpace(tc.input))
+			expected.Instruction.InlineComment = tc.comment
+			require.Equal(t, expected, rec)
+			require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), state)
+		})
+	}
+	nextError(t, ipfw.NewParser("add pass ip from any to any / x"), ipfw.ParseError{
+		Kind:   ipfw.ErrExpectedNewlineOrEOF,
+		Line:   1,
+		Column: 28,
+		Text:   "add pass ip from any to any / x",
+	})
 }
 
 // verifies that parsing a complete rule into a warmed-up state allocates
