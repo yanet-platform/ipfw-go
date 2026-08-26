@@ -1,5 +1,7 @@
 package ipfw
 
+import "strings"
+
 // TargetKind classifies a source or destination token by its shape.
 type TargetKind uint8
 
@@ -104,10 +106,28 @@ func classifyTarget(token string) (Target, ErrorKind) {
 	case "me":
 		return Target{Kind: TargetMe}, 0
 	}
+	if isNetwork6Text(token) {
+		return Target{Kind: TargetNetwork6, Text: token}, 0
+	}
 	if isNetwork4Text(token) {
 		return Target{Kind: TargetNetwork4, Text: token}, 0
 	}
 	return Target{}, ErrExpectedTarget
+}
+
+// isNetwork6Text reports whether the token is made of hex digits, colons,
+// dots and slashes with at least one colon, the shape of IPv6 network text.
+//
+// The colon tells it from IPv4 text, so it is checked first: an IPv4-mapped
+// address such as `::ffff:192.0.2.1` has both shapes.
+func isNetwork6Text(token string) bool {
+	_, rest := takeWhile(token, isNetwork6Byte)
+	return rest == "" && strings.IndexByte(token, ':') >= 0
+}
+
+func isNetwork6Byte(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F' ||
+		c == ':' || c == '.' || c == '/'
 }
 
 // isNetwork4Text reports whether the token is made of digits, dots and
