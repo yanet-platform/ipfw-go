@@ -186,6 +186,18 @@ func Test_ParseOptions_Table(t *testing.T) {
 			options: []ipfw.Opt{{Kind: ipfw.OptFrag}},
 		},
 		{
+			name:    "diverted",
+			input:   "diverted",
+			n:       8,
+			options: []ipfw.Opt{{Kind: ipfw.OptDiverted}},
+		},
+		{
+			name:    "negated diverted",
+			input:   "not diverted",
+			n:       12,
+			options: []ipfw.Opt{{Neg: true, Kind: ipfw.OptDiverted}},
+		},
+		{
 			name:    "in with a suffix is in",
 			input:   "inet",
 			n:       2,
