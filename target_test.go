@@ -23,12 +23,42 @@ func Test_ParseTargets_Table(t *testing.T) {
 		err   error
 		state ipfw.CollectState
 	}{
-		{name: "any", input: "any to", n: 3, state: ipfw.CollectState{Sources: []ipfw.Target{{Kind: ipfw.TargetAny}}}},
-		{name: "any at end of input", input: "any", n: 3, state: ipfw.CollectState{Sources: []ipfw.Target{{Kind: ipfw.TargetAny}}}},
-		{name: "any before a newline", input: "any\n", n: 3, state: ipfw.CollectState{Sources: []ipfw.Target{{Kind: ipfw.TargetAny}}}},
-		{name: "any before a closing brace", input: "any}", n: 3, state: ipfw.CollectState{Sources: []ipfw.Target{{Kind: ipfw.TargetAny}}}},
-		{name: "any before a comma", input: "any,x", n: 3, state: ipfw.CollectState{Sources: []ipfw.Target{{Kind: ipfw.TargetAny}}}},
-		{name: "negated any", input: "not any x", n: 7, state: ipfw.CollectState{Sources: []ipfw.Target{{Neg: true, Kind: ipfw.TargetAny}}}},
+		{
+			name:  "any",
+			input: "any to",
+			n:     3,
+			state: ipfw.CollectState{Sources: []ipfw.Target{{Kind: ipfw.TargetAny}}},
+		},
+		{
+			name:  "any at end of input",
+			input: "any",
+			n:     3,
+			state: ipfw.CollectState{Sources: []ipfw.Target{{Kind: ipfw.TargetAny}}},
+		},
+		{
+			name:  "any before a newline",
+			input: "any\n",
+			n:     3,
+			state: ipfw.CollectState{Sources: []ipfw.Target{{Kind: ipfw.TargetAny}}},
+		},
+		{
+			name:  "any before a closing brace",
+			input: "any}",
+			n:     3,
+			state: ipfw.CollectState{Sources: []ipfw.Target{{Kind: ipfw.TargetAny}}},
+		},
+		{
+			name:  "any before a comma",
+			input: "any,x",
+			n:     3,
+			state: ipfw.CollectState{Sources: []ipfw.Target{{Kind: ipfw.TargetAny}}},
+		},
+		{
+			name:  "negated any",
+			input: "not any x",
+			n:     7,
+			state: ipfw.CollectState{Sources: []ipfw.Target{{Neg: true, Kind: ipfw.TargetAny}}},
+		},
 		{
 			name:  "me",
 			input: "me to any",
@@ -92,7 +122,9 @@ func Test_ParseTargets_Table(t *testing.T) {
 			input: "192.0.2.0/255.255.255.0 to any",
 			n:     23,
 			state: ipfw.CollectState{
-				Sources: []ipfw.Target{{Kind: ipfw.TargetNetwork4, Text: "192.0.2.0/255.255.255.0"}},
+				Sources: []ipfw.Target{
+					{Kind: ipfw.TargetNetwork4, Text: "192.0.2.0/255.255.255.0"},
+				},
 			},
 		},
 		{
@@ -116,7 +148,9 @@ func Test_ParseTargets_Table(t *testing.T) {
 			input: "not 192.0.2.0/24 x",
 			n:     16,
 			state: ipfw.CollectState{
-				Sources: []ipfw.Target{{Neg: true, Kind: ipfw.TargetNetwork4, Text: "192.0.2.0/24"}},
+				Sources: []ipfw.Target{
+					{Neg: true, Kind: ipfw.TargetNetwork4, Text: "192.0.2.0/24"},
+				},
 			},
 		},
 		{
@@ -199,7 +233,9 @@ func Test_ParseTargets_Table(t *testing.T) {
 			input: "not 2001:db8::/32 x",
 			n:     17,
 			state: ipfw.CollectState{
-				Sources: []ipfw.Target{{Neg: true, Kind: ipfw.TargetNetwork6, Text: "2001:db8::/32"}},
+				Sources: []ipfw.Target{
+					{Neg: true, Kind: ipfw.TargetNetwork6, Text: "2001:db8::/32"},
+				},
 			},
 		},
 		{
@@ -255,7 +291,9 @@ func Test_ParseTargets_Table(t *testing.T) {
 			input: "not host.example.com x",
 			n:     20,
 			state: ipfw.CollectState{
-				Sources: []ipfw.Target{{Neg: true, Kind: ipfw.TargetHostname, Text: "host.example.com"}},
+				Sources: []ipfw.Target{
+					{Neg: true, Kind: ipfw.TargetHostname, Text: "host.example.com"},
+				},
 			},
 		},
 		{
@@ -348,7 +386,12 @@ func Test_ParseTargets_Table(t *testing.T) {
 				Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "table(t"}},
 			},
 		},
-		{name: "braced single", input: "{ any } x", n: 7, state: ipfw.CollectState{Sources: []ipfw.Target{{Kind: ipfw.TargetAny}}}},
+		{
+			name:  "braced single",
+			input: "{ any } x",
+			n:     7,
+			state: ipfw.CollectState{Sources: []ipfw.Target{{Kind: ipfw.TargetAny}}},
+		},
 		{
 			name:  "macro name is custom",
 			input: "_VIRTUAL_SERVERS_ to any",
@@ -415,7 +458,9 @@ func Test_ParseTargets_Table(t *testing.T) {
 			name:  "not glued to a keyword is custom",
 			input: "notany x",
 			n:     6,
-			state: ipfw.CollectState{Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "notany"}}},
+			state: ipfw.CollectState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "notany"}},
+			},
 		},
 		{
 			name:  "missing or keeps the first element",

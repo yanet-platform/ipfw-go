@@ -11,7 +11,12 @@ import (
 // bodyError is the failure of a line whose body is `_`, a token that is
 // never a protocol: reaching it proves the header before it parsed.
 func bodyError(text string, column int) ipfw.ParseError {
-	return ipfw.ParseError{Kind: ipfw.ErrExpectedEitherIPOrProto, Line: 1, Column: column, Text: text}
+	return ipfw.ParseError{
+		Kind:   ipfw.ErrExpectedEitherIPOrProto,
+		Line:   1,
+		Column: column,
+		Text:   text,
+	}
 }
 
 // verifies that every alias of the pass action is recognized by prefix and
@@ -26,21 +31,40 @@ func Test_Parser_Next_ActionPass(t *testing.T) {
 		{name: "pass", input: "add pass _", expected: bodyError("add pass _", 9)},
 		{name: "accept", input: "add accept _", expected: bodyError("add accept _", 11)},
 		{name: "permit", input: "add permit _", expected: bodyError("add permit _", 11)},
-		{name: "numbered rule", input: "add 100 permit _", expected: bodyError("add 100 permit _", 15)},
 		{
-			name:     "prefix match then whitespace expected",
-			input:    "add passthru x",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 8, Text: "add passthru x"},
+			name:     "numbered rule",
+			input:    "add 100 permit _",
+			expected: bodyError("add 100 permit _", 15),
 		},
 		{
-			name:     "truncated keyword",
-			input:    "add pas ip",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedAction, Line: 1, Column: 4, Text: "add pas ip"},
+			name:  "prefix match then whitespace expected",
+			input: "add passthru x",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 8,
+				Text:   "add passthru x",
+			},
 		},
 		{
-			name:     "no whitespace after the action",
-			input:    "add allow\n",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 9, Text: "add allow"},
+			name:  "truncated keyword",
+			input: "add pas ip",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedAction,
+				Line:   1,
+				Column: 4,
+				Text:   "add pas ip",
+			},
+		},
+		{
+			name:  "no whitespace after the action",
+			input: "add allow\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 9,
+				Text:   "add allow",
+			},
 		},
 	}
 	for _, tc := range cases {
@@ -64,14 +88,24 @@ func Test_Parser_Next_ActionDeny(t *testing.T) {
 		{name: "deny", input: "add deny _", expected: bodyError("add deny _", 9)},
 		{name: "drop", input: "add drop _", expected: bodyError("add drop _", 9)},
 		{
-			name:     "prefix match then whitespace expected",
-			input:    "add denyall _",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 8, Text: "add denyall _"},
+			name:  "prefix match then whitespace expected",
+			input: "add denyall _",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 8,
+				Text:   "add denyall _",
+			},
 		},
 		{
-			name:     "denied is not deny",
-			input:    "add denied _",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedAction, Line: 1, Column: 4, Text: "add denied _"},
+			name:  "denied is not deny",
+			input: "add denied _",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedAction,
+				Line:   1,
+				Column: 4,
+				Text:   "add denied _",
+			},
 		},
 	}
 	for _, tc := range cases {
@@ -106,33 +140,66 @@ func Test_Parser_Next_ActionSkipTo(t *testing.T) {
 		input    string
 		expected ipfw.ParseError
 	}{
-		{name: "label", input: "add skipto :ADMIN_RULES _", expected: bodyError("add skipto :ADMIN_RULES _", 24)},
+		{
+			name:     "label",
+			input:    "add skipto :ADMIN_RULES _",
+			expected: bodyError("add skipto :ADMIN_RULES _", 24),
+		},
 		{name: "number", input: "add skipto 1500 _", expected: bodyError("add skipto 1500 _", 16)},
-		{name: "tablearg", input: "add skipto tablearg _", expected: bodyError("add skipto tablearg _", 20)},
 		{
-			name:     "no whitespace",
-			input:    "add skipto",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 10, Text: "add skipto"},
+			name:     "tablearg",
+			input:    "add skipto tablearg _",
+			expected: bodyError("add skipto tablearg _", 20),
 		},
 		{
-			name:     "keyword glued to a word",
-			input:    "add skiptox _",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 10, Text: "add skiptox _"},
+			name:  "no whitespace",
+			input: "add skipto",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 10,
+				Text:   "add skipto",
+			},
 		},
 		{
-			name:     "unknown target",
-			input:    "add skipto x",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedSkipTo, Line: 1, Column: 11, Text: "add skipto x"},
+			name:  "keyword glued to a word",
+			input: "add skiptox _",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 10,
+				Text:   "add skiptox _",
+			},
 		},
 		{
-			name:     "label without a name",
-			input:    "add skipto :",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedToken, Line: 1, Column: 12, Text: "add skipto :"},
+			name:  "unknown target",
+			input: "add skipto x",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedSkipTo,
+				Line:   1,
+				Column: 11,
+				Text:   "add skipto x",
+			},
 		},
 		{
-			name:     "overflowing number",
-			input:    "add skipto 4294967296",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedSkipTo, Line: 1, Column: 11, Text: "add skipto 4294967296"},
+			name:  "label without a name",
+			input: "add skipto :",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedToken,
+				Line:   1,
+				Column: 12,
+				Text:   "add skipto :",
+			},
+		},
+		{
+			name:  "overflowing number",
+			input: "add skipto 4294967296",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedSkipTo,
+				Line:   1,
+				Column: 11,
+				Text:   "add skipto 4294967296",
+			},
 		},
 	}
 	for _, tc := range cases {
@@ -147,9 +214,22 @@ func Test_Parser_Next_ActionSkipTo(t *testing.T) {
 		num    uint32
 		skipTo ipfw.SkipTo
 	}{
-		{name: "label", input: "add skipto :ADMIN_RULES ip from any to any", skipTo: ipfw.SkipTo{Kind: ipfw.SkipToLabel, Label: "ADMIN_RULES"}},
-		{name: "number", input: "add 100 skipto 200 ip from any to any", num: 100, skipTo: ipfw.SkipTo{Kind: ipfw.SkipToNumber, Number: 200}},
-		{name: "tablearg", input: "add skipto tablearg ip from any to any", skipTo: ipfw.SkipTo{Kind: ipfw.SkipToTableArg}},
+		{
+			name:   "label",
+			input:  "add skipto :ADMIN_RULES ip from any to any",
+			skipTo: ipfw.SkipTo{Kind: ipfw.SkipToLabel, Label: "ADMIN_RULES"},
+		},
+		{
+			name:   "number",
+			input:  "add 100 skipto 200 ip from any to any",
+			num:    100,
+			skipTo: ipfw.SkipTo{Kind: ipfw.SkipToNumber, Number: 200},
+		},
+		{
+			name:   "tablearg",
+			input:  "add skipto tablearg ip from any to any",
+			skipTo: ipfw.SkipTo{Kind: ipfw.SkipToTableArg},
+		},
 	}
 	for _, tc := range targets {
 		t.Run(tc.name, func(t *testing.T) {
@@ -170,15 +250,26 @@ func Test_Parser_Next_ActionSkipTo(t *testing.T) {
 func Test_Parser_Next_ActionCheckState(t *testing.T) {
 	checkState := func(line int, text, flow string, num uint32) ipfw.Record {
 		return ipfw.Record{
-			Line:        line,
-			Text:        text,
-			Kind:        ipfw.RecordInstruction,
-			Instruction: ipfw.Instruction{Num: num, Action: ipfw.Action{Kind: ipfw.ActionCheckState, Flow: flow}},
+			Line: line,
+			Text: text,
+			Kind: ipfw.RecordInstruction,
+			Instruction: ipfw.Instruction{
+				Num:    num,
+				Action: ipfw.Action{Kind: ipfw.ActionCheckState, Flow: flow},
+			},
 		}
 	}
-	next(t, ipfw.NewParser("add check-state :any\n"), checkState(1, "add check-state :any", "any", 0))
+	next(
+		t,
+		ipfw.NewParser("add check-state :any\n"),
+		checkState(1, "add check-state :any", "any", 0),
+	)
 	next(t, ipfw.NewParser("add check-state"), checkState(1, "add check-state", "", 0))
-	next(t, ipfw.NewParser("add 10 check-state :x\n"), checkState(1, "add 10 check-state :x", "x", 10))
+	next(
+		t,
+		ipfw.NewParser("add 10 check-state :x\n"),
+		checkState(1, "add 10 check-state :x", "x", 10),
+	)
 
 	parser := ipfw.NewParser("add check-state :any\nadd pass ip from any to any\n")
 	next(t, parser, checkState(1, "add check-state :any", "any", 0))
@@ -195,24 +286,44 @@ func Test_Parser_Next_ActionCheckState(t *testing.T) {
 		expected ipfw.ParseError
 	}{
 		{
-			name:     "colon without a name",
-			input:    "add check-state :\n",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedNewlineOrEOF, Line: 1, Column: 16, Text: "add check-state :"},
+			name:  "colon without a name",
+			input: "add check-state :\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedNewlineOrEOF,
+				Line:   1,
+				Column: 16,
+				Text:   "add check-state :",
+			},
 		},
 		{
-			name:     "word after the keyword",
-			input:    "add check-state foo",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedNewlineOrEOF, Line: 1, Column: 16, Text: "add check-state foo"},
+			name:  "word after the keyword",
+			input: "add check-state foo",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedNewlineOrEOF,
+				Line:   1,
+				Column: 16,
+				Text:   "add check-state foo",
+			},
 		},
 		{
-			name:     "inline comment is not accepted either",
-			input:    "add check-state // c",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedNewlineOrEOF, Line: 1, Column: 16, Text: "add check-state // c"},
+			name:  "inline comment is not accepted either",
+			input: "add check-state // c",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedNewlineOrEOF,
+				Line:   1,
+				Column: 16,
+				Text:   "add check-state // c",
+			},
 		},
 		{
-			name:     "keyword glued to a word",
-			input:    "add check-statex",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedNewlineOrEOF, Line: 1, Column: 15, Text: "add check-statex"},
+			name:  "keyword glued to a word",
+			input: "add check-statex",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedNewlineOrEOF,
+				Line:   1,
+				Column: 15,
+				Text:   "add check-statex",
+			},
 		},
 	}
 	for _, tc := range cases {
@@ -233,22 +344,39 @@ func Test_Action_String(t *testing.T) {
 		{name: "deny", action: ipfw.Action{Kind: ipfw.ActionDeny}, text: "deny"},
 		{name: "count", action: ipfw.Action{Kind: ipfw.ActionCount}, text: "count"},
 		{
-			name:   "skipto label",
-			action: ipfw.Action{Kind: ipfw.ActionSkipTo, SkipTo: ipfw.SkipTo{Kind: ipfw.SkipToLabel, Label: "ADMIN_RULES"}},
-			text:   "skipto :ADMIN_RULES",
+			name: "skipto label",
+			action: ipfw.Action{
+				Kind:   ipfw.ActionSkipTo,
+				SkipTo: ipfw.SkipTo{Kind: ipfw.SkipToLabel, Label: "ADMIN_RULES"},
+			},
+			text: "skipto :ADMIN_RULES",
 		},
 		{
-			name:   "skipto number",
-			action: ipfw.Action{Kind: ipfw.ActionSkipTo, SkipTo: ipfw.SkipTo{Kind: ipfw.SkipToNumber, Number: 100}},
-			text:   "skipto 100",
+			name: "skipto number",
+			action: ipfw.Action{
+				Kind:   ipfw.ActionSkipTo,
+				SkipTo: ipfw.SkipTo{Kind: ipfw.SkipToNumber, Number: 100},
+			},
+			text: "skipto 100",
 		},
 		{
-			name:   "skipto tablearg",
-			action: ipfw.Action{Kind: ipfw.ActionSkipTo, SkipTo: ipfw.SkipTo{Kind: ipfw.SkipToTableArg}},
-			text:   "skipto tablearg",
+			name: "skipto tablearg",
+			action: ipfw.Action{
+				Kind:   ipfw.ActionSkipTo,
+				SkipTo: ipfw.SkipTo{Kind: ipfw.SkipToTableArg},
+			},
+			text: "skipto tablearg",
 		},
-		{name: "check-state", action: ipfw.Action{Kind: ipfw.ActionCheckState}, text: "check-state"},
-		{name: "check-state with flow", action: ipfw.Action{Kind: ipfw.ActionCheckState, Flow: "any"}, text: "check-state :any"},
+		{
+			name:   "check-state",
+			action: ipfw.Action{Kind: ipfw.ActionCheckState},
+			text:   "check-state",
+		},
+		{
+			name:   "check-state with flow",
+			action: ipfw.Action{Kind: ipfw.ActionCheckState, Flow: "any"},
+			text:   "check-state :any",
+		},
 		{name: "zero value", action: ipfw.Action{}, text: ""},
 	}
 	for _, tc := range cases {
@@ -260,7 +388,11 @@ func Test_Action_String(t *testing.T) {
 
 // verifies that a skipto target prints the way it is written after skipto.
 func Test_SkipTo_String(t *testing.T) {
-	require.Equal(t, ":ADMIN_RULES", ipfw.SkipTo{Kind: ipfw.SkipToLabel, Label: "ADMIN_RULES"}.String())
+	require.Equal(
+		t,
+		":ADMIN_RULES",
+		ipfw.SkipTo{Kind: ipfw.SkipToLabel, Label: "ADMIN_RULES"}.String(),
+	)
 	require.Equal(t, "100", ipfw.SkipTo{Kind: ipfw.SkipToNumber, Number: 100}.String())
 	require.Equal(t, "tablearg", ipfw.SkipTo{Kind: ipfw.SkipToTableArg}.String())
 	require.Empty(t, ipfw.SkipTo{}.String())

@@ -486,24 +486,44 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 		expected ipfw.ParseError
 	}{
 		{
-			name:     "nothing after the protocol",
-			input:    "add allow tcp\n",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 13, Text: "add allow tcp"},
+			name:  "nothing after the protocol",
+			input: "add allow tcp\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 13,
+				Text:   "add allow tcp",
+			},
 		},
 		{
-			name:     "from missing",
-			input:    "add allow tcp any",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedFrom, Line: 1, Column: 14, Text: "add allow tcp any"},
+			name:  "from missing",
+			input: "add allow tcp any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedFrom,
+				Line:   1,
+				Column: 14,
+				Text:   "add allow tcp any",
+			},
 		},
 		{
-			name:     "nothing after from",
-			input:    "add allow tcp from",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 18, Text: "add allow tcp from"},
+			name:  "nothing after from",
+			input: "add allow tcp from",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 18,
+				Text:   "add allow tcp from",
+			},
 		},
 		{
-			name:     "nothing after the source",
-			input:    "add allow tcp from any",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 22, Text: "add allow tcp from any"},
+			name:  "nothing after the source",
+			input: "add allow tcp from any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 22,
+				Text:   "add allow tcp from any",
+			},
 		},
 		{
 			name:  "targets without or",
@@ -546,39 +566,74 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 			},
 		},
 		{
-			name:     "to missing",
-			input:    "add allow ip from any x to any",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedPrefix, Line: 1, Column: 22, Text: "add allow ip from any x to any"},
+			name:  "to missing",
+			input: "add allow ip from any x to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedPrefix,
+				Line:   1,
+				Column: 22,
+				Text:   "add allow ip from any x to any",
+			},
 		},
 		{
-			name:     "nothing after to",
-			input:    "add allow ip from any to\n",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 24, Text: "add allow ip from any to"},
+			name:  "nothing after to",
+			input: "add allow ip from any to\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 24,
+				Text:   "add allow ip from any to",
+			},
 		},
 		{
-			name:     "trailing content after the destination",
-			input:    "add allow ip from any to any extra\n",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedNewlineOrEOF, Line: 1, Column: 29, Text: "add allow ip from any to any extra"},
+			name:  "trailing content after the destination",
+			input: "add allow ip from any to any extra\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedNewlineOrEOF,
+				Line:   1,
+				Column: 29,
+				Text:   "add allow ip from any to any extra",
+			},
 		},
 		{
-			name:     "no protocol",
-			input:    "add allow _ from any",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedEitherIPOrProto, Line: 1, Column: 10, Text: "add allow _ from any"},
+			name:  "no protocol",
+			input: "add allow _ from any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedEitherIPOrProto,
+				Line:   1,
+				Column: 10,
+				Text:   "add allow _ from any",
+			},
 		},
 		{
-			name:     "ip keyword then nothing after from",
-			input:    "add allow ip from",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 17, Text: "add allow ip from"},
+			name:  "ip keyword then nothing after from",
+			input: "add allow ip from",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 17,
+				Text:   "add allow ip from",
+			},
 		},
 		{
-			name:     "group then nothing after the source",
-			input:    "add allow { tcp or udp } from any",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedWhitespace, Line: 1, Column: 33, Text: "add allow { tcp or udp } from any"},
+			name:  "group then nothing after the source",
+			input: "add allow { tcp or udp } from any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 33,
+				Text:   "add allow { tcp or udp } from any",
+			},
 		},
 		{
-			name:     "group without separator",
-			input:    "add allow { tcp udp } from any",
-			expected: ipfw.ParseError{Kind: ipfw.ErrExpectedOr, Line: 1, Column: 16, Text: "add allow { tcp udp } from any"},
+			name:  "group without separator",
+			input: "add allow { tcp udp } from any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedOr,
+				Line:   1,
+				Column: 16,
+				Text:   "add allow { tcp udp } from any",
+			},
 		},
 	}
 	for _, tc := range cases {
@@ -594,12 +649,16 @@ func Test_Parser_Next_BodyProtocolEmittedBeforeFailure(t *testing.T) {
 	var state ipfw.CollectState
 	_, err := ipfw.NewParser("add allow tcp x").Next(&state)
 	require.NotNil(t, err)
-	require.Equal(t, ipfw.CollectState{Protos: []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}}}, state)
+	require.Equal(t, ipfw.CollectState{
+		Protos: []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+	}, state)
 
 	state = ipfw.CollectState{}
 	_, err = ipfw.NewParser("add allow ip x").Next(&state)
 	require.NotNil(t, err)
-	require.Equal(t, ipfw.CollectState{IPProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}}}, state)
+	require.Equal(t, ipfw.CollectState{
+		IPProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+	}, state)
 }
 
 // passAnyToAny is the record of a bare `add pass … from any to any` line.
@@ -772,7 +831,9 @@ func Test_Parser_Next_TargetGroups(t *testing.T) {
 			input: "add pass ip from not 192.0.2.0/24 to { me or not me6 }\n",
 			state: ipfw.CollectState{
 				IPProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
-				Sources:  []ipfw.Target{{Neg: true, Kind: ipfw.TargetNetwork4, Text: "192.0.2.0/24"}},
+				Sources: []ipfw.Target{
+					{Neg: true, Kind: ipfw.TargetNetwork4, Text: "192.0.2.0/24"},
+				},
 				Destinations: []ipfw.Target{
 					{Kind: ipfw.TargetMe},
 					{Neg: true, Kind: ipfw.TargetMe6},
