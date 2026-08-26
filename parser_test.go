@@ -556,6 +556,16 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 			},
 		},
 		{
+			name:  "source port range without its second port",
+			input: "add allow tcp from any 22- to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedPort,
+				Line:   1,
+				Column: 26,
+				Text:   "add allow tcp from any 22- to any",
+			},
+		},
+		{
 			name:  "nothing after the source port",
 			input: "add allow tcp from any 22",
 			expected: ipfw.ParseError{
@@ -929,6 +939,27 @@ func Test_Parser_Next_Ports(t *testing.T) {
 				Sources:      anyToAny,
 				Destinations: anyToAny,
 				SourcePorts:  []ipfw.PortMatch{portService("http")},
+			},
+		},
+		{
+			name:  "source port range and destination service",
+			input: "add allow tcp from 2001:db8::/32 1024-65535 to any domain\n",
+			state: ipfw.CollectState{
+				Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+				Sources:          []ipfw.Target{{Kind: ipfw.TargetNetwork6, Text: "2001:db8::/32"}},
+				Destinations:     anyToAny,
+				SourcePorts:      []ipfw.PortMatch{portSpan(ipfw.Port{Number: 1024}, ipfw.Port{Number: 65535})},
+				DestinationPorts: []ipfw.PortMatch{portService("domain")},
+			},
+		},
+		{
+			name:  "whole range on the destination",
+			input: "add allow tcp from any to any 1-65535\n",
+			state: ipfw.CollectState{
+				Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+				Sources:          anyToAny,
+				Destinations:     anyToAny,
+				DestinationPorts: []ipfw.PortMatch{portSpan(ipfw.Port{Number: 1}, ipfw.Port{Number: 65535})},
 			},
 		},
 		{

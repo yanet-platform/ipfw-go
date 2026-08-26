@@ -23,6 +23,11 @@ func portService(name string) ipfw.PortMatch {
 	return ipfw.PortMatch{Range: ipfw.PortRange{Lo: port, Hi: port}}
 }
 
+// portSpan is a port range match.
+func portSpan(lo, hi ipfw.Port) ipfw.PortMatch {
+	return ipfw.PortMatch{Range: ipfw.PortRange{Lo: lo, Hi: hi}}
+}
+
 // SourcePort implements State.
 func (m rejectingState) SourcePort(ipfw.PortMatch) error {
 	return m.err
@@ -37,7 +42,8 @@ func (m rejectingState) DestinationPort(ipfw.PortMatch) error {
 // the consumed length, and position a failure at the port.
 //
 // A port is a run of letters and digits up to a dash, a number when every
-// byte is a digit and the value fits sixteen bits, a name otherwise.
+// byte is a digit and the value fits sixteen bits, a name otherwise. A dash
+// makes a range of two ports.
 func Test_ParsePorts_Table(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -89,10 +95,40 @@ func Test_ParsePorts_Table(t *testing.T) {
 			ports: []ipfw.PortMatch{portService("to")},
 		},
 		{
-			name:  "dash ends the port",
+			name:  "range",
+			input: "22-53 to any",
+			n:     5,
+			ports: []ipfw.PortMatch{portSpan(ipfw.Port{Number: 22}, ipfw.Port{Number: 53})},
+		},
+		{
+			name:  "range of names",
+			input: "http-https x",
+			n:     10,
+			ports: []ipfw.PortMatch{portSpan(ipfw.Port{Name: "http"}, ipfw.Port{Name: "https"})},
+		},
+		{
+			name:  "range of a number and a name",
+			input: "22-ssh x",
+			n:     6,
+			ports: []ipfw.PortMatch{portSpan(ipfw.Port{Number: 22}, ipfw.Port{Name: "ssh"})},
+		},
+		{
+			name:  "whole range",
+			input: "1-65535",
+			n:     7,
+			ports: []ipfw.PortMatch{portSpan(ipfw.Port{Number: 1}, ipfw.Port{Number: 65535})},
+		},
+		{
+			name:  "range without its second port",
 			input: "22-",
-			n:     2,
-			ports: []ipfw.PortMatch{portNumber(22)},
+			n:     3,
+			err:   ipfw.ErrExpectedPort,
+		},
+		{
+			name:  "range without its second port before a space",
+			input: "22- 53",
+			n:     3,
+			err:   ipfw.ErrExpectedPort,
 		},
 		{
 			name:  "empty input",
@@ -172,14 +208,14 @@ func Test_ParsePorts_OverflowIsName(t *testing.T) {
 
 // verifies that parsing a port into a warmed-up state allocates nothing.
 func Test_ParsePorts_NoAllocs(t *testing.T) {
-	input := "22 to any"
+	input := "1024-65535 to any"
 	var state ipfw.CollectState
 	_, _ = ipfw.ParseSourcePorts(input, &state)
 	ok := true
 	allocs := testing.AllocsPerRun(100, func() {
 		state.Reset()
 		n, err := ipfw.ParseSourcePorts(input, &state)
-		if err != nil || n != 2 {
+		if err != nil || n != 10 {
 			ok = false
 		}
 	})

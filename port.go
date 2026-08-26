@@ -47,9 +47,9 @@ func ParseDestinationPorts(s string, state State) (int, error) {
 // parsePorts parses one port range into the source or the destination side
 // of the state, a failure pointing at the port.
 func parsePorts(s string, state State, destination bool) (string, fail) {
-	portRange, rest, kind := parsePortRange(s)
-	if kind != 0 {
-		return s, fail{Kind: kind, At: s}
+	portRange, rest, failure := parsePortRange(s)
+	if failure.Failed() {
+		return s, failure
 	}
 	match := PortMatch{Range: portRange}
 	var err error
@@ -58,24 +58,32 @@ func parsePorts(s string, state State, destination bool) (string, fail) {
 	} else {
 		err = state.SourcePort(match)
 	}
-	if failure := failFrom(err, s); failure.Failed() {
+	if failure = failFrom(err, s); failure.Failed() {
 		return s, failure
 	}
 	return rest, fail{}
 }
 
-// parsePortRange parses a single port for now, the range running from the
-// port to itself.
-func parsePortRange(s string) (PortRange, string, ErrorKind) {
-	port, rest, kind := parsePort(s)
+// parsePortRange parses a port or a `lo-hi` range, a single port running
+// from itself to itself, the failure pointing at the missing port.
+func parsePortRange(s string) (PortRange, string, fail) {
+	lo, rest, kind := parsePort(s)
 	if kind != 0 {
-		return PortRange{}, s, kind
+		return PortRange{}, s, fail{Kind: kind, At: s}
 	}
-	return PortRange{Lo: port, Hi: port}, rest, 0
+	afterDash, ok := prefix(rest, "-")
+	if !ok {
+		return PortRange{Lo: lo, Hi: lo}, rest, fail{}
+	}
+	hi, rest, kind := parsePort(afterDash)
+	if kind != 0 {
+		return PortRange{}, s, fail{Kind: kind, At: afterDash}
+	}
+	return PortRange{Lo: lo, Hi: hi}, rest, fail{}
 }
 
-// parsePort reads a run of letters and digits, a number when every byte is
-// a digit and the value fits sixteen bits, a name otherwise.
+// parsePort reads a run of letters and digits up to a dash, a number when
+// every byte is a digit and the value fits sixteen bits, a name otherwise.
 //
 // An overflowing number is a name like any other, since custom services may
 // be named by digits. An empty run is ErrExpectedPort.
