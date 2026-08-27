@@ -548,6 +548,57 @@ func Test_VM_Check_Established(t *testing.T) {
 	require.Equal(t, pass, negated.Check(&vm.Context{}, udp))
 }
 
+// verifies that in and out match the direction of the check, that either
+// in a group always matches and that not in is out.
+func Test_VM_Check_Direction(t *testing.T) {
+	in, out := &vm.Context{Direction: vm.In}, &vm.Context{Direction: vm.Out}
+	packet := tcp4("192.0.2.1", "192.0.2.2")
+	cases := []struct {
+		name  string
+		rules string
+		in    ipfw.Action
+		out   ipfw.Action
+	}{
+		{
+			name:  "in",
+			rules: "add allow ip from any to any in\nadd deny ip from any to any\n",
+			in:    pass,
+			out:   deny,
+		},
+		{
+			name:  "out",
+			rules: "add allow ip from any to any out\nadd deny ip from any to any\n",
+			in:    deny,
+			out:   pass,
+		},
+		{
+			name:  "in or out",
+			rules: "add allow ip from any to any { in or out }\nadd deny ip from any to any\n",
+			in:    pass,
+			out:   pass,
+		},
+		{
+			name:  "not in",
+			rules: "add allow ip from any to any not in\nadd deny ip from any to any\n",
+			in:    deny,
+			out:   pass,
+		},
+		{
+			name:  "in and out never both",
+			rules: "add allow ip from any to any in out\nadd deny ip from any to any\n",
+			in:    deny,
+			out:   deny,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			machine := build(t, tc.rules, none)
+			require.Equal(t, tc.in, machine.Check(in, packet))
+			require.Equal(t, tc.out, machine.Check(out, packet))
+		})
+	}
+}
+
 // verifies the fold over the options: AND between terms, OR inside a
 // group, and a rule with no options decided by its body alone.
 func Test_VM_Check_OptionFold(t *testing.T) {
@@ -958,10 +1009,10 @@ func Test_VM_Build_Errors(t *testing.T) {
 		},
 		{
 			name:      "unsupported option",
-			rules:     "add pass tcp from any to any established in\n",
+			rules:     "add pass tcp from any to any established frag\n",
 			resolvers: resolving,
 			line:      1,
-			text:      "add pass tcp from any to any established in",
+			text:      "add pass tcp from any to any established frag",
 			cause:     vm.ErrUnsupportedOption,
 		},
 		{

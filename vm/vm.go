@@ -375,7 +375,7 @@ func (m *builder[V4, V6]) OnDestinationPort(match ipfw.PortNumberMatch) error {
 // ErrUnsupportedOption.
 func (m *builder[V4, V6]) OnOption(opt ipfw.Opt) error {
 	switch opt.Kind {
-	case ipfw.OptEstablished:
+	case ipfw.OptEstablished, ipfw.OptIn, ipfw.OptOut:
 	default:
 		return ErrUnsupportedOption
 	}
@@ -462,16 +462,16 @@ func (m *VM[V4, V6]) matches(rule *op[V4, V6], ctx *Context, pkt Packet) bool {
 			return false
 		}
 	}
-	return m.matchOptions(rule.Options, pkt)
+	return m.matchOptions(rule.Options, ctx, pkt)
 }
 
 // matchOptions folds the options left to right: an option starting a
 // term must find the previous term true, one marked Or extends the term.
-func (m *VM[V4, V6]) matchOptions(options []ipfw.Opt, pkt Packet) bool {
+func (m *VM[V4, V6]) matchOptions(options []ipfw.Opt, ctx *Context, pkt Packet) bool {
 	term := true
 	for idx := range options {
 		opt := &options[idx]
-		hit := m.matchOption(opt, pkt) != opt.Neg
+		hit := m.matchOption(opt, ctx, pkt) != opt.Neg
 		if opt.Or {
 			term = term || hit
 			continue
@@ -485,14 +485,19 @@ func (m *VM[V4, V6]) matchOptions(options []ipfw.Opt, pkt Packet) bool {
 }
 
 // matchOption reports whether the option, its negation aside, holds for
-// the packet.
+// the packet in the context.
 //
-// established is a TCP packet with ACK or RST set.
-func (m *VM[V4, V6]) matchOption(opt *ipfw.Opt, pkt Packet) bool {
+// established is a TCP packet with ACK or RST set, in and out the
+// direction of the check.
+func (m *VM[V4, V6]) matchOption(opt *ipfw.Opt, ctx *Context, pkt Packet) bool {
 	switch opt.Kind {
 	case ipfw.OptEstablished:
 		flags, ok := pkt.TCPFlags()
 		return ok && flags&(ipfw.TCPAck|ipfw.TCPRst) != 0
+	case ipfw.OptIn:
+		return ctx.Direction == In
+	case ipfw.OptOut:
+		return ctx.Direction == Out
 	}
 	return false
 }
