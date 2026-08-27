@@ -132,9 +132,11 @@ type VMState[V4, V6 any] interface {
 	OnOption(o Opt) error
 }
 
-// Resolvers is what a Resolver resolves with, every part but the network
-// parser optional: a missing one makes the names it would resolve errors.
-type Resolvers[V4, V6 any] struct {
+// Environment is what the names of a ruleset are interpreted in.
+//
+// Every part but the network parser is optional, a missing one making the
+// names it would resolve errors.
+type Environment[V4, V6 any] struct {
 	// Networks parses network text.
 	Networks NetworkParser[V4, V6]
 	// Protos resolves protocol names.
@@ -151,13 +153,13 @@ type Resolvers[V4, V6 any] struct {
 // It makes one call per token, a hostname or macro giving one call per
 // network it stands for.
 type Resolver[V4, V6 any] struct {
-	sink      VMState[V4, V6]
-	resolvers Resolvers[V4, V6]
+	sink        VMState[V4, V6]
+	environment Environment[V4, V6]
 }
 
-// NewResolver returns a State resolving into sink with resolvers.
-func NewResolver[V4, V6 any](sink VMState[V4, V6], resolvers Resolvers[V4, V6]) *Resolver[V4, V6] {
-	return &Resolver[V4, V6]{sink: sink, resolvers: resolvers}
+// NewResolver returns a State resolving into sink within the environment.
+func NewResolver[V4, V6 any](sink VMState[V4, V6], environment Environment[V4, V6]) *Resolver[V4, V6] {
+	return &Resolver[V4, V6]{sink: sink, environment: environment}
 }
 
 // OnIPProto implements State.
@@ -228,10 +230,10 @@ func (m *Resolver[V4, V6]) resolveProto(proto Proto) (uint8, error) {
 	if proto.IsNumber() {
 		return proto.Number, nil
 	}
-	if m.resolvers.Protos == nil {
+	if m.environment.Protos == nil {
 		return 0, ErrUnresolvedProto
 	}
-	number, ok := m.resolvers.Protos.ResolveProto(proto.Name)
+	number, ok := m.environment.Protos.ResolveProto(proto.Name)
 	if !ok {
 		return 0, ErrUnresolvedProto
 	}
@@ -257,10 +259,10 @@ func (m *Resolver[V4, V6]) resolvePort(port Port) (uint16, error) {
 	if port.IsNumber() {
 		return port.Number, nil
 	}
-	if m.resolvers.Services == nil {
+	if m.environment.Services == nil {
 		return 0, ErrUnresolvedService
 	}
-	number, ok := m.resolvers.Services.ResolveService(port.Name)
+	number, ok := m.environment.Services.ResolveService(port.Name)
 	if !ok {
 		return 0, ErrUnresolvedService
 	}
@@ -278,13 +280,13 @@ func (m *Resolver[V4, V6]) resolveTarget(target Target, side bodySide) error {
 	match := TargetMatch[V4, V6]{Neg: target.Neg, Kind: target.Kind}
 	switch target.Kind {
 	case TargetNetwork4:
-		network, err := m.resolvers.Networks.ParseNetwork4(target.Text)
+		network, err := m.environment.Networks.ParseNetwork4(target.Text)
 		if err != nil {
 			return ErrExpectedIPv4Network
 		}
 		match.Net4 = network
 	case TargetNetwork6:
-		network, err := m.resolvers.Networks.ParseNetwork6(target.Text)
+		network, err := m.environment.Networks.ParseNetwork6(target.Text)
 		if err != nil {
 			return ErrExpectedIPv6Network
 		}
@@ -292,10 +294,10 @@ func (m *Resolver[V4, V6]) resolveTarget(target Target, side bodySide) error {
 	case TargetTable:
 		match.Name = target.Text
 	case TargetHostname, TargetCustom:
-		if m.resolvers.Targets == nil {
+		if m.environment.Targets == nil {
 			return ErrUnresolvedTarget
 		}
-		nets4, nets6, err := m.resolvers.Targets.ResolveTarget(target)
+		nets4, nets6, err := m.environment.Targets.ResolveTarget(target)
 		if err != nil {
 			return err
 		}

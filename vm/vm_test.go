@@ -92,16 +92,16 @@ func parse6(s string) net6 {
 }
 
 // resolving parses networks with xnetip and resolves the fake protocols.
-var resolving = ipfw.Resolvers[net4, net6]{Networks: nets, Protos: fakeProtos{}}
+var resolving = ipfw.Environment[net4, net6]{Networks: nets, Protos: fakeProtos{}}
 
 // resolvingTargets is resolving with the fake targets too.
-var resolvingTargets = ipfw.Resolvers[net4, net6]{Networks: nets, Protos: fakeProtos{}, Targets: fakeTargets{}}
+var resolvingTargets = ipfw.Environment[net4, net6]{Networks: nets, Protos: fakeProtos{}, Targets: fakeTargets{}}
 
 // resolvingServices is resolving with the fake services too.
-var resolvingServices = ipfw.Resolvers[net4, net6]{Networks: nets, Protos: fakeProtos{}, Services: fakeServices{}}
+var resolvingServices = ipfw.Environment[net4, net6]{Networks: nets, Protos: fakeProtos{}, Services: fakeServices{}}
 
 // networksOnly parses networks and resolves no name.
-var networksOnly = ipfw.Resolvers[net4, net6]{Networks: nets}
+var networksOnly = ipfw.Environment[net4, net6]{Networks: nets}
 
 // none is the configuration with nothing set.
 var none = vm.Config[net4, net6]{}
@@ -110,7 +110,8 @@ var none = vm.Config[net4, net6]{}
 // any error.
 func build(t *testing.T, src string, cfg vm.Config[net4, net6]) *vm.VM[net4, net6] {
 	t.Helper()
-	machine, err := vm.Build(ipfw.NewParser(src), resolving, cfg)
+	cfg.Environment = resolving
+	machine, err := vm.Build(ipfw.NewParser(src), cfg)
 	require.NoError(t, err)
 	return machine
 }
@@ -517,8 +518,7 @@ func Test_VM_Check_Ports(t *testing.T) {
 func Test_VM_Build_ServiceNames(t *testing.T) {
 	machine, err := vm.Build(
 		ipfw.NewParser("add pass tcp from any ssh-smtp to any smtp\nadd deny ip from any to any\n"),
-		resolvingServices,
-		none,
+		vm.Config[net4, net6]{Environment: resolvingServices},
 	)
 	require.NoError(t, err)
 	packet := vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1"))
@@ -660,7 +660,7 @@ func Test_VM_Check_ProtoOption(t *testing.T) {
 	require.Equal(t, deny, negated.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.2")))
 	require.Equal(t, pass, negated.Check(&vm.Context{}, udp))
 
-	numeric, err := vm.Build(ipfw.NewParser("add pass ip from any to any { proto 17 or proto 1 }\nadd deny ip from any to any\n"), networksOnly, none)
+	numeric, err := vm.Build(ipfw.NewParser("add pass ip from any to any { proto 17 or proto 1 }\nadd deny ip from any to any\n"), vm.Config[net4, net6]{Environment: networksOnly})
 	require.NoError(t, err)
 	require.Equal(t, pass, numeric.Check(&vm.Context{}, udp))
 	require.Equal(t, deny, numeric.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.2")))
@@ -770,7 +770,7 @@ func Test_VM_Check_PortOptions(t *testing.T) {
 		})
 	}
 
-	named, err := vm.Build(ipfw.NewParser("add pass tcp from any to any dst-port ssh,smtp\nadd deny ip from any to any\n"), resolvingServices, none)
+	named, err := vm.Build(ipfw.NewParser("add pass tcp from any to any dst-port ssh,smtp\nadd deny ip from any to any\n"), vm.Config[net4, net6]{Environment: resolvingServices})
 	require.NoError(t, err)
 	require.Equal(t, pass, named.Check(&vm.Context{}, tcp(50000, 25)))
 	require.Equal(t, deny, named.Check(&vm.Context{}, tcp(50000, 26)))
@@ -1109,7 +1109,7 @@ func Test_VM_Check_ResolvedTargets(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			machine, err := vm.Build(ipfw.NewParser(tc.rules), resolvingTargets, none)
+			machine, err := vm.Build(ipfw.NewParser(tc.rules), vm.Config[net4, net6]{Environment: resolvingTargets})
 			require.NoError(t, err)
 			require.Equal(t, tc.verdict, machine.Check(&vm.Context{}, tc.packet))
 		})
@@ -1120,8 +1120,7 @@ func Test_VM_Check_ResolvedTargets(t *testing.T) {
 func Test_VM_Check_Resolved_NoAllocs(t *testing.T) {
 	machine, err := vm.Build(
 		ipfw.NewParser("add deny ip from not host.example.com to _NETS_\nadd pass ip from host.example.com to { _NETS_ or not host.example.com }\nadd deny ip from any to any\n"),
-		resolvingTargets,
-		none,
+		vm.Config[net4, net6]{Environment: resolvingTargets},
 	)
 	require.NoError(t, err)
 	packet := tcp4("192.0.2.1", "198.51.100.5")
@@ -1309,7 +1308,7 @@ func Test_VM_Build_UnsupportedKinds(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := vm.Build(ipfw.NewParser(tc.rules, ipfw.WithCommandHook(invented)), resolving, none)
+			_, err := vm.Build(ipfw.NewParser(tc.rules, ipfw.WithCommandHook(invented)), vm.Config[net4, net6]{Environment: resolving})
 			var buildErr *vm.BuildError
 			require.ErrorAs(t, err, &buildErr)
 			require.Equal(t, 2, buildErr.Line)
@@ -1338,7 +1337,7 @@ func setupMatcher(opt ipfw.Opt, _ *vm.Context, pkt vm.Packet) bool {
 // verifies that a custom option is decided by the configured matcher under
 // the fold's negation and grouping, and is a build error without one.
 func Test_VM_Check_CustomOption(t *testing.T) {
-	withMatcher := vm.Config[net4, net6]{OptionMatcher: setupMatcher}
+	withMatcher := vm.Config[net4, net6]{Environment: resolving, OptionMatcher: setupMatcher}
 	cases := []struct {
 		name    string
 		rules   string
@@ -1398,13 +1397,13 @@ func Test_VM_Check_CustomOption(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			machine, err := vm.Build(ipfw.NewParser(tc.rules, ipfw.WithOptionHook(setupHook)), resolving, withMatcher)
+			machine, err := vm.Build(ipfw.NewParser(tc.rules, ipfw.WithOptionHook(setupHook)), withMatcher)
 			require.NoError(t, err)
 			require.Equal(t, tc.verdict, machine.Check(tc.ctx, tc.packet))
 		})
 	}
 
-	_, err := vm.Build(ipfw.NewParser("add pass ip from any to any\nadd pass tcp from any to any established setup\n", ipfw.WithOptionHook(setupHook)), resolving, none)
+	_, err := vm.Build(ipfw.NewParser("add pass ip from any to any\nadd pass tcp from any to any established setup\n", ipfw.WithOptionHook(setupHook)), vm.Config[net4, net6]{Environment: resolving})
 	var buildErr *vm.BuildError
 	require.ErrorAs(t, err, &buildErr)
 	require.Equal(t, 2, buildErr.Line)
@@ -1419,8 +1418,7 @@ func Test_VM_Check_CustomOption(t *testing.T) {
 func Test_VM_CustomOption_NoAllocs(t *testing.T) {
 	machine, err := vm.Build(
 		ipfw.NewParser("add deny tcp from any to any not setup\nadd pass tcp from any to any { setup or in }\nadd deny ip from any to any\n", ipfw.WithOptionHook(setupHook)),
-		resolving,
-		vm.Config[net4, net6]{OptionMatcher: setupMatcher},
+		vm.Config[net4, net6]{Environment: resolving, OptionMatcher: setupMatcher},
 	)
 	require.NoError(t, err)
 	packet := tcp4Flags(ipfw.TCPSyn)
@@ -1464,7 +1462,7 @@ func Test_VM_Check_PolicyOptions(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.option, func(t *testing.T) {
 			parser := ipfw.NewParser("add pass ip from any to any "+tc.option+"\nadd deny ip from any to any\n", ipfw.WithOptionHook(note))
-			machine, err := vm.Build(parser, resolving, none)
+			machine, err := vm.Build(parser, vm.Config[net4, net6]{Environment: resolving})
 			require.NoError(t, err)
 			require.Equal(t, tc.in, machine.Check(&vm.Context{Direction: vm.In}, packet))
 			require.Equal(t, tc.out, machine.Check(&vm.Context{Direction: vm.Out}, packet))
@@ -1577,145 +1575,145 @@ func Test_VM_TableArg_NoAllocs(t *testing.T) {
 // take yet, a protocol name with no resolver, a hostname, table entries.
 func Test_VM_Build_Errors(t *testing.T) {
 	cases := []struct {
-		name      string
-		rules     string
-		resolvers ipfw.Resolvers[net4, net6]
-		line      int
-		text      string
-		cause     error
+		name        string
+		rules       string
+		environment ipfw.Environment[net4, net6]
+		line        int
+		text        string
+		cause       error
 	}{
 		{
-			name:      "parse error",
-			rules:     "add pass ip from any to any\nadd foobar :any\n",
-			resolvers: resolving,
-			line:      2,
-			text:      "add foobar :any",
-			cause:     ipfw.ErrExpectedAction,
+			name:        "parse error",
+			rules:       "add pass ip from any to any\nadd foobar :any\n",
+			environment: resolving,
+			line:        2,
+			text:        "add foobar :any",
+			cause:       ipfw.ErrExpectedAction,
 		},
 		{
-			name:      "rule number going backwards",
-			rules:     "add 100 pass ip from any to any\nadd 50 deny ip from any to any\n",
-			resolvers: resolving,
-			line:      2,
-			text:      "add 50 deny ip from any to any",
-			cause:     vm.ErrRuleNumberOrder,
+			name:        "rule number going backwards",
+			rules:       "add 100 pass ip from any to any\nadd 50 deny ip from any to any\n",
+			environment: resolving,
+			line:        2,
+			text:        "add 50 deny ip from any to any",
+			cause:       vm.ErrRuleNumberOrder,
 		},
 		{
-			name:      "rule number repeated",
-			rules:     "add 100 pass ip from any to any\nadd 100 deny ip from any to any\n",
-			resolvers: resolving,
-			line:      2,
-			text:      "add 100 deny ip from any to any",
-			cause:     vm.ErrRuleNumberOrder,
+			name:        "rule number repeated",
+			rules:       "add 100 pass ip from any to any\nadd 100 deny ip from any to any\n",
+			environment: resolving,
+			line:        2,
+			text:        "add 100 deny ip from any to any",
+			cause:       vm.ErrRuleNumberOrder,
 		},
 		{
-			name:      "skipto to a number that never appears",
-			rules:     "add deny udp from any to any\nadd skipto 7 ip from any to any\nadd pass ip from any to any\n",
-			resolvers: resolving,
-			line:      2,
-			text:      "add skipto 7 ip from any to any",
-			cause:     vm.ErrUnresolvedJump,
+			name:        "skipto to a number that never appears",
+			rules:       "add deny udp from any to any\nadd skipto 7 ip from any to any\nadd pass ip from any to any\n",
+			environment: resolving,
+			line:        2,
+			text:        "add skipto 7 ip from any to any",
+			cause:       vm.ErrUnresolvedJump,
 		},
 		{
-			name:      "skipto to its own number",
-			rules:     "add 50 skipto 50 ip from any to any\nadd pass ip from any to any\n",
-			resolvers: resolving,
-			line:      1,
-			text:      "add 50 skipto 50 ip from any to any",
-			cause:     vm.ErrUnresolvedJump,
+			name:        "skipto to its own number",
+			rules:       "add 50 skipto 50 ip from any to any\nadd pass ip from any to any\n",
+			environment: resolving,
+			line:        1,
+			text:        "add 50 skipto 50 ip from any to any",
+			cause:       vm.ErrUnresolvedJump,
 		},
 		{
-			name:      "skipto backwards",
-			rules:     "add 50 pass udp from any to any\nadd 100 skipto 50 ip from any to any\n",
-			resolvers: resolving,
-			line:      2,
-			text:      "add 100 skipto 50 ip from any to any",
-			cause:     vm.ErrUnresolvedJump,
+			name:        "skipto backwards",
+			rules:       "add 50 pass udp from any to any\nadd 100 skipto 50 ip from any to any\n",
+			environment: resolving,
+			line:        2,
+			text:        "add 100 skipto 50 ip from any to any",
+			cause:       vm.ErrUnresolvedJump,
 		},
 		{
-			name:      "skipto to a label that never appears",
-			rules:     "add skipto :NOWHERE ip from any to any\nadd pass ip from any to any\n",
-			resolvers: resolving,
-			line:      1,
-			text:      "add skipto :NOWHERE ip from any to any",
-			cause:     vm.ErrUnresolvedJump,
+			name:        "skipto to a label that never appears",
+			rules:       "add skipto :NOWHERE ip from any to any\nadd pass ip from any to any\n",
+			environment: resolving,
+			line:        1,
+			text:        "add skipto :NOWHERE ip from any to any",
+			cause:       vm.ErrUnresolvedJump,
 		},
 		{
-			name:      "skipto to a label before it",
-			rules:     "add count ip from any to any\n:BACK\nadd skipto :BACK ip from any to any\n",
-			resolvers: resolving,
-			line:      3,
-			text:      "add skipto :BACK ip from any to any",
-			cause:     vm.ErrUnresolvedJump,
+			name:        "skipto to a label before it",
+			rules:       "add count ip from any to any\n:BACK\nadd skipto :BACK ip from any to any\n",
+			environment: resolving,
+			line:        3,
+			text:        "add skipto :BACK ip from any to any",
+			cause:       vm.ErrUnresolvedJump,
 		},
 		{
-			name:      "service name without a resolver",
-			rules:     "add pass tcp from any ssh to any\n",
-			resolvers: resolving,
-			line:      1,
-			text:      "add pass tcp from any ssh to any",
-			cause:     ipfw.ErrUnresolvedService,
+			name:        "service name without a resolver",
+			rules:       "add pass tcp from any ssh to any\n",
+			environment: resolving,
+			line:        1,
+			text:        "add pass tcp from any ssh to any",
+			cause:       ipfw.ErrUnresolvedService,
 		},
 		{
-			name:      "unresolved service name",
-			rules:     "add pass tcp from any to any 22,bogus\n",
-			resolvers: resolvingServices,
-			line:      1,
-			text:      "add pass tcp from any to any 22,bogus",
-			cause:     ipfw.ErrUnresolvedService,
+			name:        "unresolved service name",
+			rules:       "add pass tcp from any to any 22,bogus\n",
+			environment: resolvingServices,
+			line:        1,
+			text:        "add pass tcp from any to any 22,bogus",
+			cause:       ipfw.ErrUnresolvedService,
 		},
 		{
-			name:      "proto option name without a resolver",
-			rules:     "add pass ip from any to any proto tcp\n",
-			resolvers: networksOnly,
-			line:      1,
-			text:      "add pass ip from any to any proto tcp",
-			cause:     ipfw.ErrUnresolvedProto,
+			name:        "proto option name without a resolver",
+			rules:       "add pass ip from any to any proto tcp\n",
+			environment: networksOnly,
+			line:        1,
+			text:        "add pass ip from any to any proto tcp",
+			cause:       ipfw.ErrUnresolvedProto,
 		},
 		{
-			name:      "IPv4 table entry that does not parse",
-			rules:     "table t add 192.0.2.0/24\ntable t add 192.0.2.0/33\n",
-			resolvers: resolving,
-			line:      2,
-			text:      "table t add 192.0.2.0/33",
-			cause:     ipfw.ErrExpectedIPv4Network,
+			name:        "IPv4 table entry that does not parse",
+			rules:       "table t add 192.0.2.0/24\ntable t add 192.0.2.0/33\n",
+			environment: resolving,
+			line:        2,
+			text:        "table t add 192.0.2.0/33",
+			cause:       ipfw.ErrExpectedIPv4Network,
 		},
 		{
-			name:      "IPv6 table entry that does not parse",
-			rules:     "table t add 2001:db8::/129\n",
-			resolvers: resolving,
-			line:      1,
-			text:      "table t add 2001:db8::/129",
-			cause:     ipfw.ErrExpectedIPv6Network,
+			name:        "IPv6 table entry that does not parse",
+			rules:       "table t add 2001:db8::/129\n",
+			environment: resolving,
+			line:        1,
+			text:        "table t add 2001:db8::/129",
+			cause:       ipfw.ErrExpectedIPv6Network,
 		},
 		{
-			name:      "unresolved protocol without a resolver",
-			rules:     "add pass tcp from any to any\n",
-			resolvers: networksOnly,
-			line:      1,
-			text:      "add pass tcp from any to any",
-			cause:     ipfw.ErrUnresolvedProto,
+			name:        "unresolved protocol without a resolver",
+			rules:       "add pass tcp from any to any\n",
+			environment: networksOnly,
+			line:        1,
+			text:        "add pass tcp from any to any",
+			cause:       ipfw.ErrUnresolvedProto,
 		},
 		{
-			name:      "unresolved protocol name",
-			rules:     "add pass gre from any to any\n",
-			resolvers: resolving,
-			line:      1,
-			text:      "add pass gre from any to any",
-			cause:     ipfw.ErrUnresolvedProto,
+			name:        "unresolved protocol name",
+			rules:       "add pass gre from any to any\n",
+			environment: resolving,
+			line:        1,
+			text:        "add pass gre from any to any",
+			cause:       ipfw.ErrUnresolvedProto,
 		},
 		{
-			name:      "hostname without a resolver",
-			rules:     "add pass ip from host.example.com to any\n",
-			resolvers: resolving,
-			line:      1,
-			text:      "add pass ip from host.example.com to any",
-			cause:     ipfw.ErrUnresolvedTarget,
+			name:        "hostname without a resolver",
+			rules:       "add pass ip from host.example.com to any\n",
+			environment: resolving,
+			line:        1,
+			text:        "add pass ip from host.example.com to any",
+			cause:       ipfw.ErrUnresolvedTarget,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := vm.Build(ipfw.NewParser(tc.rules), tc.resolvers, none)
+			_, err := vm.Build(ipfw.NewParser(tc.rules), vm.Config[net4, net6]{Environment: tc.environment})
 			require.Error(t, err)
 			var buildErr *vm.BuildError
 			require.ErrorAs(t, err, &buildErr)
@@ -1729,7 +1727,7 @@ func Test_VM_Build_Errors(t *testing.T) {
 
 // verifies that a parse error keeps its position inside the build error.
 func Test_VM_Build_ParseError(t *testing.T) {
-	_, err := vm.Build(ipfw.NewParser("add pass ip from any to any\n  add foobar :any\n"), resolving, none)
+	_, err := vm.Build(ipfw.NewParser("add pass ip from any to any\n  add foobar :any\n"), vm.Config[net4, net6]{Environment: resolving})
 	var parseErr *ipfw.ParseError
 	require.ErrorAs(t, err, &parseErr)
 	require.Equal(t, ipfw.ParseError{
@@ -1744,8 +1742,7 @@ func Test_VM_Build_ParseError(t *testing.T) {
 func Test_VM_Build_NumericProto(t *testing.T) {
 	machine, err := vm.Build(
 		ipfw.NewParser("add pass 6 from any to any\nadd deny ip from any to any\n"),
-		networksOnly,
-		none,
+		vm.Config[net4, net6]{Environment: networksOnly},
 	)
 	require.NoError(t, err)
 	require.Equal(t, pass, machine.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.1")))

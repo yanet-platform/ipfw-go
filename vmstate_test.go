@@ -108,7 +108,7 @@ func (m *fakeTargets) ResolveTarget(target ipfw.Target) ([]net4, []net6, error) 
 }
 
 // everything resolves protocols, services and targets.
-var everything = ipfw.Resolvers[net4, net6]{
+var everything = ipfw.Environment[net4, net6]{
 	Networks: nets,
 	Protos:   fakeProtos{},
 	Services: fakeServices{},
@@ -116,11 +116,11 @@ var everything = ipfw.Resolvers[net4, net6]{
 }
 
 // networksOnly parses networks and resolves no name.
-var networksOnly = ipfw.Resolvers[net4, net6]{Networks: nets}
+var networksOnly = ipfw.Environment[net4, net6]{Networks: nets}
 
 // resolved parses one line through a Resolver into a fresh ReduceVMState,
 // failing the test on an error.
-func resolved(t *testing.T, line string, resolvers ipfw.Resolvers[net4, net6]) ipfw.ReduceVMState[net4, net6] {
+func resolved(t *testing.T, line string, resolvers ipfw.Environment[net4, net6]) ipfw.ReduceVMState[net4, net6] {
 	t.Helper()
 	var sink ipfw.ReduceVMState[net4, net6]
 	_, err := ipfw.NewParser(line).Next(ipfw.NewResolver(&sink, resolvers))
@@ -129,7 +129,7 @@ func resolved(t *testing.T, line string, resolvers ipfw.Resolvers[net4, net6]) i
 }
 
 // rejected parses one line through a Resolver and returns its error.
-func rejected(t *testing.T, line string, resolvers ipfw.Resolvers[net4, net6]) ipfw.ParseError {
+func rejected(t *testing.T, line string, resolvers ipfw.Environment[net4, net6]) ipfw.ParseError {
 	t.Helper()
 	var sink ipfw.ReduceVMState[net4, net6]
 	_, err := ipfw.NewParser(line).Next(ipfw.NewResolver(&sink, resolvers))
@@ -317,7 +317,7 @@ func Test_Resolver_Errors(t *testing.T) {
 	cases := []struct {
 		name      string
 		input     string
-		resolvers ipfw.Resolvers[net4, net6]
+		resolvers ipfw.Environment[net4, net6]
 		expected  ipfw.ParseError
 	}{
 		{

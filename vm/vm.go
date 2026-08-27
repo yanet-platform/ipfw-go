@@ -54,9 +54,11 @@ const (
 // It runs on the match path and must not allocate.
 type OptionMatcher func(opt ipfw.Opt, ctx *Context, pkt Packet) bool
 
-// Config is what a VM is built with beyond the ruleset and its resolvers,
-// every part optional.
+// Config is what a VM is built with beyond the ruleset, every part but
+// the environment's network parser optional.
 type Config[V4, V6 any] struct {
+	// Environment is what the names of the ruleset are interpreted in.
+	Environment ipfw.Environment[V4, V6]
 	// Tables is the table registry, nil meaning a fresh default one.
 	Tables TableRegistry[V4, V6]
 	// DefaultVerdict is the action when no rule matches, the zero value
@@ -142,12 +144,8 @@ type op[V4, V6 Network] struct {
 }
 
 // Build reads the whole ruleset from p into a VM, every name resolved
-// with resolvers on the way in.
-func Build[V4, V6 Network](
-	p *ipfw.Parser,
-	resolvers ipfw.Resolvers[V4, V6],
-	cfg Config[V4, V6],
-) (*VM[V4, V6], error) {
+// within the configured environment on the way in.
+func Build[V4, V6 Network](p *ipfw.Parser, cfg Config[V4, V6]) (*VM[V4, V6], error) {
 	machine := &VM[V4, V6]{tables: cfg.Tables, matcher: cfg.OptionMatcher, verdict: cfg.DefaultVerdict}
 	if machine.tables == nil {
 		machine.tables = NewTables[V4, V6]()
@@ -155,8 +153,8 @@ func Build[V4, V6 Network](
 	if machine.verdict.Kind == 0 {
 		machine.verdict = ipfw.Action{Kind: ipfw.ActionDeny}
 	}
-	sink := newBuilder(machine.tables, resolvers.Networks, cfg.OptionMatcher != nil)
-	state := ipfw.NewResolver(sink, resolvers)
+	sink := newBuilder(machine.tables, cfg.Environment.Networks, cfg.OptionMatcher != nil)
+	state := ipfw.NewResolver(sink, cfg.Environment)
 	for {
 		rec, parseErr := p.Next(state)
 		if parseErr != nil {
