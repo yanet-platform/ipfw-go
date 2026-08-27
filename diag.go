@@ -65,10 +65,6 @@ type Style struct {
 }
 
 // DiagStyle is the palette of a terminal that takes ANSI escapes.
-//
-// The colours are those of rustc: the error bold red, its message bold,
-// the position and the gutter bold blue, the carets bold yellow, the
-// markers of a cut line faint.
 func DiagStyle() Style {
 	return Style{
 		Error:   "\x1b[1;91m",
@@ -112,7 +108,7 @@ func WithDiagStyle(style Style) DiagnosticOption {
 	}
 }
 
-// Diagnostic renders a ParseError the way rustc reports errors.
+// Diagnostic renders a ParseError as a diagnostic message.
 //
 // The rendering is the message, the position, and the source line with
 // carets under the token the parser stopped at. This is the error path,
