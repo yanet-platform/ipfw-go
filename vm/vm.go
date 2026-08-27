@@ -131,7 +131,7 @@ func Build[V4, V6 Network](
 		machine.verdict = ipfw.Action{Kind: ipfw.ActionDeny}
 	}
 	var sink builder[V4, V6]
-	state := ipfw.NewResolver[V4, V6](&sink, resolvers)
+	state := ipfw.NewResolver(&sink, resolvers)
 	for {
 		sink.Rule = op[V4, V6]{}
 		rec, parseErr := p.Next(state)

@@ -1,6 +1,6 @@
 # Developer entry points for the gates described in AGENTS.md.
 #
-# The lint binaries (gofumpt, golangci-lint, gocommentlint, benchstat) are
+# The lint binaries (gofumpt, golangci-lint, gopls, gocommentlint, benchstat) are
 # installed with `go install` into $GOPATH/bin, which is prepended to PATH
 # here so the targets work even when that directory is not on the caller's
 # PATH.
@@ -18,10 +18,15 @@ test:
 test-short:
 	go test -short ./...
 
-# The static gate: formatting, vet, golangci-lint, then the comment shape
-# of the staged diff. The pre-commit hook runs exactly this target.
-# gocommentlint is a local tool: when it is not installed the gate reports
-# that and skips it instead of failing (CI and fresh clones stay green).
+# The static gate: formatting, vet, golangci-lint, the gopls hints, then the
+# comment shape of the staged diff. The pre-commit hook runs exactly this
+# target. gocommentlint is a local tool and gopls may be absent: when one is
+# not installed the gate reports that and skips it instead of failing (CI
+# and fresh clones stay green).
+#
+# The gopls hints (infertypeargs and the like) are what the editor shows and
+# no golangci-lint linter covers. gopls check exits zero either way, so the
+# gate fails on any output.
 lint:
 	@unformatted="$$(gofumpt -l .)"; \
 	if [ -n "$$unformatted" ]; then \
@@ -31,6 +36,10 @@ lint:
 	fi
 	go vet ./...
 	golangci-lint run ./...
+	@if command -v gopls >/dev/null 2>&1; then \
+		hints="$$(gopls check -severity=hint $$(find . -name '*.go'))"; \
+		if [ -n "$$hints" ]; then echo "$$hints"; exit 1; fi; \
+	else echo "lint: gopls not installed, skipping the hint gate"; fi
 	@if command -v gocommentlint >/dev/null 2>&1; then gocommentlint; \
 	else echo "lint: gocommentlint not installed, skipping the comment gate"; fi
 
