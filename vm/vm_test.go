@@ -1,6 +1,7 @@
 package vm_test
 
 import (
+	"fmt"
 	"net/netip"
 	"strconv"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/yanet-platform/xnetip"
 
 	"github.com/yanet-platform/ipfw"
+	"github.com/yanet-platform/ipfw/internal/synthetic"
 	"github.com/yanet-platform/ipfw/vm"
 )
 
@@ -1748,31 +1750,185 @@ func Test_VM_Build_NumericProto(t *testing.T) {
 	require.Equal(t, pass, machine.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.1")))
 }
 
-// verifies that a check allocates nothing.
-func Test_VM_Check_NoAllocs(t *testing.T) {
-	machine := build(t, "table t add 203.0.113.0/24\nadd deny udp from any to any\nadd deny ip from 198.51.100.0/24 to table(t)\nadd skipto :NEXT ip from table(t) to any\nadd deny ip from me6 to me\nadd deny tcp from any 1-1023 to any\nadd pass tcp from 192.0.2.0/24 not 25 to { me or 2001:db8::/32 } 22,80-443\n:NEXT\nadd deny ip from any to any\n", none)
-	packet := tcp4("192.0.2.1", "192.0.2.1")
-	ctx := &vm.Context{LocalAddrs: []netip.Addr{netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("192.0.2.1")}}
-	verdict := pass
-	allocs := testing.AllocsPerRun(100, func() {
-		if machine.Check(ctx, packet) != pass {
-			verdict = deny
-		}
-	})
-	require.Equal(t, pass, verdict)
-	require.Zero(t, allocs)
+// anyTargets stands every hostname and macro for one network of each
+// family.
+type anyTargets struct{}
+
+// ResolveTarget implements ipfw.TargetResolver.
+func (anyTargets) ResolveTarget(ipfw.Target) ([]net4, []net6, error) {
+	return []net4{parse4("192.0.2.0/28")}, []net6{parse6("2001:db8::/64")}, nil
 }
 
-// verifies that one VM serves checks from several goroutines at once.
+// syntheticVM builds the synthetic ruleset, whose jumps mostly go nowhere
+// and whose names any resolver serves.
+func syntheticVM(t *testing.T) *vm.VM[net4, net6] {
+	t.Helper()
+	machine, err := vm.Build(ipfw.NewParser(synthetic.Ruleset()), vm.Config[net4, net6]{
+		Environment:     ipfw.Environment[net4, net6]{Networks: nets, Protos: fakeProtos{}, Targets: anyTargets{}},
+		UnresolvedJumps: vm.UnresolvedJumpsFallThrough,
+	})
+	require.NoError(t, err)
+	return machine
+}
+
+// syntheticContext is a check environment exercising me, via and in.
+var syntheticContext = &vm.Context{
+	Direction:  vm.In,
+	IfName:     "vlan1234",
+	LocalAddrs: []netip.Addr{netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("2001:db8::1")},
+}
+
+// syntheticPackets are packets of every shape the matchers look at.
+var syntheticPackets = map[string]vm.Packet{
+	"tcp4 syn":  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.5"), netip.MustParseAddr("203.0.113.5")).WithTCP(ipfw.TCPSyn, 40000, 443),
+	"tcp4 ack":  vm.NewIPv4Packet(netip.MustParseAddr("198.51.100.5"), netip.MustParseAddr("192.0.2.1")).WithTCP(ipfw.TCPAck, 22, 40000),
+	"udp4":      vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.200")).WithUDP(53, 53),
+	"icmp4":     vm.NewIPv4Packet(netip.MustParseAddr("203.0.113.9"), netip.MustParseAddr("192.0.2.1")).WithICMP(8, 0),
+	"fragment4": vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.5"), netip.MustParseAddr("203.0.113.5")).WithFragmentOffset(100),
+	"tcp6":      vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::5"), netip.MustParseAddr("2001:db8:1::5")).WithTCP(ipfw.TCPSyn|ipfw.TCPAck, 40000, 80),
+	"icmp6":     vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8::2")).WithICMP6(128, 0),
+}
+
+// verifies that a check of the synthetic ruleset, traced or not, allocates
+// nothing for a packet of any shape.
+func Test_VM_Check_NoAllocs(t *testing.T) {
+	machine := syntheticVM(t)
+	for name, packet := range syntheticPackets {
+		t.Run(name, func(t *testing.T) {
+			expected := machine.Check(syntheticContext, packet)
+			mismatches := 0
+			allocs := testing.AllocsPerRun(100, func() {
+				if machine.Check(syntheticContext, packet) != expected {
+					mismatches++
+				}
+			})
+			require.Zero(t, mismatches)
+			require.Zero(t, allocs)
+
+			allocs = testing.AllocsPerRun(100, func() {
+				if action, matched := machine.CheckTrace(syntheticContext, packet, nopTracer{}); matched && action != expected {
+					mismatches++
+				}
+			})
+			require.Zero(t, mismatches)
+			require.Zero(t, allocs)
+		})
+	}
+}
+
+// verifies that one VM serves checks of the synthetic ruleset from several
+// goroutines at once, every one seeing the verdicts of a lone check.
 func Test_VM_Check_Concurrent(t *testing.T) {
-	machine := build(t, "add pass tcp from 192.0.2.0/24 to any\nadd deny ip from any to any\n", none)
+	machine := syntheticVM(t)
+	expected := map[string]ipfw.Action{}
+	for name, packet := range syntheticPackets {
+		expected[name] = machine.Check(syntheticContext, packet)
+	}
 	for idx := range 8 {
 		t.Run(strconv.Itoa(idx), func(t *testing.T) {
 			t.Parallel()
-			for range 1000 {
-				require.Equal(t, pass, machine.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.1")))
-				require.Equal(t, deny, machine.Check(&vm.Context{}, tcp4("198.51.100.1", "192.0.2.1")))
+			for range 200 {
+				for name, packet := range syntheticPackets {
+					require.Equal(t, expected[name], machine.Check(syntheticContext, packet))
+				}
 			}
 		})
 	}
+}
+
+// benchmarkRuleset is n rules that never match the benchmark packet, then
+// the tail.
+func benchmarkRuleset(n int, tail string) string {
+	var b strings.Builder
+	for range n {
+		b.WriteString("add deny tcp from 203.0.113.0/24 to any 22\n")
+	}
+	b.WriteString(tail)
+	return b.String()
+}
+
+// benchmarkCheck measures Check over the ruleset with the benchmark packet.
+func benchmarkCheck(b *testing.B, ruleset string) {
+	b.Helper()
+	machine, err := vm.Build(ipfw.NewParser(ruleset), vm.Config[net4, net6]{
+		Environment:     ipfw.Environment[net4, net6]{Networks: nets, Protos: fakeProtos{}, Targets: anyTargets{}},
+		UnresolvedJumps: vm.UnresolvedJumpsFallThrough,
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	packet := syntheticPackets["tcp4 syn"]
+	b.ReportAllocs()
+	for b.Loop() {
+		machine.Check(syntheticContext, packet)
+	}
+}
+
+func Benchmark_VM_Check_FirstRule(b *testing.B) {
+	benchmarkCheck(b, benchmarkRuleset(0, "add pass ip from any to any\n")+benchmarkRuleset(1000, ""))
+}
+
+func Benchmark_VM_Check_LastRule(b *testing.B) {
+	benchmarkCheck(b, benchmarkRuleset(1000, "add pass ip from any to any\n"))
+}
+
+func Benchmark_VM_Check_NoRule(b *testing.B) {
+	benchmarkCheck(b, benchmarkRuleset(1000, ""))
+}
+
+func Benchmark_VM_Check_Jumps(b *testing.B) {
+	var ruleset strings.Builder
+	for idx := range 1000 {
+		fmt.Fprintf(&ruleset, "add skipto :S%d ip from any to any\nadd deny ip from any to any\n:S%d\n", idx, idx)
+	}
+	ruleset.WriteString("add pass ip from any to any\n")
+	benchmarkCheck(b, ruleset.String())
+}
+
+func Benchmark_VM_Check_Synthetic(b *testing.B) {
+	benchmarkCheck(b, synthetic.Ruleset())
+}
+
+func Benchmark_VM_Build_Synthetic(b *testing.B) {
+	ruleset := synthetic.Ruleset()
+	cfg := vm.Config[net4, net6]{
+		Environment:     ipfw.Environment[net4, net6]{Networks: nets, Protos: fakeProtos{}, Targets: anyTargets{}},
+		UnresolvedJumps: vm.UnresolvedJumpsFallThrough,
+	}
+	b.ReportAllocs()
+	b.SetBytes(int64(len(ruleset)))
+	for b.Loop() {
+		if _, err := vm.Build(ipfw.NewParser(ruleset), cfg); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func ExampleBuild() {
+	ruleset := "add deny ip from 198.51.100.0/24 to any\n" +
+		"add pass ip from 192.0.2.0/24 to any 22\n" +
+		"add deny ip from any to any\n"
+	machine, err := vm.Build(ipfw.NewParser(ruleset), vm.Config[xnetip.Network4, xnetip.Network6]{
+		Environment: ipfw.Environment[xnetip.Network4, xnetip.Network6]{
+			Networks: ipfw.NetworkParserFuncs[xnetip.Network4, xnetip.Network6]{
+				Parse4:    xnetip.ParseNetwork4,
+				Parse6:    xnetip.ParseNetwork6,
+				FromAddr4: xnetip.Network4FromAddr,
+				FromAddr6: xnetip.Network6FromAddr,
+			},
+		},
+	})
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	ctx := &vm.Context{}
+	ssh := vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.10"), netip.MustParseAddr("203.0.113.1")).WithTCP(ipfw.TCPSyn, 40000, 22)
+	fmt.Println(machine.Check(ctx, ssh))
+	other := vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.10"), netip.MustParseAddr("203.0.113.1")).WithTCP(ipfw.TCPSyn, 40000, 80)
+	fmt.Println(machine.Check(ctx, other))
+	// Output:
+	//
+	// pass
+	// deny
 }
