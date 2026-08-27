@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/yanet-platform/ipfw"
+	"github.com/yanet-platform/ipfw-go"
 )
 
 // bodyError is the failure of a line whose body is `_`, a token that is

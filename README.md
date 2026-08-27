@@ -3,7 +3,7 @@
 A Go port of the Rust [`ipfw`](../ipfw) crate: a streaming, zero-copy parser for the FreeBSD/macOS [`ipfw(8)`](https://man.freebsd.org/cgi/man.cgi?ipfw(8)) ruleset format and a virtual machine that evaluates a packet against the ruleset. Runtime code uses the standard library only.
 
 ```sh
-go get github.com/yanet-platform/ipfw
+go get github.com/yanet-platform/ipfw-go
 ```
 
 Licensed under the Apache License 2.0, see [LICENSE](LICENSE).

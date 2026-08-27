@@ -4,7 +4,7 @@ Guidance for AI coding agents working on `ipfw`. Facts about the code, build and
 
 ## Project
 
-`ipfw` (`github.com/yanet-platform/ipfw`, Go 1.24) is a **stdlib-only runtime** port of the Rust `ipfw` crate at `../ipfw`: a streaming, zero-copy parser for the FreeBSD/macOS `ipfw(8)` ruleset format plus a virtual machine that evaluates a packet against the ruleset. Package `ipfw` holds the parser, the token types, `State` and the typed layer (`Environment`, `Resolver`, `VMState`), package `vm` the VM. Tests use `testify`, `rapid` and `xnetip`. `README.md` shows the layers and the deviations from the Rust crate and from FreeBSD.
+`ipfw` (`github.com/yanet-platform/ipfw-go`, Go 1.24) is a **stdlib-only runtime** port of the Rust `ipfw` crate at `../ipfw`: a streaming, zero-copy parser for the FreeBSD/macOS `ipfw(8)` ruleset format plus a virtual machine that evaluates a packet against the ruleset. Package `ipfw` holds the parser, the token types, `State` and the typed layer (`Environment`, `Resolver`, `VMState`), package `vm` the VM. Tests use `testify`, `rapid` and `xnetip`. `README.md` shows the layers and the deviations from the Rust crate and from FreeBSD.
 
 ## Layout
 

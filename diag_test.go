@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/yanet-platform/ipfw"
+	"github.com/yanet-platform/ipfw-go"
 )
 
 // lines joins the lines of an expected rendering, the trailing newline

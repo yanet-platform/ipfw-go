@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
 
-	"github.com/yanet-platform/ipfw"
+	"github.com/yanet-platform/ipfw-go"
 )
 
 // protos is the state of a body with the given transport protocols.

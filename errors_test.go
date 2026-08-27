@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/yanet-platform/ipfw"
+	"github.com/yanet-platform/ipfw-go"
 )
 
 // verifies that every error kind renders its documented message and an

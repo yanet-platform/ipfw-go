@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"net/netip"
 
-	"github.com/yanet-platform/ipfw"
+	"github.com/yanet-platform/ipfw-go"
 )
 
 // The transport protocol numbers the matcher knows.

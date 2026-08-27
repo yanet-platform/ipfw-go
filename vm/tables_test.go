@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/xnetip"
 
-	"github.com/yanet-platform/ipfw/vm"
+	"github.com/yanet-platform/ipfw-go/vm"
 )
 
 var _ vm.TableRegistry[net4, net6] = (*vm.DefaultTableRegistry[net4, net6])(nil)

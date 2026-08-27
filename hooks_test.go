@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/yanet-platform/ipfw"
+	"github.com/yanet-platform/ipfw-go"
 )
 
 // allowFromAny is a command hook for `ALLOW_FROM_ANY(PROTO, DST[, PORTS])

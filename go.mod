@@ -1,4 +1,4 @@
-module github.com/yanet-platform/ipfw
+module github.com/yanet-platform/ipfw-go
 
 go 1.24
 

@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/xnetip"
 
-	"github.com/yanet-platform/ipfw"
-	"github.com/yanet-platform/ipfw/vm"
+	"github.com/yanet-platform/ipfw-go"
+	"github.com/yanet-platform/ipfw-go/vm"
 )
 
 type (
