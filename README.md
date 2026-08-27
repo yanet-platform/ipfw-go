@@ -45,14 +45,12 @@ Licensed under the Apache License 2.0, see [LICENSE](LICENSE).
 ## How it fits together
 
 ```
-        ipfw.Parser ─────────────► ipfw.State ────────────► ipfw.Resolver ──────► ipfw.VMState
-        one line at a time         raw tokens of the        names into values     numbers and
-        │                          rule body                within an             networks
-        └─► ipfw.Record            (ReduceState collects,   Environment           (vm builds
-            what the line is       DiscardState drops)                            from these)
+ipfw.Parser ──► ipfw.State  ──► ipfw.Resolver  ──► ipfw.VMState ──► vm.VM
+one line        raw tokens      names within       numbers and      checks
+at a time       of the body     an Environment     networks         packets
 ```
 
-The parser knows the grammar and nothing else. It never parses an address, never resolves a name, and every token it hands over is a sub-slice of the input, so a line costs no allocation at all. Turning text into values is the next layer's business, and evaluating packets the layer after that.
+Alongside the tokens the parser hands back a `Record` for the line, saying whether it held a rule, a table command, a label or a comment. The parser knows the grammar and nothing else. It never parses an address, never resolves a name, and every token it hands over is a sub-slice of the input, so a line costs no allocation at all. Turning text into values is the next layer's business, and evaluating packets the layer after that.
 
 ## Parsing
 
