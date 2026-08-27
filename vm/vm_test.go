@@ -1478,10 +1478,10 @@ func Test_VM_Check_PolicyOptions(t *testing.T) {
 // next rule, and an entry added after the build counts.
 func Test_VM_Check_TableArg(t *testing.T) {
 	packet := tcp4("192.0.2.1", "192.0.2.2")
-	corpus := build(t, "table t create type iface\n\nadd skipto tablearg ip from any to any via table(t) in\ntable t add vlan1234 :INBOUND\nadd deny ip from any to any\n\n:INBOUND\nadd pass ip from any to any\n", none)
-	require.Equal(t, pass, corpus.Check(&vm.Context{IfName: "vlan1234"}, packet))
-	require.Equal(t, deny, corpus.Check(&vm.Context{IfName: "eth0"}, packet))
-	require.Equal(t, deny, corpus.Check(&vm.Context{IfName: "vlan1234", Direction: vm.Out}, packet))
+	tablearg := build(t, "table t create type iface\n\nadd skipto tablearg ip from any to any via table(t) in\ntable t add vlan1234 :INBOUND\nadd deny ip from any to any\n\n:INBOUND\nadd pass ip from any to any\n", none)
+	require.Equal(t, pass, tablearg.Check(&vm.Context{IfName: "vlan1234"}, packet))
+	require.Equal(t, deny, tablearg.Check(&vm.Context{IfName: "eth0"}, packet))
+	require.Equal(t, deny, tablearg.Check(&vm.Context{IfName: "vlan1234", Direction: vm.Out}, packet))
 
 	two := build(t, "table j add vlan1 :ONE\ntable j add vlan2 :TWO\ntable j add vlan3 :NOWHERE\nadd skipto tablearg ip from any to any via table(j)\nadd deny ip from any to any\n:ONE\nadd pass ip from any to any\n:TWO\nadd count ip from any to any\nadd deny ip from any to any\n", none)
 	cases := []struct {
