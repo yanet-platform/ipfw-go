@@ -548,6 +548,116 @@ func Test_VM_Check_Established(t *testing.T) {
 	require.Equal(t, pass, negated.Check(&vm.Context{}, udp))
 }
 
+// verifies the src-port and dst-port options: the packet's port must be
+// present and in a range, a list is any of its ranges, a negated list none.
+func Test_VM_Check_PortOptions(t *testing.T) {
+	tcp := func(src, dst uint16) vm.Packet {
+		return vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")).WithTCP(ipfw.TCPSyn, src, dst)
+	}
+	cases := []struct {
+		name    string
+		rules   string
+		packet  vm.Packet
+		verdict ipfw.Action
+	}{
+		{
+			name:    "src-port, match",
+			rules:   "add pass tcp from any to any src-port 25\nadd deny ip from any to any\n",
+			packet:  tcp(25, 50000),
+			verdict: pass,
+		},
+		{
+			name:    "src-port, mismatch",
+			rules:   "add pass tcp from any to any src-port 25\nadd deny ip from any to any\n",
+			packet:  tcp(26, 50000),
+			verdict: deny,
+		},
+		{
+			name:    "two dst-port rules, first",
+			rules:   "add pass tcp from any to any dst-port 22\nadd pass tcp from any to any dst-port 25\nadd deny ip from any to any\n",
+			packet:  tcp(50000, 22),
+			verdict: pass,
+		},
+		{
+			name:    "two dst-port rules, second",
+			rules:   "add pass tcp from any to any dst-port 22\nadd pass tcp from any to any dst-port 25\nadd deny ip from any to any\n",
+			packet:  tcp(50000, 25),
+			verdict: pass,
+		},
+		{
+			name:    "two dst-port rules, neither",
+			rules:   "add pass tcp from any to any dst-port 22\nadd pass tcp from any to any dst-port 25\nadd deny ip from any to any\n",
+			packet:  tcp(50000, 26),
+			verdict: deny,
+		},
+		{
+			name:    "dst-port over UDP",
+			rules:   "add pass ip from any to any dst-port 22\nadd deny ip from any to any\n",
+			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")).WithUDP(50000, 22),
+			verdict: pass,
+		},
+		{
+			name:    "dst-port against ICMP",
+			rules:   "add pass ip from any to any dst-port 22\nadd deny ip from any to any\n",
+			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")).WithICMP(8, 1),
+			verdict: deny,
+		},
+		{
+			name:    "dst-port list, first",
+			rules:   "add pass tcp from any to any dst-port 22,80\nadd deny ip from any to any\n",
+			packet:  tcp(50000, 22),
+			verdict: pass,
+		},
+		{
+			name:    "dst-port list, second",
+			rules:   "add pass tcp from any to any dst-port 22,80\nadd deny ip from any to any\n",
+			packet:  tcp(50000, 80),
+			verdict: pass,
+		},
+		{
+			name:    "dst-port list, neither",
+			rules:   "add pass tcp from any to any dst-port 22,80\nadd deny ip from any to any\n",
+			packet:  tcp(50000, 443),
+			verdict: deny,
+		},
+		{
+			name:    "negated dst-port list, inside",
+			rules:   "add pass tcp from any to any not dst-port 22,80\nadd deny ip from any to any\n",
+			packet:  tcp(50000, 22),
+			verdict: deny,
+		},
+		{
+			name:    "negated dst-port list, outside",
+			rules:   "add pass tcp from any to any not dst-port 22,80\nadd deny ip from any to any\n",
+			packet:  tcp(50000, 443),
+			verdict: pass,
+		},
+		{
+			name:    "range with another option",
+			rules:   "add pass tcp from any to any established src-port 1024-65535\nadd deny ip from any to any\n",
+			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")).WithTCP(ipfw.TCPAck, 1024, 22),
+			verdict: pass,
+		},
+		{
+			name:    "range with another option, below",
+			rules:   "add pass tcp from any to any established src-port 1024-65535\nadd deny ip from any to any\n",
+			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")).WithTCP(ipfw.TCPAck, 1023, 22),
+			verdict: deny,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			machine := build(t, tc.rules, none)
+			require.Equal(t, tc.verdict, machine.Check(&vm.Context{}, tc.packet))
+		})
+	}
+
+	named, err := vm.Build(ipfw.NewParser("add pass tcp from any to any dst-port ssh,smtp\nadd deny ip from any to any\n"), resolvingServices, none)
+	require.NoError(t, err)
+	require.Equal(t, pass, named.Check(&vm.Context{}, tcp(50000, 25)))
+	require.Equal(t, deny, named.Check(&vm.Context{}, tcp(50000, 26)))
+}
+
 // verifies that tcpflags matches a TCP packet whose examined flags are
 // exactly the ones to be set, and never a packet without TCP flags.
 func Test_VM_Check_TCPFlags(t *testing.T) {
@@ -1169,10 +1279,10 @@ func Test_VM_Build_Errors(t *testing.T) {
 		},
 		{
 			name:      "unsupported option",
-			rules:     "add pass tcp from any to any established src-port 22\n",
+			rules:     "add pass tcp from any to any established proto tcp\n",
 			resolvers: resolving,
 			line:      1,
-			text:      "add pass tcp from any to any established src-port 22",
+			text:      "add pass tcp from any to any established proto tcp",
 			cause:     vm.ErrUnsupportedOption,
 		},
 		{
