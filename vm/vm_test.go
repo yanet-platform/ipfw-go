@@ -41,8 +41,25 @@ func (fakeProtos) ResolveProto(name string) (uint8, bool) {
 	return 0, false
 }
 
+// fakeServices resolves the two service names the tests use.
+type fakeServices struct{}
+
+// ResolveService implements ipfw.ServiceResolver.
+func (fakeServices) ResolveService(name string) (uint16, bool) {
+	switch name {
+	case "ssh":
+		return 22, true
+	case "smtp":
+		return 25, true
+	}
+	return 0, false
+}
+
 // resolving parses networks with xnetip and resolves the fake protocols.
 var resolving = ipfw.Resolvers[net4, net6]{Networks: nets, Protos: fakeProtos{}}
+
+// resolvingServices is resolving with the fake services too.
+var resolvingServices = ipfw.Resolvers[net4, net6]{Networks: nets, Protos: fakeProtos{}, Services: fakeServices{}}
 
 // networksOnly parses networks and resolves no name.
 var networksOnly = ipfw.Resolvers[net4, net6]{Networks: nets}
@@ -361,6 +378,116 @@ func Test_VM_Check_UnresolvedJumpsFallThrough(t *testing.T) {
 	}, tracer.seen)
 }
 
+// verifies the port matchers of the rule body: a list requires the packet
+// to have ports and one of its ranges, negated or not, to hold the port.
+func Test_VM_Check_Ports(t *testing.T) {
+	cases := []struct {
+		name    string
+		rules   string
+		packet  vm.Packet
+		verdict ipfw.Action
+	}{
+		{
+			name:    "source port, match",
+			rules:   "add pass tcp from any 22 to any\nadd deny ip from any to any\n",
+			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")).WithTCP(ipfw.TCPSyn, 22, 50000),
+			verdict: pass,
+		},
+		{
+			name:    "source port, mismatch",
+			rules:   "add pass tcp from any 22 to any\nadd deny ip from any to any\n",
+			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")).WithTCP(ipfw.TCPSyn, 26, 50000),
+			verdict: deny,
+		},
+		{
+			name:    "destination port over TCP",
+			rules:   "add pass ip from any to any 22\nadd deny ip from any to any\n",
+			packet:  tcp4("192.0.2.1", "192.0.2.1"),
+			verdict: pass,
+		},
+		{
+			name:    "destination port over UDP",
+			rules:   "add pass ip from any to any 22\nadd deny ip from any to any\n",
+			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")).WithUDP(50000, 22),
+			verdict: pass,
+		},
+		{
+			name:    "destination port against ICMP, which has none",
+			rules:   "add pass ip from any to any 22\nadd deny ip from any to any\n",
+			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")).WithICMP(8, 1),
+			verdict: deny,
+		},
+		{
+			name:    "both sides, match",
+			rules:   "add pass tcp from 192.0.2.0/24 25 to 198.51.100.0/24 25\nadd deny ip from any to any\n",
+			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("198.51.100.1")).WithTCP(ipfw.TCPSyn, 25, 25),
+			verdict: pass,
+		},
+		{
+			name:    "both sides, destination port mismatch",
+			rules:   "add pass tcp from 192.0.2.0/24 25 to 198.51.100.0/24 25\nadd deny ip from any to any\n",
+			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("198.51.100.1")).WithTCP(ipfw.TCPSyn, 25, 26),
+			verdict: deny,
+		},
+		{
+			name:    "range and list, inside the range",
+			rules:   "add pass tcp from any 1000-2000,22 to any 80,443\nadd deny ip from any to any\n",
+			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")).WithTCP(ipfw.TCPSyn, 1500, 443),
+			verdict: pass,
+		},
+		{
+			name:    "range and list, the single port",
+			rules:   "add pass tcp from any 1000-2000,22 to any 80,443\nadd deny ip from any to any\n",
+			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")).WithTCP(ipfw.TCPSyn, 22, 80),
+			verdict: pass,
+		},
+		{
+			name:    "range and list, just outside the range",
+			rules:   "add pass tcp from any 1000-2000,22 to any 80,443\nadd deny ip from any to any\n",
+			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")).WithTCP(ipfw.TCPSyn, 2001, 80),
+			verdict: deny,
+		},
+		{
+			name:    "negated list, port outside",
+			rules:   "add pass tcp from any not 22,25 to any\nadd deny ip from any to any\n",
+			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")).WithTCP(ipfw.TCPSyn, 23, 50000),
+			verdict: pass,
+		},
+		{
+			name:    "negated list, port inside",
+			rules:   "add pass tcp from any not 22,25 to any\nadd deny ip from any to any\n",
+			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")).WithTCP(ipfw.TCPSyn, 25, 50000),
+			verdict: deny,
+		},
+		{
+			name:    "IPv6 packet",
+			rules:   "add pass tcp from any to any 22\nadd deny ip from any to any\n",
+			packet:  vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8::2")).WithTCP(ipfw.TCPSyn, 50000, 22),
+			verdict: pass,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			machine := build(t, tc.rules, none)
+			require.Equal(t, tc.verdict, machine.Check(&vm.Context{}, tc.packet))
+		})
+	}
+}
+
+// verifies that service names are resolved into ports on the way in.
+func Test_VM_Build_ServiceNames(t *testing.T) {
+	machine, err := vm.Build(
+		ipfw.NewParser("add pass tcp from any ssh-smtp to any smtp\nadd deny ip from any to any\n"),
+		resolvingServices,
+		none,
+	)
+	require.NoError(t, err)
+	packet := vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1"))
+	require.Equal(t, pass, machine.Check(&vm.Context{}, packet.WithTCP(ipfw.TCPSyn, 23, 25)))
+	require.Equal(t, deny, machine.Check(&vm.Context{}, packet.WithTCP(ipfw.TCPSyn, 26, 25)))
+	require.Equal(t, deny, machine.Check(&vm.Context{}, packet.WithTCP(ipfw.TCPSyn, 23, 22)))
+}
+
 // verifies that me and me6 match the addresses the context lists, in the
 // packet's family only, so one VM gives different verdicts per context.
 func Test_VM_Check_Me(t *testing.T) {
@@ -605,12 +732,20 @@ func Test_VM_Build_Errors(t *testing.T) {
 			cause:     vm.ErrUnresolvedJump,
 		},
 		{
-			name:      "unsupported ports",
-			rules:     "add pass tcp from any 22 to any\n",
+			name:      "service name without a resolver",
+			rules:     "add pass tcp from any ssh to any\n",
 			resolvers: resolving,
 			line:      1,
-			text:      "add pass tcp from any 22 to any",
-			cause:     vm.ErrUnsupportedPort,
+			text:      "add pass tcp from any ssh to any",
+			cause:     ipfw.ErrUnresolvedService,
+		},
+		{
+			name:      "unresolved service name",
+			rules:     "add pass tcp from any to any 22,bogus\n",
+			resolvers: resolvingServices,
+			line:      1,
+			text:      "add pass tcp from any to any 22,bogus",
+			cause:     ipfw.ErrUnresolvedService,
 		},
 		{
 			name:      "unsupported option",
@@ -701,7 +836,7 @@ func Test_VM_Build_NumericProto(t *testing.T) {
 
 // verifies that a check allocates nothing.
 func Test_VM_Check_NoAllocs(t *testing.T) {
-	machine := build(t, "table t add 203.0.113.0/24\nadd deny udp from any to any\nadd deny ip from 198.51.100.0/24 to table(t)\nadd skipto :NEXT ip from table(t) to any\nadd deny ip from me6 to me\nadd pass tcp from 192.0.2.0/24 to { me or 2001:db8::/32 }\n:NEXT\nadd deny ip from any to any\n", none)
+	machine := build(t, "table t add 203.0.113.0/24\nadd deny udp from any to any\nadd deny ip from 198.51.100.0/24 to table(t)\nadd skipto :NEXT ip from table(t) to any\nadd deny ip from me6 to me\nadd deny tcp from any 1-1023 to any\nadd pass tcp from 192.0.2.0/24 not 25 to { me or 2001:db8::/32 } 22,80-443\n:NEXT\nadd deny ip from any to any\n", none)
 	packet := tcp4("192.0.2.1", "192.0.2.1")
 	ctx := &vm.Context{LocalAddrs: []netip.Addr{netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("192.0.2.1")}}
 	verdict := pass

@@ -72,7 +72,6 @@ var (
 	ErrUnresolvedJump    = errors.New("skipto to a rule that never appears")
 	ErrUnsupportedOption = errors.New("unsupported option")
 	ErrUnsupportedAction = errors.New("unsupported action")
-	ErrUnsupportedPort   = errors.New("unsupported port")
 	ErrUnsupportedRecord = errors.New("unsupported record")
 )
 
@@ -124,6 +123,11 @@ type op[V4, V6 Network] struct {
 	Sources []ipfw.TargetMatch[V4, V6]
 	// Destinations are the destinations, none matching nothing.
 	Destinations []ipfw.TargetMatch[V4, V6]
+	// SourcePorts are the source port ranges, none meaning any port, some
+	// requiring the packet to have ports.
+	SourcePorts []ipfw.PortNumberMatch
+	// DestinationPorts are the destination port ranges, likewise.
+	DestinationPorts []ipfw.PortNumberMatch
 	// Jump is the index of the rule a matching skipto continues at, always
 	// past this one: the next rule until the jump is linked.
 	Jump int
@@ -353,13 +357,15 @@ func (m *builder[V4, V6]) OnDestinationTarget(match ipfw.TargetMatch[V4, V6]) er
 }
 
 // OnSourcePort implements ipfw.VMState.
-func (m *builder[V4, V6]) OnSourcePort(ipfw.PortNumberMatch) error {
-	return ErrUnsupportedPort
+func (m *builder[V4, V6]) OnSourcePort(match ipfw.PortNumberMatch) error {
+	m.Rule.SourcePorts = append(m.Rule.SourcePorts, match)
+	return nil
 }
 
 // OnDestinationPort implements ipfw.VMState.
-func (m *builder[V4, V6]) OnDestinationPort(ipfw.PortNumberMatch) error {
-	return ErrUnsupportedPort
+func (m *builder[V4, V6]) OnDestinationPort(match ipfw.PortNumberMatch) error {
+	m.Rule.DestinationPorts = append(m.Rule.DestinationPorts, match)
+	return nil
 }
 
 // OnOption implements ipfw.VMState.
@@ -420,7 +426,7 @@ type nopTracer struct{}
 func (nopTracer) Trace(*ipfw.Record, ipfw.Action, bool) {}
 
 // matches reports whether the packet satisfies the body of the rule: the
-// IP versions, the protocols, the sources and the destinations.
+// IP versions, the protocols, the sources, the destinations and the ports.
 func (m *VM[V4, V6]) matches(rule *op[V4, V6], ctx *Context, pkt Packet) bool {
 	if !matchIPProtos(rule.IPProtos, pkt.Version()) {
 		return false
@@ -431,7 +437,35 @@ func (m *VM[V4, V6]) matches(rule *op[V4, V6], ctx *Context, pkt Packet) bool {
 	if !m.matchTargets(rule.Sources, ctx, pkt.SourceAddr()) {
 		return false
 	}
-	return m.matchTargets(rule.Destinations, ctx, pkt.DestinationAddr())
+	if !m.matchTargets(rule.Destinations, ctx, pkt.DestinationAddr()) {
+		return false
+	}
+	if len(rule.SourcePorts) > 0 {
+		port, ok := pkt.SourcePort()
+		if !ok || !matchPorts(rule.SourcePorts, port) {
+			return false
+		}
+	}
+	if len(rule.DestinationPorts) > 0 {
+		port, ok := pkt.DestinationPort()
+		if !ok || !matchPorts(rule.DestinationPorts, port) {
+			return false
+		}
+	}
+	return true
+}
+
+// matchPorts reports whether the port is in one of the ranges, or, the
+// list being negated, in none of them.
+//
+// One `not` negates a whole list, so every element carries the same flag.
+func matchPorts(matches []ipfw.PortNumberMatch, port uint16) bool {
+	for _, match := range matches {
+		if match.Lo <= port && port <= match.Hi {
+			return !match.Neg
+		}
+	}
+	return len(matches) > 0 && matches[0].Neg
 }
 
 // matchIPProtos reports whether the version is in one of the version
