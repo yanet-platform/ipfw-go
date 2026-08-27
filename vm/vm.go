@@ -128,6 +128,9 @@ type op[V4, V6 Network] struct {
 	SourcePorts []ipfw.PortNumberMatch
 	// DestinationPorts are the destination port ranges, likewise.
 	DestinationPorts []ipfw.PortNumberMatch
+	// Options are the rule options in order, AND-ed except inside an
+	// or-group.
+	Options []ipfw.Opt
 	// Jump is the index of the rule a matching skipto continues at, always
 	// past this one: the next rule until the jump is linked.
 	Jump int
@@ -368,9 +371,16 @@ func (m *builder[V4, V6]) OnDestinationPort(match ipfw.PortNumberMatch) error {
 	return nil
 }
 
-// OnOption implements ipfw.VMState.
-func (m *builder[V4, V6]) OnOption(ipfw.Opt) error {
-	return ErrUnsupportedOption
+// OnOption implements ipfw.VMState, an option the VM cannot evaluate being
+// ErrUnsupportedOption.
+func (m *builder[V4, V6]) OnOption(opt ipfw.Opt) error {
+	switch opt.Kind {
+	case ipfw.OptEstablished:
+	default:
+		return ErrUnsupportedOption
+	}
+	m.Rule.Options = append(m.Rule.Options, opt)
+	return nil
 }
 
 // Tables is the registry the ruleset filled, the one configured or a
@@ -425,8 +435,8 @@ type nopTracer struct{}
 // Trace implements Tracer.
 func (nopTracer) Trace(*ipfw.Record, ipfw.Action, bool) {}
 
-// matches reports whether the packet satisfies the body of the rule: the
-// IP versions, the protocols, the sources, the destinations and the ports.
+// matches reports whether the packet satisfies the body of the rule and
+// then its options.
 func (m *VM[V4, V6]) matches(rule *op[V4, V6], ctx *Context, pkt Packet) bool {
 	if !matchIPProtos(rule.IPProtos, pkt.Version()) {
 		return false
@@ -452,7 +462,39 @@ func (m *VM[V4, V6]) matches(rule *op[V4, V6], ctx *Context, pkt Packet) bool {
 			return false
 		}
 	}
-	return true
+	return m.matchOptions(rule.Options, pkt)
+}
+
+// matchOptions folds the options left to right: an option starting a
+// term must find the previous term true, one marked Or extends the term.
+func (m *VM[V4, V6]) matchOptions(options []ipfw.Opt, pkt Packet) bool {
+	term := true
+	for idx := range options {
+		opt := &options[idx]
+		hit := m.matchOption(opt, pkt) != opt.Neg
+		if opt.Or {
+			term = term || hit
+			continue
+		}
+		if !term {
+			return false
+		}
+		term = hit
+	}
+	return term
+}
+
+// matchOption reports whether the option, its negation aside, holds for
+// the packet.
+//
+// established is a TCP packet with ACK or RST set.
+func (m *VM[V4, V6]) matchOption(opt *ipfw.Opt, pkt Packet) bool {
+	switch opt.Kind {
+	case ipfw.OptEstablished:
+		flags, ok := pkt.TCPFlags()
+		return ok && flags&(ipfw.TCPAck|ipfw.TCPRst) != 0
+	}
+	return false
 }
 
 // matchPorts reports whether the port is in one of the ranges, or, the

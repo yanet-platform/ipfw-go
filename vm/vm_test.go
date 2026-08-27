@@ -526,6 +526,60 @@ func Test_VM_Build_ServiceNames(t *testing.T) {
 	require.Equal(t, deny, machine.Check(&vm.Context{}, packet.WithTCP(ipfw.TCPSyn, 23, 22)))
 }
 
+// tcp4Flags is a TCP packet with the flags from src to dst over IPv4.
+func tcp4Flags(flags ipfw.TCPFlag) vm.Packet {
+	return vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")).WithTCP(flags, 50000, 22)
+}
+
+// verifies that established matches a TCP packet with ACK or RST set and
+// nothing else, negated the other way round.
+func Test_VM_Check_Established(t *testing.T) {
+	machine := build(t, "add allow tcp from any to any established\nadd deny ip from any to any\n", none)
+	require.Equal(t, deny, machine.Check(&vm.Context{}, tcp4Flags(ipfw.TCPSyn)))
+	require.Equal(t, pass, machine.Check(&vm.Context{}, tcp4Flags(ipfw.TCPAck)))
+	require.Equal(t, pass, machine.Check(&vm.Context{}, tcp4Flags(ipfw.TCPRst)))
+	require.Equal(t, pass, machine.Check(&vm.Context{}, tcp4Flags(ipfw.TCPSyn|ipfw.TCPAck)))
+	udp := vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")).WithUDP(50000, 22)
+	require.Equal(t, deny, machine.Check(&vm.Context{}, udp))
+
+	negated := build(t, "add allow ip from any to any not established\nadd deny ip from any to any\n", none)
+	require.Equal(t, pass, negated.Check(&vm.Context{}, tcp4Flags(ipfw.TCPSyn)))
+	require.Equal(t, deny, negated.Check(&vm.Context{}, tcp4Flags(ipfw.TCPAck)))
+	require.Equal(t, pass, negated.Check(&vm.Context{}, udp))
+}
+
+// verifies the fold over the options: AND between terms, OR inside a
+// group, and a rule with no options decided by its body alone.
+func Test_VM_Check_OptionFold(t *testing.T) {
+	machine := build(t, "add pass tcp from any to any established not established\nadd count tcp from any to any { not established or established }\nadd pass tcp from any to any\nadd deny ip from any to any\n", none)
+	for _, flags := range []ipfw.TCPFlag{ipfw.TCPSyn, ipfw.TCPAck} {
+		tracer := &recordingTracer{}
+		action, matched := machine.CheckTrace(&vm.Context{}, tcp4Flags(flags), tracer)
+		require.True(t, matched)
+		require.Equal(t, pass, action)
+		require.Equal(t, []traced{
+			{line: 1, action: ipfw.ActionPass, matched: false},
+			{line: 2, action: ipfw.ActionCount, matched: true},
+			{line: 3, action: ipfw.ActionPass, matched: true},
+		}, tracer.seen)
+	}
+}
+
+// verifies that a check over options allocates nothing.
+func Test_VM_Options_NoAllocs(t *testing.T) {
+	machine := build(t, "add deny tcp from any to any { established or not established } not established\nadd pass tcp from any to any established\nadd deny ip from any to any\n", none)
+	packet := tcp4Flags(ipfw.TCPAck)
+	ctx := &vm.Context{}
+	verdict := pass
+	allocs := testing.AllocsPerRun(100, func() {
+		if machine.Check(ctx, packet) != pass {
+			verdict = deny
+		}
+	})
+	require.Equal(t, pass, verdict)
+	require.Zero(t, allocs)
+}
+
 // verifies that a name stands for every network the resolver gives, of
 // both families, negated as a whole, and for nothing when it gives none.
 func Test_VM_Check_ResolvedTargets(t *testing.T) {
@@ -904,10 +958,10 @@ func Test_VM_Build_Errors(t *testing.T) {
 		},
 		{
 			name:      "unsupported option",
-			rules:     "add pass tcp from any to any established\n",
+			rules:     "add pass tcp from any to any established in\n",
 			resolvers: resolving,
 			line:      1,
-			text:      "add pass tcp from any to any established",
+			text:      "add pass tcp from any to any established in",
 			cause:     vm.ErrUnsupportedOption,
 		},
 		{
