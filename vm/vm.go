@@ -383,8 +383,8 @@ func (m *builder[V4, V6]) OnDestinationPort(match ipfw.PortNumberMatch) error {
 func (m *builder[V4, V6]) OnOption(opt ipfw.Opt) error {
 	switch opt.Kind {
 	case ipfw.OptEstablished, ipfw.OptIn, ipfw.OptOut, ipfw.OptFrag, ipfw.OptICMPTypes, ipfw.OptICMP6Types,
-		ipfw.OptTCPFlags, ipfw.OptSourcePort, ipfw.OptDestinationPort, ipfw.OptProto:
-	case ipfw.OptVia:
+		ipfw.OptTCPFlags, ipfw.OptSourcePort, ipfw.OptDestinationPort, ipfw.OptProto, ipfw.OptVia,
+		ipfw.OptKeepState, ipfw.OptComment, ipfw.OptDiverted, ipfw.OptAntiSpoof:
 	default:
 		return ErrUnsupportedOption
 	}
@@ -534,8 +534,11 @@ func (m *VM[V4, V6]) matchOptions(options []ipfw.Opt, ctx *Context, pkt Packet) 
 // and out the direction of the check, via the context's interface by
 // name, by mask or through a table, frag a non-first fragment, icmptypes
 // and icmp6types an ICMP packet of the family with a type in the set.
+// The options the VM does not emulate follow matchPolicy.
 func (m *VM[V4, V6]) matchOption(opt *ipfw.Opt, ctx *Context, pkt Packet) (bool, int) {
 	switch opt.Kind {
+	case ipfw.OptKeepState, ipfw.OptComment, ipfw.OptDiverted, ipfw.OptAntiSpoof:
+		return matchPolicy(opt.Kind, ctx), noTarget
 	case ipfw.OptEstablished:
 		flags, ok := pkt.TCPFlags()
 		return ok && flags&(ipfw.TCPAck|ipfw.TCPRst) != 0, noTarget
@@ -566,6 +569,24 @@ func (m *VM[V4, V6]) matchOption(opt *ipfw.Opt, ctx *Context, pkt Packet) (bool,
 		return ok && opt.Types.Has(ty), noTarget
 	}
 	return false, noTarget
+}
+
+// matchPolicy is the fixed verdict of an option whose meaning the VM
+// cannot reproduce.
+//
+// keep-state holds, the VM being stateless and the state it would create
+// of no consequence to the verdict. A comment holds, being no condition.
+// diverted never holds, there being no divert sockets. antispoof holds
+// on the way out and never on the way in, the VM knowing no topology to
+// tell a spoofed source by.
+func matchPolicy(kind ipfw.OptKind, ctx *Context) bool {
+	switch kind {
+	case ipfw.OptKeepState, ipfw.OptComment:
+		return true
+	case ipfw.OptAntiSpoof:
+		return ctx.Direction == Out
+	}
+	return false
 }
 
 // matchVia reports whether the context's interface is the one named, one

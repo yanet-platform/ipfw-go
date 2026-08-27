@@ -3,6 +3,7 @@ package vm_test
 import (
 	"net/netip"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -1317,6 +1318,43 @@ func Test_VM_Build_UnsupportedKinds(t *testing.T) {
 	}
 }
 
+// verifies the fixed policy of the options the VM does not emulate:
+// keep-state and a comment hold, diverted never, antispoof on the way out.
+func Test_VM_Check_PolicyOptions(t *testing.T) {
+	packet := tcp4("192.0.2.1", "192.0.2.2")
+	cases := []struct {
+		option string
+		in     ipfw.Action
+		out    ipfw.Action
+	}{
+		{option: "keep-state", in: pass, out: pass},
+		{option: "not keep-state", in: deny, out: deny},
+		{option: "keep-state :flow", in: pass, out: pass},
+		{option: "not keep-state :flow", in: deny, out: deny},
+		{option: "diverted", in: deny, out: deny},
+		{option: "not diverted", in: pass, out: pass},
+		{option: "antispoof", in: deny, out: pass},
+		{option: "not antispoof", in: pass, out: deny},
+		{option: "note", in: pass, out: pass},
+		{option: "not note", in: deny, out: deny},
+	}
+	note := func(rest string) (ipfw.Opt, int, error) {
+		if strings.HasPrefix(rest, "note") {
+			return ipfw.Opt{Kind: ipfw.OptComment, Text: "note"}, len("note"), nil
+		}
+		return ipfw.Opt{}, 0, ipfw.ErrUnknownOption
+	}
+	for _, tc := range cases {
+		t.Run(tc.option, func(t *testing.T) {
+			parser := ipfw.NewParser("add pass ip from any to any "+tc.option+"\nadd deny ip from any to any\n", ipfw.WithOptionHook(note))
+			machine, err := vm.Build(parser, resolving, none)
+			require.NoError(t, err)
+			require.Equal(t, tc.in, machine.Check(&vm.Context{Direction: vm.In}, packet))
+			require.Equal(t, tc.out, machine.Check(&vm.Context{Direction: vm.Out}, packet))
+		})
+	}
+}
+
 // verifies that via table(NAME) matches an interface the table lists and
 // that skipto tablearg then continues at the label the entry's value names.
 //
@@ -1508,14 +1546,6 @@ func Test_VM_Build_Errors(t *testing.T) {
 			line:      1,
 			text:      "add pass tcp from any to any 22,bogus",
 			cause:     ipfw.ErrUnresolvedService,
-		},
-		{
-			name:      "unsupported option",
-			rules:     "add pass tcp from any to any established keep-state\n",
-			resolvers: resolving,
-			line:      1,
-			text:      "add pass tcp from any to any established keep-state",
-			cause:     vm.ErrUnsupportedOption,
 		},
 		{
 			name:      "proto option name without a resolver",
