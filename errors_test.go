@@ -66,6 +66,16 @@ func Test_ErrorKind_Error(t *testing.T) {
 			message: "unresolved target name",
 		},
 		{
+			name:    "unresolved proto",
+			kind:    ipfw.ErrUnresolvedProto,
+			message: "unresolved protocol name",
+		},
+		{
+			name:    "unresolved service",
+			kind:    ipfw.ErrUnresolvedService,
+			message: "unresolved service name",
+		},
+		{
 			name:    "expected hostname escape close",
 			kind:    ipfw.ErrExpectedHostnameEscapeClose,
 			message: "expected closing `'` of a quoted hostname",

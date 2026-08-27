@@ -29,9 +29,13 @@ const (
 	ErrExpectedFlowName
 	ErrUnknownOption
 	ErrExpectedTarget
-	// ErrUnresolvedTarget is a hostname or a target of unknown shape with no
-	// resolver to turn it into networks.
+	// ErrUnresolvedTarget is a hostname or a target of unknown shape that no
+	// resolver turns into networks.
 	ErrUnresolvedTarget
+	// ErrUnresolvedProto is a protocol name that no resolver turns into a number.
+	ErrUnresolvedProto
+	// ErrUnresolvedService is a service name that no resolver turns into a port.
+	ErrUnresolvedService
 	ErrExpectedHostnameEscapeClose
 	ErrExpectedTableCommand
 	ErrExpectedTableKey
@@ -97,6 +101,10 @@ func (m ErrorKind) Error() string {
 		return "expected target"
 	case ErrUnresolvedTarget:
 		return "unresolved target name"
+	case ErrUnresolvedProto:
+		return "unresolved protocol name"
+	case ErrUnresolvedService:
+		return "unresolved service name"
 	case ErrExpectedHostnameEscapeClose:
 		return "expected closing `'` of a quoted hostname"
 	case ErrExpectedTableCommand:

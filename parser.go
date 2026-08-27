@@ -314,14 +314,16 @@ func (m *Parser) parseBody(s string, state State) (string, fail) {
 	// state so that a rejected attempt emits nothing.
 	//
 	// `to any established` is an option, `to any domain` a port and `to any
-	// 22 established` both. A failed port attempt leaves the input where the
-	// destination ended.
+	// 22 established` both. A token that is not a port leaves the input
+	// where the destination ended, a port the state refuses fails the line.
 	if buf, ok := ws1(rest); ok {
 		if _, err = parseOptions(buf, DiscardState{}, m.opts.OptionHook); !err.Failed() {
 			return parseOptions(buf, state, m.opts.OptionHook)
 		}
 		if buf, err = parsePorts(buf, state, destinationSide); !err.Failed() {
 			rest = buf
+		} else if !isPortSyntax(err.Kind) {
+			return s, err
 		}
 	}
 	if buf, ok := ws1(rest); ok {

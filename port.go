@@ -98,6 +98,12 @@ func parsePortRange(s string) (PortRange, string, fail) {
 	return PortRange{Lo: lo, Hi: hi}, rest, fail{}
 }
 
+// isPortSyntax reports whether the kind is one parsePort raises itself,
+// as opposed to one a state returned for a port it was handed.
+func isPortSyntax(kind ErrorKind) bool {
+	return kind == ErrExpectedPort || kind == ErrUnexpectedEscape
+}
+
 // parsePort reads a run of letters and digits up to a dash, a number when
 // every byte is a digit and the value fits sixteen bits, a name otherwise.
 //

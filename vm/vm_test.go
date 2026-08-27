@@ -41,13 +41,20 @@ func (fakeProtos) ResolveProto(name string) (uint8, bool) {
 	return 0, false
 }
 
-// resolving is the configuration with the fake protocol resolver.
-var resolving = vm.Config[net4, net6]{Protos: fakeProtos{}}
+// resolving parses networks with xnetip and resolves the fake protocols.
+var resolving = ipfw.Resolvers[net4, net6]{Networks: nets, Protos: fakeProtos{}}
 
-// build builds a VM from src, failing the test on any error.
+// networksOnly parses networks and resolves no name.
+var networksOnly = ipfw.Resolvers[net4, net6]{Networks: nets}
+
+// none is the configuration with nothing set.
+var none = vm.Config[net4, net6]{}
+
+// build builds a VM from src with the fake resolvers, failing the test on
+// any error.
 func build(t *testing.T, src string, cfg vm.Config[net4, net6]) *vm.VM[net4, net6] {
 	t.Helper()
-	machine, err := vm.Build(ipfw.NewParser(src), nets, cfg)
+	machine, err := vm.Build(ipfw.NewParser(src), resolving, cfg)
 	require.NoError(t, err)
 	return machine
 }
@@ -153,7 +160,7 @@ func Test_VM_Check_Compat(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			machine := build(t, tc.rules, resolving)
+			machine := build(t, tc.rules, none)
 			require.Equal(t, tc.verdict, machine.Check(&vm.Context{}, tc.packet))
 		})
 	}
@@ -163,14 +170,11 @@ func Test_VM_Check_Compat(t *testing.T) {
 // configured, and that CheckTrace reports no termination then.
 func Test_VM_Check_DefaultVerdict(t *testing.T) {
 	packet := tcp4("192.0.2.1", "192.0.2.1")
-	empty := build(t, "", resolving)
+	empty := build(t, "", none)
 	require.Equal(t, deny, empty.Check(&vm.Context{}, packet))
 	require.Equal(t, 0, empty.Len())
 
-	permissive := build(t, "add deny udp from any to any\n", vm.Config[net4, net6]{
-		Protos:         fakeProtos{},
-		DefaultVerdict: pass,
-	})
+	permissive := build(t, "add deny udp from any to any\n", vm.Config[net4, net6]{DefaultVerdict: pass})
 	require.Equal(t, pass, permissive.Check(&vm.Context{}, packet))
 	action, matched := permissive.CheckTrace(&vm.Context{}, packet, nopTracer{})
 	require.False(t, matched)
@@ -203,7 +207,7 @@ func (m *recordingTracer) Trace(rec *ipfw.Record, action ipfw.Action, matched bo
 // verifies that the tracer sees every rule up to the terminating one with
 // its match flag, and every rule when none terminates.
 func Test_VM_CheckTrace_ReportsEveryOp(t *testing.T) {
-	machine := build(t, "add deny udp from any to any\n# c\nadd deny ip from 198.51.100.0/24 to any\nadd pass tcp from any to any\nadd deny ip from any to any\n", resolving)
+	machine := build(t, "add deny udp from any to any\n# c\nadd deny ip from 198.51.100.0/24 to any\nadd pass tcp from any to any\nadd deny ip from any to any\n", none)
 	require.Equal(t, 4, machine.Len())
 
 	tracer := &recordingTracer{}
@@ -218,7 +222,7 @@ func Test_VM_CheckTrace_ReportsEveryOp(t *testing.T) {
 
 	tracer = &recordingTracer{}
 	icmp := vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8::2")).WithICMP6(128, 0)
-	_, matched = build(t, "add pass tcp from any to any\n", resolving).CheckTrace(&vm.Context{}, icmp, tracer)
+	_, matched = build(t, "add pass tcp from any to any\n", none).CheckTrace(&vm.Context{}, icmp, tracer)
 	require.False(t, matched)
 	require.Equal(t, []traced{{line: 1, action: ipfw.ActionPass, matched: false}}, tracer.seen)
 }
@@ -230,89 +234,89 @@ func Test_VM_CheckTrace_ReportsEveryOp(t *testing.T) {
 // the VM does not take yet, a protocol name with no resolver, a hostname.
 func Test_VM_Build_Errors(t *testing.T) {
 	cases := []struct {
-		name  string
-		rules string
-		cfg   vm.Config[net4, net6]
-		line  int
-		text  string
-		cause error
+		name      string
+		rules     string
+		resolvers ipfw.Resolvers[net4, net6]
+		line      int
+		text      string
+		cause     error
 	}{
 		{
-			name:  "parse error",
-			rules: "add pass ip from any to any\nadd foobar :any\n",
-			cfg:   resolving,
-			line:  2,
-			text:  "add foobar :any",
-			cause: ipfw.ErrExpectedAction,
+			name:      "parse error",
+			rules:     "add pass ip from any to any\nadd foobar :any\n",
+			resolvers: resolving,
+			line:      2,
+			text:      "add foobar :any",
+			cause:     ipfw.ErrExpectedAction,
 		},
 		{
-			name:  "unsupported action",
-			rules: "add count ip from any to any\n",
-			cfg:   resolving,
-			line:  1,
-			text:  "add count ip from any to any",
-			cause: vm.ErrUnsupportedAction,
+			name:      "unsupported action",
+			rules:     "add count ip from any to any\n",
+			resolvers: resolving,
+			line:      1,
+			text:      "add count ip from any to any",
+			cause:     vm.ErrUnsupportedAction,
 		},
 		{
-			name:  "unsupported target",
-			rules: "add pass ip from me to any\n",
-			cfg:   resolving,
-			line:  1,
-			text:  "add pass ip from me to any",
-			cause: vm.ErrUnsupportedTarget,
+			name:      "unsupported target",
+			rules:     "add pass ip from me to any\n",
+			resolvers: resolving,
+			line:      1,
+			text:      "add pass ip from me to any",
+			cause:     vm.ErrUnsupportedTarget,
 		},
 		{
-			name:  "unsupported ports",
-			rules: "add pass tcp from any 22 to any\n",
-			cfg:   resolving,
-			line:  1,
-			text:  "add pass tcp from any 22 to any",
-			cause: vm.ErrUnsupportedPort,
+			name:      "unsupported ports",
+			rules:     "add pass tcp from any 22 to any\n",
+			resolvers: resolving,
+			line:      1,
+			text:      "add pass tcp from any 22 to any",
+			cause:     vm.ErrUnsupportedPort,
 		},
 		{
-			name:  "unsupported option",
-			rules: "add pass tcp from any to any established\n",
-			cfg:   resolving,
-			line:  1,
-			text:  "add pass tcp from any to any established",
-			cause: vm.ErrUnsupportedOption,
+			name:      "unsupported option",
+			rules:     "add pass tcp from any to any established\n",
+			resolvers: resolving,
+			line:      1,
+			text:      "add pass tcp from any to any established",
+			cause:     vm.ErrUnsupportedOption,
 		},
 		{
-			name:  "unsupported record",
-			rules: ":LABEL\n",
-			cfg:   resolving,
-			line:  1,
-			text:  ":LABEL",
-			cause: vm.ErrUnsupportedRecord,
+			name:      "unsupported record",
+			rules:     ":LABEL\n",
+			resolvers: resolving,
+			line:      1,
+			text:      ":LABEL",
+			cause:     vm.ErrUnsupportedRecord,
 		},
 		{
-			name:  "unresolved protocol without a resolver",
-			rules: "add pass tcp from any to any\n",
-			cfg:   vm.Config[net4, net6]{},
-			line:  1,
-			text:  "add pass tcp from any to any",
-			cause: vm.ErrUnresolvedProto,
+			name:      "unresolved protocol without a resolver",
+			rules:     "add pass tcp from any to any\n",
+			resolvers: networksOnly,
+			line:      1,
+			text:      "add pass tcp from any to any",
+			cause:     ipfw.ErrUnresolvedProto,
 		},
 		{
-			name:  "unresolved protocol name",
-			rules: "add pass gre from any to any\n",
-			cfg:   resolving,
-			line:  1,
-			text:  "add pass gre from any to any",
-			cause: vm.ErrUnresolvedProto,
+			name:      "unresolved protocol name",
+			rules:     "add pass gre from any to any\n",
+			resolvers: resolving,
+			line:      1,
+			text:      "add pass gre from any to any",
+			cause:     ipfw.ErrUnresolvedProto,
 		},
 		{
-			name:  "hostname without a resolver",
-			rules: "add pass ip from host.example.com to any\n",
-			cfg:   resolving,
-			line:  1,
-			text:  "add pass ip from host.example.com to any",
-			cause: ipfw.ErrUnresolvedTarget,
+			name:      "hostname without a resolver",
+			rules:     "add pass ip from host.example.com to any\n",
+			resolvers: resolving,
+			line:      1,
+			text:      "add pass ip from host.example.com to any",
+			cause:     ipfw.ErrUnresolvedTarget,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := vm.Build(ipfw.NewParser(tc.rules), nets, tc.cfg)
+			_, err := vm.Build(ipfw.NewParser(tc.rules), tc.resolvers, none)
 			require.Error(t, err)
 			var buildErr *vm.BuildError
 			require.ErrorAs(t, err, &buildErr)
@@ -326,7 +330,7 @@ func Test_VM_Build_Errors(t *testing.T) {
 
 // verifies that a parse error keeps its position inside the build error.
 func Test_VM_Build_ParseError(t *testing.T) {
-	_, err := vm.Build(ipfw.NewParser("add pass ip from any to any\n  add foobar :any\n"), nets, resolving)
+	_, err := vm.Build(ipfw.NewParser("add pass ip from any to any\n  add foobar :any\n"), resolving, none)
 	var parseErr *ipfw.ParseError
 	require.ErrorAs(t, err, &parseErr)
 	require.Equal(t, ipfw.ParseError{
@@ -339,13 +343,18 @@ func Test_VM_Build_ParseError(t *testing.T) {
 
 // verifies that a numeric protocol needs no resolver.
 func Test_VM_Build_NumericProto(t *testing.T) {
-	machine := build(t, "add pass 6 from any to any\nadd deny ip from any to any\n", vm.Config[net4, net6]{})
+	machine, err := vm.Build(
+		ipfw.NewParser("add pass 6 from any to any\nadd deny ip from any to any\n"),
+		networksOnly,
+		none,
+	)
+	require.NoError(t, err)
 	require.Equal(t, pass, machine.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.1")))
 }
 
 // verifies that a check allocates nothing.
 func Test_VM_Check_NoAllocs(t *testing.T) {
-	machine := build(t, "add deny udp from any to any\nadd deny ip from 198.51.100.0/24 to any\nadd pass tcp from 192.0.2.0/24 to { any or 2001:db8::/32 }\nadd deny ip from any to any\n", resolving)
+	machine := build(t, "add deny udp from any to any\nadd deny ip from 198.51.100.0/24 to any\nadd pass tcp from 192.0.2.0/24 to { any or 2001:db8::/32 }\nadd deny ip from any to any\n", none)
 	packet := tcp4("192.0.2.1", "192.0.2.1")
 	ctx := &vm.Context{}
 	verdict := pass
@@ -360,7 +369,7 @@ func Test_VM_Check_NoAllocs(t *testing.T) {
 
 // verifies that one VM serves checks from several goroutines at once.
 func Test_VM_Check_Concurrent(t *testing.T) {
-	machine := build(t, "add pass tcp from 192.0.2.0/24 to any\nadd deny ip from any to any\n", resolving)
+	machine := build(t, "add pass tcp from 192.0.2.0/24 to any\nadd deny ip from any to any\n", none)
 	for idx := range 8 {
 		t.Run(strconv.Itoa(idx), func(t *testing.T) {
 			t.Parallel()

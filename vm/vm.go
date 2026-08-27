@@ -3,7 +3,6 @@ package vm
 import (
 	"errors"
 	"net/netip"
-	"slices"
 	"strconv"
 
 	"github.com/yanet-platform/ipfw"
@@ -50,16 +49,9 @@ const (
 // OptionMatcher decides whether a custom option matches a packet.
 type OptionMatcher func(opt ipfw.Opt, ctx *Context, pkt Packet) bool
 
-// Config is what a VM is built with beyond the ruleset, every part
-// optional.
+// Config is what a VM is built with beyond the ruleset and its resolvers,
+// every part optional.
 type Config[V4, V6 any] struct {
-	// Protos resolves protocol names, nil making every name an error.
-	Protos ipfw.ProtoResolver
-	// Services resolves service names, nil making every name an error.
-	Services ipfw.ServiceResolver
-	// Targets stands hostnames and targets of unknown shape for networks,
-	// nil making them an error.
-	Targets ipfw.TargetResolver[V4, V6]
 	// Tables is the table registry, nil meaning a fresh default one.
 	Tables TableRegistry[V4, V6]
 	// DefaultVerdict is the action when no rule matches, the zero value
@@ -75,8 +67,6 @@ type Config[V4, V6 any] struct {
 var (
 	ErrRuleNumberOrder   = errors.New("rule number goes backwards")
 	ErrUnresolvedJump    = errors.New("skipto to a label that never appears")
-	ErrUnresolvedProto   = errors.New("unresolved protocol name")
-	ErrUnresolvedService = errors.New("unresolved service name")
 	ErrUnsupportedOption = errors.New("unsupported option")
 	ErrUnsupportedAction = errors.New("unsupported action")
 	ErrUnsupportedTarget = errors.New("unsupported target")
@@ -90,7 +80,8 @@ type BuildError struct {
 	Line int
 	// Text is the line without leading and trailing whitespace.
 	Text string
-	// Err is the cause: a *ipfw.ParseError or one of the vm errors.
+	// Err is the cause: a *ipfw.ParseError, which wraps a vm error when a
+	// token is one the VM does not take, or a vm error of the whole line.
 	Err error
 }
 
@@ -111,8 +102,8 @@ type VM[V4, V6 Network] struct {
 	verdict ipfw.Action
 }
 
-// op is one rule: the record for tracing, the action and the tokens of
-// the body, copied out of the state that collected the line.
+// op is one rule: the record for tracing, the action and the typed tokens
+// of the body as the resolver handed them over.
 type op[V4, V6 Network] struct {
 	// Record is the line the rule came from.
 	Record ipfw.Record
@@ -120,28 +111,29 @@ type op[V4, V6 Network] struct {
 	Action ipfw.Action
 	// IPProtos are the IP version sets, none meaning any version.
 	IPProtos []ipfw.ProtoIPMatch
-	// Protos are the transport protocols, none meaning any protocol.
-	Protos []ipfw.ProtoMatch
+	// Protos are the transport protocol numbers, none meaning any protocol.
+	Protos []ipfw.ProtoNumberMatch
 	// Sources are the sources, none matching nothing.
 	Sources []ipfw.TargetMatch[V4, V6]
 	// Destinations are the destinations, none matching nothing.
 	Destinations []ipfw.TargetMatch[V4, V6]
 }
 
-// Build reads the whole ruleset from p into a VM, networks parsed with
-// nets and names resolved as cfg says.
+// Build reads the whole ruleset from p into a VM, every name resolved
+// with resolvers on the way in.
 func Build[V4, V6 Network](
 	p *ipfw.Parser,
-	nets ipfw.NetworkParser[V4, V6],
+	resolvers ipfw.Resolvers[V4, V6],
 	cfg Config[V4, V6],
 ) (*VM[V4, V6], error) {
 	machine := &VM[V4, V6]{verdict: cfg.DefaultVerdict}
 	if machine.verdict.Kind == 0 {
 		machine.verdict = ipfw.Action{Kind: ipfw.ActionDeny}
 	}
-	state := ipfw.NewRuleState(nets, cfg.Targets)
+	var sink builder[V4, V6]
+	state := ipfw.NewResolver[V4, V6](&sink, resolvers)
 	for {
-		state.Reset()
+		sink.Rule = op[V4, V6]{}
 		rec, parseErr := p.Next(state)
 		if parseErr != nil {
 			return nil, &BuildError{Line: parseErr.Line, Text: parseErr.Text, Err: parseErr}
@@ -152,9 +144,10 @@ func Build[V4, V6 Network](
 		case ipfw.RecordEmpty, ipfw.RecordComment:
 			continue
 		case ipfw.RecordInstruction:
-			rule, err := newOp(rec, state, &cfg)
-			if err != nil {
-				return nil, &BuildError{Line: rec.Line, Text: rec.Text, Err: err}
+			rule := sink.Rule
+			rule.Record, rule.Action = *rec, rec.Instruction.Action
+			if rule.Action.Kind != ipfw.ActionPass && rule.Action.Kind != ipfw.ActionDeny {
+				return nil, &BuildError{Line: rec.Line, Text: rec.Text, Err: ErrUnsupportedAction}
 			}
 			machine.ops = append(machine.ops, rule)
 		default:
@@ -163,69 +156,68 @@ func Build[V4, V6 Network](
 	}
 }
 
-// newOp validates one rule and copies its tokens out of the state.
-func newOp[V4, V6 Network](
-	rec *ipfw.Record,
-	state *ipfw.RuleState[V4, V6],
-	cfg *Config[V4, V6],
-) (op[V4, V6], error) {
-	rule := op[V4, V6]{Record: *rec, Action: rec.Instruction.Action}
-	if rule.Action.Kind != ipfw.ActionPass && rule.Action.Kind != ipfw.ActionDeny {
-		return op[V4, V6]{}, ErrUnsupportedAction
-	}
-	if len(state.SourcePorts) > 0 || len(state.DestinationPorts) > 0 {
-		return op[V4, V6]{}, ErrUnsupportedPort
-	}
-	if len(state.Options) > 0 {
-		return op[V4, V6]{}, ErrUnsupportedOption
-	}
-	for _, target := range state.Sources {
-		if err := checkTarget(target); err != nil {
-			return op[V4, V6]{}, err
-		}
-	}
-	for _, target := range state.Destinations {
-		if err := checkTarget(target); err != nil {
-			return op[V4, V6]{}, err
-		}
-	}
-	rule.Protos = make([]ipfw.ProtoMatch, 0, len(state.Protos))
-	for _, match := range state.Protos {
-		resolved, err := resolveProto(match, cfg.Protos)
-		if err != nil {
-			return op[V4, V6]{}, err
-		}
-		rule.Protos = append(rule.Protos, resolved)
-	}
-	rule.IPProtos = slices.Clone(state.IPProtos)
-	rule.Sources = slices.Clone(state.Sources)
-	rule.Destinations = slices.Clone(state.Destinations)
-	return rule, nil
+// builder is the VMState a build reads a line into.
+//
+// It collects the tokens of the rule under construction and rejects the
+// ones the VM does not take yet, which the parser then positions at the
+// token.
+type builder[V4, V6 Network] struct {
+	// Rule is the rule under construction.
+	Rule op[V4, V6]
 }
 
-// checkTarget rejects the target kinds a check cannot match.
+// OnIPProto implements ipfw.VMState.
+func (m *builder[V4, V6]) OnIPProto(match ipfw.ProtoIPMatch) error {
+	m.Rule.IPProtos = append(m.Rule.IPProtos, match)
+	return nil
+}
+
+// OnProto implements ipfw.VMState.
+func (m *builder[V4, V6]) OnProto(match ipfw.ProtoNumberMatch) error {
+	m.Rule.Protos = append(m.Rule.Protos, match)
+	return nil
+}
+
+// OnSourceTarget implements ipfw.VMState.
+func (m *builder[V4, V6]) OnSourceTarget(match ipfw.TargetMatch[V4, V6]) error {
+	if err := checkTarget(match); err != nil {
+		return err
+	}
+	m.Rule.Sources = append(m.Rule.Sources, match)
+	return nil
+}
+
+// OnDestinationTarget implements ipfw.VMState.
+func (m *builder[V4, V6]) OnDestinationTarget(match ipfw.TargetMatch[V4, V6]) error {
+	if err := checkTarget(match); err != nil {
+		return err
+	}
+	m.Rule.Destinations = append(m.Rule.Destinations, match)
+	return nil
+}
+
+// OnSourcePort implements ipfw.VMState.
+func (m *builder[V4, V6]) OnSourcePort(ipfw.PortNumberMatch) error {
+	return ErrUnsupportedPort
+}
+
+// OnDestinationPort implements ipfw.VMState.
+func (m *builder[V4, V6]) OnDestinationPort(ipfw.PortNumberMatch) error {
+	return ErrUnsupportedPort
+}
+
+// OnOption implements ipfw.VMState.
+func (m *builder[V4, V6]) OnOption(ipfw.Opt) error {
+	return ErrUnsupportedOption
+}
+
+// checkTarget rejects the target kinds a check cannot match yet.
 func checkTarget[V4, V6 any](target ipfw.TargetMatch[V4, V6]) error {
 	switch target.Kind {
 	case ipfw.TargetAny, ipfw.TargetNetwork4, ipfw.TargetNetwork6:
 		return nil
 	}
 	return ErrUnsupportedTarget
-}
-
-// resolveProto turns a protocol name into its number through the
-// resolver, a number staying as it is.
-func resolveProto(match ipfw.ProtoMatch, resolver ipfw.ProtoResolver) (ipfw.ProtoMatch, error) {
-	if match.Proto.IsNumber() {
-		return match, nil
-	}
-	if resolver == nil {
-		return ipfw.ProtoMatch{}, ErrUnresolvedProto
-	}
-	number, ok := resolver.ResolveProto(match.Proto.Name)
-	if !ok {
-		return ipfw.ProtoMatch{}, ErrUnresolvedProto
-	}
-	return ipfw.ProtoMatch{Neg: match.Neg, Proto: ipfw.Proto{Number: number}}, nil
 }
 
 // Len is the number of rules.
@@ -304,12 +296,12 @@ func matchIPProtos(matches []ipfw.ProtoIPMatch, version IPVersion) bool {
 
 // matchProtos reports whether the protocol is one of the protocols, none
 // meaning any protocol.
-func matchProtos(matches []ipfw.ProtoMatch, protocol uint8) bool {
+func matchProtos(matches []ipfw.ProtoNumberMatch, protocol uint8) bool {
 	if len(matches) == 0 {
 		return true
 	}
 	for _, match := range matches {
-		if (match.Proto.Number == protocol) != match.Neg {
+		if (match.Number == protocol) != match.Neg {
 			return true
 		}
 	}
