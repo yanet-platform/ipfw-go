@@ -7,26 +7,26 @@ import (
 	"strings"
 )
 
-// diagnosticOptions is what a DiagnosticOption configures.
-type diagnosticOptions struct {
+// diagOptions is what a DiagOption configures.
+type diagOptions struct {
 	// Path is printed before the position, none when empty.
 	Path string
 	// Width is the room the rendering may take, unlimited when zero.
 	Width int
 	// Style wraps the parts of the rendering, the zero value none.
-	Style Style
+	Style DiagStyle
 }
 
-func newDiagnosticOptions() diagnosticOptions {
-	return diagnosticOptions{}
+func newDiagOptions() diagOptions {
+	return diagOptions{}
 }
 
-// DiagnosticOption configures a Diagnostic, see the With functions.
-type DiagnosticOption func(*diagnosticOptions)
+// DiagOption configures a Diag, see the With functions.
+type DiagOption func(*diagOptions)
 
 // WithDiagPath names the file in the position line, as `path:line:column`.
-func WithDiagPath(path string) DiagnosticOption {
-	return func(opts *diagnosticOptions) {
+func WithDiagPath(path string) DiagOption {
+	return func(opts *diagOptions) {
 		opts.Path = path
 	}
 }
@@ -36,20 +36,20 @@ func WithDiagPath(path string) DiagnosticOption {
 // A source line that does not fit next to the gutter is cut around the
 // caret, the cut sides marked with `...`. A width too small to hold the
 // gutter and both markers behaves as the smallest usable one.
-func WithDiagWidth(width int) DiagnosticOption {
-	return func(opts *diagnosticOptions) {
+func WithDiagWidth(width int) DiagOption {
+	return func(opts *diagOptions) {
 		opts.Width = width
 	}
 }
 
-// Style is what each part of a rendering is wrapped in, the zero value
+// DiagStyle is what each part of a rendering is wrapped in, the zero value
 // adding nothing.
 //
 // A role holds what opens its part and Reset what ends every one. The
-// roles are meant for ANSI escapes, see DiagStyle, but anything a
+// roles are meant for ANSI escapes, see ColorDiagStyle, but anything a
 // consumer's terminal or markup takes will do, and whatever they hold
 // does not count against the width.
-type Style struct {
+type DiagStyle struct {
 	// Error opens the word `error`.
 	Error string
 	// Message opens the text of the error.
@@ -64,9 +64,9 @@ type Style struct {
 	Reset string
 }
 
-// DiagStyle is the palette of a terminal that takes ANSI escapes.
-func DiagStyle() Style {
-	return Style{
+// ColorDiagStyle is the palette of a terminal that takes ANSI escapes.
+func ColorDiagStyle() DiagStyle {
+	return DiagStyle{
 		Error:   "\x1b[1;91m",
 		Message: "\x1b[1m",
 		Info:    "\x1b[1;94m",
@@ -76,8 +76,8 @@ func DiagStyle() Style {
 	}
 }
 
-// DiagStyleFor is DiagStyle when w is a terminal that takes colour and the
-// zero Style otherwise, so that a rendering piped into a file stays plain.
+// DiagStyleFor is the palette when w is a terminal that takes colour and
+// the zero DiagStyle otherwise, so that a rendering piped into a file stays plain.
 //
 // A terminal is a character device the environment does not speak against:
 // NO_COLOR set to anything, or TERM naming a dumb one, means no colour.
@@ -85,50 +85,50 @@ func DiagStyle() Style {
 // the standard library affords, so a character device that is no terminal,
 // os.DevNull among them, passes for one, and on Windows it says nothing
 // about whether the console takes the escapes.
-func DiagStyleFor(w io.Writer) Style {
+func DiagStyleFor(w io.Writer) DiagStyle {
 	if os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" {
-		return Style{}
+		return DiagStyle{}
 	}
 	file, ok := w.(*os.File)
 	if !ok || file == nil {
-		return Style{}
+		return DiagStyle{}
 	}
 	info, err := file.Stat()
 	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
-		return Style{}
+		return DiagStyle{}
 	}
-	return DiagStyle()
+	return ColorDiagStyle()
 }
 
 // WithDiagStyle wraps the parts of the rendering in the style, the zero value
 // leaving it plain.
-func WithDiagStyle(style Style) DiagnosticOption {
-	return func(opts *diagnosticOptions) {
+func WithDiagStyle(style DiagStyle) DiagOption {
+	return func(opts *diagOptions) {
 		opts.Style = style
 	}
 }
 
-// Diagnostic renders a ParseError as a diagnostic message.
+// Diag renders a ParseError as a diagnostic message.
 //
 // The rendering is the message, the position, and the source line with
 // carets under the token the parser stopped at. This is the error path,
 // it may allocate.
-type Diagnostic struct {
+type Diag struct {
 	err  *ParseError
-	opts diagnosticOptions
+	opts diagOptions
 }
 
-// NewDiagnostic wraps err for rendering.
-func NewDiagnostic(err *ParseError, options ...DiagnosticOption) Diagnostic {
-	opts := newDiagnosticOptions()
+// NewDiag wraps err for rendering.
+func NewDiag(err *ParseError, options ...DiagOption) Diag {
+	opts := newDiagOptions()
 	for _, option := range options {
 		option(&opts)
 	}
-	return Diagnostic{err: err, opts: opts}
+	return Diag{err: err, opts: opts}
 }
 
 // String renders the diagnostic, a trailing newline included.
-func (m Diagnostic) String() string {
+func (m Diag) String() string {
 	var b strings.Builder
 	style := m.opts.Style
 	number := strconv.Itoa(m.err.Line)
@@ -192,7 +192,7 @@ func (m Diagnostic) String() string {
 }
 
 // reset ends a role, nothing having opened it when the role is empty.
-func (m Style) reset(b *strings.Builder, role string) {
+func (m DiagStyle) reset(b *strings.Builder, role string) {
 	if role != "" {
 		b.WriteString(m.Reset)
 	}
@@ -200,7 +200,7 @@ func (m Style) reset(b *strings.Builder, role string) {
 
 // writeLine writes the source line with the markers of its cut sides
 // dimmed.
-func (m Style) writeLine(b *strings.Builder, line string, left, right bool) {
+func (m DiagStyle) writeLine(b *strings.Builder, line string, left, right bool) {
 	if left {
 		b.WriteString(m.Dimmed)
 		b.WriteString(line[:markerLen])
@@ -220,7 +220,7 @@ func (m Style) writeLine(b *strings.Builder, line string, left, right bool) {
 }
 
 // WriteTo writes the rendering to w.
-func (m Diagnostic) WriteTo(w io.Writer) (int64, error) {
+func (m Diag) WriteTo(w io.Writer) (int64, error) {
 	n, err := io.WriteString(w, m.String())
 	return int64(n), err
 }
@@ -236,7 +236,7 @@ const markerLen = 4
 // half of the room, on the left when the room reaches the end of the line
 // from the caret, on both sides otherwise. Each cut side loses four bytes
 // to its marker, so the caret column is the same before and after.
-func (m Diagnostic) sourceLine(gutter int) (string, int, bool, bool) {
+func (m Diag) sourceLine(gutter int) (string, int, bool, bool) {
 	text := m.err.Text
 	caret := min(max(m.err.Column, 0), max(len(text)-1, 0))
 	room := max(m.opts.Width-gutter-markerLen, 8)

@@ -16,6 +16,11 @@ func protos(matches ...ipfw.ProtoMatch) ipfw.ReduceState {
 	return ipfw.ReduceState{Protos: matches}
 }
 
+// ipProtos is the state of an IP version keyword.
+func ipProtos(matches ...ipfw.ProtoIPMatch) ipfw.ReduceState {
+	return ipfw.ReduceState{IPProtos: matches}
+}
+
 // verifies that the protocol parser feeds the state, reports the consumed
 // length, and positions a failure at the element start.
 //
@@ -256,29 +261,44 @@ func Test_ParseProtocols_StateError(t *testing.T) {
 	require.Equal(t, boom, err)
 }
 
-// verifies that only the exact IP version keywords are recognized.
-func Test_ParseProtoIP_Table(t *testing.T) {
+// ipKeywords are the words that stand for an IP version, not a protocol.
+var ipKeywords = map[string]bool{
+	"ip":   true,
+	"all":  true,
+	"ip4":  true,
+	"ipv4": true,
+	"ip6":  true,
+	"ipv6": true,
+}
+
+// verifies that only the exact IP version keywords stand for a version,
+// every other word being a protocol name.
+func Test_ParseProtocols_IPKeywords(t *testing.T) {
 	cases := []struct {
 		token string
 		proto ipfw.ProtoIP
-		ok    bool
 	}{
-		{token: "ip", proto: ipfw.ProtoIPAny, ok: true},
-		{token: "all", proto: ipfw.ProtoIPAny, ok: true},
-		{token: "ip4", proto: ipfw.ProtoIPv4, ok: true},
-		{token: "ipv4", proto: ipfw.ProtoIPv4, ok: true},
-		{token: "ip6", proto: ipfw.ProtoIPv6, ok: true},
-		{token: "ipv6", proto: ipfw.ProtoIPv6, ok: true},
+		{token: "ip", proto: ipfw.ProtoIPAny},
+		{token: "all", proto: ipfw.ProtoIPAny},
+		{token: "ip4", proto: ipfw.ProtoIPv4},
+		{token: "ipv4", proto: ipfw.ProtoIPv4},
+		{token: "ip6", proto: ipfw.ProtoIPv6},
+		{token: "ipv6", proto: ipfw.ProtoIPv6},
 		{token: "ipencap"},
 		{token: "IP"},
 		{token: "ip4x"},
-		{token: ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.token, func(t *testing.T) {
-			proto, ok := ipfw.ParseProtoIP(tc.token)
-			require.Equal(t, tc.ok, ok)
-			require.Equal(t, tc.proto, proto)
+			var state ipfw.ReduceState
+			n, err := ipfw.ParseProtocols(tc.token, &state)
+			require.NoError(t, err)
+			require.Equal(t, len(tc.token), n)
+			if tc.proto != 0 {
+				require.Equal(t, ipProtos(ipfw.ProtoIPMatch{Proto: tc.proto}), state)
+				return
+			}
+			require.Equal(t, protos(ipfw.ProtoMatch{Proto: ipfw.Proto{Name: tc.token}}), state)
 		})
 	}
 }
@@ -301,7 +321,7 @@ func Test_ParseProtocols_NumberRoundTrip(t *testing.T) {
 func Test_ParseProtocols_NameRoundTrip(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		name := rapid.StringMatching(`[a-z]{1,6}`).Draw(t, "name")
-		if _, keyword := ipfw.ParseProtoIP(name); keyword {
+		if _, keyword := ipKeywords[name]; keyword {
 			t.Skip("an IP version keyword")
 		}
 		var state ipfw.ReduceState

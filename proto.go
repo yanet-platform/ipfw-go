@@ -10,9 +10,9 @@ const (
 	ProtoIPAny = ProtoIPv4 | ProtoIPv6
 )
 
-// ParseProtoIP recognizes the exact IP version keywords `ip`, `all`, `ip4`,
-// `ipv4`, `ip6` and `ipv6`.
-func ParseProtoIP(token string) (ProtoIP, bool) {
+// protoIPKeyword recognizes the exact IP version keywords `ip`, `all`,
+// `ip4`, `ipv4`, `ip6` and `ipv6`.
+func protoIPKeyword(token string) (ProtoIP, bool) {
 	switch token {
 	case "ip", "all":
 		return ProtoIPAny, true
@@ -108,7 +108,7 @@ func parseProtocolElement(s string, state State) (string, fail) {
 // emitProto hands the protocol to the callback of its kind, an IP version
 // keyword going to OnIPProto and anything else to OnProto.
 func emitProto(state State, neg bool, proto Proto) error {
-	if version, ok := ParseProtoIP(proto.Name); ok {
+	if version, ok := protoIPKeyword(proto.Name); ok {
 		return state.OnIPProto(ProtoIPMatch{Neg: neg, Proto: version})
 	}
 	return state.OnProto(ProtoMatch{Neg: neg, Proto: proto})

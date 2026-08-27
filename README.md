@@ -17,7 +17,7 @@ for {
 	rec, err := parser.Next(&state) // err is a *ipfw.ParseError with line, column and text
 	if err != nil {
 		// rustc-style rendering; WithDiagStyle(DiagStyleFor(os.Stderr)) colours it when a terminal is watching
-		fmt.Println(ipfw.NewDiagnostic(err))
+		fmt.Println(ipfw.NewDiag(err))
 		return
 	}
 	if rec.Kind == ipfw.RecordEOF {
@@ -76,7 +76,7 @@ action, matched := machine.CheckTrace(ctx, packet, tracer)           // every ru
 | hostnames and macros (`_NAME_`) | `ipfw.TargetResolver`: one name → any number of networks of both families |
 | custom commands | `ipfw.WithCommandHook`: the hook parses the line, may call the exported sub-parsers |
 | custom options | `ipfw.WithOptionHook` on the parser and `vm.Config.OptionMatcher` at check time |
-| tables | `vm.TableRegistry`, `vm.Tables` as the default, may be pre-filled or changed after the build |
+| tables | `vm.TableRegistry`, `vm.DefaultTables` as the default, may be pre-filled or changed after the build |
 | unresolved jumps | `vm.Config.UnresolvedJumps`: an error at build or a fall-through |
 | tracing | `vm.Tracer` per rule evaluated |
 | your own consumer | implement `ipfw.State` (raw tokens) or `ipfw.VMState` (typed) |

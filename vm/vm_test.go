@@ -1256,7 +1256,7 @@ func Test_VM_Check_Tables(t *testing.T) {
 // verifies that a registry passed in is the one the ruleset fills and the
 // VM consults, and that an interface value loses its leading colon.
 func Test_VM_Build_Tables(t *testing.T) {
-	tables := vm.NewTables[net4, net6]()
+	tables := vm.NewDefaultTables[net4, net6]()
 	tables.AddNetwork4("pre", must4(t, "203.0.113.0/24"))
 	machine := build(t, "table i add vlan1 :LABEL\ntable i add vlan2 plain\ntable i add vlan3\ntable pre add 192.0.2.0/24\nadd pass ip from table(pre) to any\nadd deny ip from any to any\n", vm.Config[net4, net6]{Tables: tables})
 	require.Same(t, tables, machine.Tables())

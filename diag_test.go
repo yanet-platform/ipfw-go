@@ -34,13 +34,13 @@ func Test_Diagnostic_WithDiagPath(t *testing.T) {
 		"   |",
 		" 3 | add foobar :any # WOW",
 		"   |     ^^^^^^",
-	), ipfw.NewDiagnostic(unknownAction, ipfw.WithDiagPath("fw.conf")).String())
+	), ipfw.NewDiag(unknownAction, ipfw.WithDiagPath("fw.conf")).String())
 }
 
 // verifies that a style wraps each role of the rendering and nothing
 // else, the layout staying what it is without one.
 func Test_Diagnostic_WithDiagStyle(t *testing.T) {
-	style := ipfw.Style{
+	style := ipfw.DiagStyle{
 		Error:   "<e>",
 		Message: "<m>",
 		Info:    "<i>",
@@ -54,7 +54,7 @@ func Test_Diagnostic_WithDiagStyle(t *testing.T) {
 		"<i>   |<r>",
 		"<i> 3 | <r>add foobar :any # WOW",
 		"<i>   | <r>    <s>^^^^^^<r>",
-	), ipfw.NewDiagnostic(
+	), ipfw.NewDiag(
 		unknownAction,
 		ipfw.WithDiagPath("fw.conf"),
 		ipfw.WithDiagStyle(style),
@@ -70,10 +70,10 @@ func Test_Diagnostic_WithDiagStyle_Cut(t *testing.T) {
 		Column: 41,
 		Text:   "add pass ip from 192.0.2.0/24 to any not frobnicate 1024-65535 established",
 	}
-	styled := ipfw.NewDiagnostic(err, ipfw.WithDiagWidth(48), ipfw.WithDiagStyle(ipfw.DiagStyle())).String()
+	styled := ipfw.NewDiag(err, ipfw.WithDiagWidth(48), ipfw.WithDiagStyle(ipfw.ColorDiagStyle())).String()
 	require.Contains(t, styled, "\x1b[2m... \x1b[0m")
 	require.Contains(t, styled, "\x1b[2m ...\x1b[0m")
-	require.Equal(t, ipfw.NewDiagnostic(err, ipfw.WithDiagWidth(48)).String(), plain(styled))
+	require.Equal(t, ipfw.NewDiag(err, ipfw.WithDiagWidth(48)).String(), plain(styled))
 }
 
 // verifies that a style is chosen for the writer it will be rendered to.
@@ -87,43 +87,43 @@ func Test_DiagStyleFor(t *testing.T) {
 	file, err := os.CreateTemp(t.TempDir(), "diag")
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, file.Close()) })
-	require.Equal(t, ipfw.Style{}, ipfw.DiagStyleFor(file))
+	require.Equal(t, ipfw.DiagStyle{}, ipfw.DiagStyleFor(file))
 
 	reader, writer, err := os.Pipe()
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, reader.Close()) })
 	t.Cleanup(func() { require.NoError(t, writer.Close()) })
-	require.Equal(t, ipfw.Style{}, ipfw.DiagStyleFor(writer))
+	require.Equal(t, ipfw.DiagStyle{}, ipfw.DiagStyleFor(writer))
 
-	require.Equal(t, ipfw.Style{}, ipfw.DiagStyleFor(&strings.Builder{}))
-	require.Equal(t, ipfw.Style{}, ipfw.DiagStyleFor(nil))
+	require.Equal(t, ipfw.DiagStyle{}, ipfw.DiagStyleFor(&strings.Builder{}))
+	require.Equal(t, ipfw.DiagStyle{}, ipfw.DiagStyleFor(nil))
 
 	terminal, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, terminal.Close()) })
-	require.Equal(t, ipfw.DiagStyle(), ipfw.DiagStyleFor(terminal))
+	require.Equal(t, ipfw.ColorDiagStyle(), ipfw.DiagStyleFor(terminal))
 
 	t.Setenv("NO_COLOR", "1")
-	require.Equal(t, ipfw.Style{}, ipfw.DiagStyleFor(terminal))
+	require.Equal(t, ipfw.DiagStyle{}, ipfw.DiagStyleFor(terminal))
 
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "dumb")
-	require.Equal(t, ipfw.Style{}, ipfw.DiagStyleFor(terminal))
+	require.Equal(t, ipfw.DiagStyle{}, ipfw.DiagStyleFor(terminal))
 }
 
 // verifies that the palette of DiagStyle wraps every role in ANSI
 // escapes and that an empty style leaves the rendering untouched.
 func Test_Diagnostic_DiagStyle(t *testing.T) {
-	colored := ipfw.NewDiagnostic(unknownAction, ipfw.WithDiagStyle(ipfw.DiagStyle())).String()
+	colored := ipfw.NewDiag(unknownAction, ipfw.WithDiagStyle(ipfw.ColorDiagStyle())).String()
 	require.Contains(t, colored, "\x1b[1;91merror\x1b[0m")
 	require.Contains(t, colored, "\x1b[1;94m  --> 3:5\x1b[0m")
 	require.Contains(t, colored, "\x1b[1;93m^^^^^^\x1b[0m")
-	require.Equal(t, plain(ipfw.NewDiagnostic(unknownAction).String()), plain(colored))
+	require.Equal(t, plain(ipfw.NewDiag(unknownAction).String()), plain(colored))
 
 	require.Equal(
 		t,
-		ipfw.NewDiagnostic(unknownAction).String(),
-		ipfw.NewDiagnostic(unknownAction, ipfw.WithDiagStyle(ipfw.Style{})).String(),
+		ipfw.NewDiag(unknownAction).String(),
+		ipfw.NewDiag(unknownAction, ipfw.WithDiagStyle(ipfw.DiagStyle{})).String(),
 	)
 }
 
@@ -148,7 +148,7 @@ func Test_Diagnostic_WithoutDiagPath(t *testing.T) {
 		"   |",
 		" 3 | add foobar :any # WOW",
 		"   |     ^^^^^^",
-	), ipfw.NewDiagnostic(unknownAction).String())
+	), ipfw.NewDiag(unknownAction).String())
 }
 
 // verifies that an error straight from the parser renders with the carets
@@ -162,7 +162,7 @@ func Test_Diagnostic_FromParser(t *testing.T) {
 		"   |",
 		" 1 | add foobar :any # WOW",
 		"   |     ^^^^^^",
-	), ipfw.NewDiagnostic(err).String())
+	), ipfw.NewDiag(err).String())
 }
 
 // verifies that an error at the end of the line puts one caret under the
@@ -180,7 +180,7 @@ func Test_Diagnostic_EndOfLine(t *testing.T) {
 		"   |",
 		" 1 | add deny log",
 		"   |            ^",
-	), ipfw.NewDiagnostic(err).String())
+	), ipfw.NewDiag(err).String())
 }
 
 // verifies that an empty line gets a single caret at the first column.
@@ -192,7 +192,7 @@ func Test_Diagnostic_EmptyText(t *testing.T) {
 		"   |",
 		" 2 | ",
 		"   | ^",
-	), ipfw.NewDiagnostic(err).String())
+	), ipfw.NewDiag(err).String())
 }
 
 // verifies that the error a state returned follows the kind in the header.
@@ -210,7 +210,7 @@ func Test_Diagnostic_StateError(t *testing.T) {
 		"   |",
 		" 1 | add pass ip from any to any",
 		"   |          ^^",
-	), ipfw.NewDiagnostic(err).String())
+	), ipfw.NewDiag(err).String())
 }
 
 // verifies that the gutter grows with the line number and the arrow moves
@@ -228,7 +228,7 @@ func Test_Diagnostic_WideGutter(t *testing.T) {
 		"       |",
 		" 12345 | add foobar :any",
 		"       |     ^^^^^^",
-	), ipfw.NewDiagnostic(err).String())
+	), ipfw.NewDiag(err).String())
 }
 
 // verifies the four width cases of the reference, the cut sides marked
@@ -301,7 +301,7 @@ func Test_Diagnostic_WithDiagWidth(t *testing.T) {
 				Column: tc.column,
 				Text:   tc.text,
 			}
-			require.Equal(t, tc.expected, ipfw.NewDiagnostic(err, ipfw.WithDiagWidth(40)).String())
+			require.Equal(t, tc.expected, ipfw.NewDiag(err, ipfw.WithDiagWidth(40)).String())
 		})
 	}
 }
@@ -309,7 +309,7 @@ func Test_Diagnostic_WithDiagWidth(t *testing.T) {
 // verifies that WriteTo writes exactly the rendering and reports its
 // length.
 func Test_Diagnostic_WriteTo(t *testing.T) {
-	diagnostic := ipfw.NewDiagnostic(unknownAction, ipfw.WithDiagPath("fw.conf"))
+	diagnostic := ipfw.NewDiag(unknownAction, ipfw.WithDiagPath("fw.conf"))
 	var buf strings.Builder
 	n, err := diagnostic.WriteTo(&buf)
 	require.NoError(t, err)

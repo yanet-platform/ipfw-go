@@ -2353,7 +2353,7 @@ func ExampleParser_Next() {
 	for {
 		rec, err := parser.Next(&state)
 		if err != nil {
-			fmt.Println(ipfw.NewDiagnostic(err))
+			fmt.Println(ipfw.NewDiag(err))
 			return
 		}
 		if rec.Kind == ipfw.RecordEOF {

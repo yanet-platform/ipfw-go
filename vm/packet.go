@@ -124,9 +124,9 @@ func (m RawIPv4Packet) WithUDP(src, dst uint16) RawIPv4Packet {
 }
 
 // WithICMP makes the packet an ICMP one.
-func (m RawIPv4Packet) WithICMP(typ, code uint8) RawIPv4Packet {
+func (m RawIPv4Packet) WithICMP(ty, code uint8) RawIPv4Packet {
 	m[9] = protoICMP
-	m[ipv4HeaderLen], m[ipv4HeaderLen+1] = typ, code
+	m[ipv4HeaderLen], m[ipv4HeaderLen+1] = ty, code
 	return m
 }
 
@@ -233,9 +233,9 @@ func (m RawIPv6Packet) WithUDP(src, dst uint16) RawIPv6Packet {
 }
 
 // WithICMP6 makes the packet an ICMPv6 one.
-func (m RawIPv6Packet) WithICMP6(typ, code uint8) RawIPv6Packet {
+func (m RawIPv6Packet) WithICMP6(ty, code uint8) RawIPv6Packet {
 	m[6] = protoICMPv6
-	m[ipv6HeaderLen], m[ipv6HeaderLen+1] = typ, code
+	m[ipv6HeaderLen], m[ipv6HeaderLen+1] = ty, code
 	return m
 }
 
