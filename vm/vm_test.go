@@ -1318,6 +1318,123 @@ func Test_VM_Build_UnsupportedKinds(t *testing.T) {
 	}
 }
 
+// setupHook parses the custom option `setup`.
+func setupHook(rest string) (ipfw.Opt, int, error) {
+	if strings.HasPrefix(rest, "setup") {
+		return ipfw.Opt{Kind: ipfw.OptCustom, Text: "setup"}, len("setup"), nil
+	}
+	return ipfw.Opt{}, 0, ipfw.ErrUnknownOption
+}
+
+// setupMatcher matches `setup` as a TCP packet with SYN and without ACK.
+func setupMatcher(opt ipfw.Opt, _ *vm.Context, pkt vm.Packet) bool {
+	if opt.Text != "setup" {
+		return false
+	}
+	flags, ok := pkt.TCPFlags()
+	return ok && flags&(ipfw.TCPSyn|ipfw.TCPAck) == ipfw.TCPSyn
+}
+
+// verifies that a custom option is decided by the configured matcher under
+// the fold's negation and grouping, and is a build error without one.
+func Test_VM_Check_CustomOption(t *testing.T) {
+	withMatcher := vm.Config[net4, net6]{OptionMatcher: setupMatcher}
+	cases := []struct {
+		name    string
+		rules   string
+		ctx     *vm.Context
+		packet  vm.Packet
+		verdict ipfw.Action
+	}{
+		{
+			name:    "setup, SYN",
+			rules:   "add pass tcp from any to any setup\nadd deny ip from any to any\n",
+			ctx:     &vm.Context{},
+			packet:  tcp4Flags(ipfw.TCPSyn),
+			verdict: pass,
+		},
+		{
+			name:    "setup, SYN with ACK",
+			rules:   "add pass tcp from any to any setup\nadd deny ip from any to any\n",
+			ctx:     &vm.Context{},
+			packet:  tcp4Flags(ipfw.TCPSyn | ipfw.TCPAck),
+			verdict: deny,
+		},
+		{
+			name:    "not setup, SYN",
+			rules:   "add pass tcp from any to any not setup\nadd deny ip from any to any\n",
+			ctx:     &vm.Context{},
+			packet:  tcp4Flags(ipfw.TCPSyn),
+			verdict: deny,
+		},
+		{
+			name:    "not setup, ACK",
+			rules:   "add pass tcp from any to any not setup\nadd deny ip from any to any\n",
+			ctx:     &vm.Context{},
+			packet:  tcp4Flags(ipfw.TCPAck),
+			verdict: pass,
+		},
+		{
+			name:    "setup or in, ACK coming in",
+			rules:   "add pass tcp from any to any { setup or in }\nadd deny ip from any to any\n",
+			ctx:     &vm.Context{Direction: vm.In},
+			packet:  tcp4Flags(ipfw.TCPAck),
+			verdict: pass,
+		},
+		{
+			name:    "setup or in, SYN going out",
+			rules:   "add pass tcp from any to any { setup or in }\nadd deny ip from any to any\n",
+			ctx:     &vm.Context{Direction: vm.Out},
+			packet:  tcp4Flags(ipfw.TCPSyn),
+			verdict: pass,
+		},
+		{
+			name:    "setup or in, ACK going out",
+			rules:   "add pass tcp from any to any { setup or in }\nadd deny ip from any to any\n",
+			ctx:     &vm.Context{Direction: vm.Out},
+			packet:  tcp4Flags(ipfw.TCPAck),
+			verdict: deny,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			machine, err := vm.Build(ipfw.NewParser(tc.rules, ipfw.WithOptionHook(setupHook)), resolving, withMatcher)
+			require.NoError(t, err)
+			require.Equal(t, tc.verdict, machine.Check(tc.ctx, tc.packet))
+		})
+	}
+
+	_, err := vm.Build(ipfw.NewParser("add pass ip from any to any\nadd pass tcp from any to any established setup\n", ipfw.WithOptionHook(setupHook)), resolving, none)
+	var buildErr *vm.BuildError
+	require.ErrorAs(t, err, &buildErr)
+	require.Equal(t, 2, buildErr.Line)
+	require.Equal(t, "add pass tcp from any to any established setup", buildErr.Text)
+	require.ErrorIs(t, err, vm.ErrUnsupportedOption)
+	var parseErr *ipfw.ParseError
+	require.ErrorAs(t, err, &parseErr)
+	require.Equal(t, 41, parseErr.Column)
+}
+
+// verifies that a check through the custom matcher allocates nothing.
+func Test_VM_CustomOption_NoAllocs(t *testing.T) {
+	machine, err := vm.Build(
+		ipfw.NewParser("add deny tcp from any to any not setup\nadd pass tcp from any to any { setup or in }\nadd deny ip from any to any\n", ipfw.WithOptionHook(setupHook)),
+		resolving,
+		vm.Config[net4, net6]{OptionMatcher: setupMatcher},
+	)
+	require.NoError(t, err)
+	packet := tcp4Flags(ipfw.TCPSyn)
+	ctx := &vm.Context{}
+	verdict := pass
+	allocs := testing.AllocsPerRun(100, func() {
+		if machine.Check(ctx, packet) != pass {
+			verdict = deny
+		}
+	})
+	require.Equal(t, pass, verdict)
+	require.Zero(t, allocs)
+}
+
 // verifies the fixed policy of the options the VM does not emulate:
 // keep-state and a comment hold, diverted never, antispoof on the way out.
 func Test_VM_Check_PolicyOptions(t *testing.T) {

@@ -48,7 +48,10 @@ const (
 	UnresolvedJumpsFallThrough
 )
 
-// OptionMatcher decides whether a custom option matches a packet.
+// OptionMatcher decides whether a custom option, its negation aside, holds
+// for a packet in the context.
+//
+// It runs on the match path and must not allocate.
 type OptionMatcher func(opt ipfw.Opt, ctx *Context, pkt Packet) bool
 
 // Config is what a VM is built with beyond the ruleset and its resolvers,
@@ -106,6 +109,7 @@ type VM[V4, V6 Network] struct {
 	ops     []op[V4, V6]
 	labels  map[string]int
 	tables  TableRegistry[V4, V6]
+	matcher OptionMatcher
 	verdict ipfw.Action
 }
 
@@ -144,14 +148,14 @@ func Build[V4, V6 Network](
 	resolvers ipfw.Resolvers[V4, V6],
 	cfg Config[V4, V6],
 ) (*VM[V4, V6], error) {
-	machine := &VM[V4, V6]{tables: cfg.Tables, verdict: cfg.DefaultVerdict}
+	machine := &VM[V4, V6]{tables: cfg.Tables, matcher: cfg.OptionMatcher, verdict: cfg.DefaultVerdict}
 	if machine.tables == nil {
 		machine.tables = NewTables[V4, V6]()
 	}
 	if machine.verdict.Kind == 0 {
 		machine.verdict = ipfw.Action{Kind: ipfw.ActionDeny}
 	}
-	sink := newBuilder(machine.tables, resolvers.Networks)
+	sink := newBuilder(machine.tables, resolvers.Networks, cfg.OptionMatcher != nil)
 	state := ipfw.NewResolver(sink, resolvers)
 	for {
 		rec, parseErr := p.Next(state)
@@ -197,6 +201,8 @@ type builder[V4, V6 Network] struct {
 	ops      []op[V4, V6]
 	tables   TableRegistry[V4, V6]
 	networks ipfw.NetworkParser[V4, V6]
+	// custom is whether a custom option has a matcher to go to.
+	custom bool
 	// number is the rule number the next instruction gets, an explicit one
 	// moving it forward.
 	number uint32
@@ -212,10 +218,12 @@ type builder[V4, V6 Network] struct {
 func newBuilder[V4, V6 Network](
 	tables TableRegistry[V4, V6],
 	networks ipfw.NetworkParser[V4, V6],
+	custom bool,
 ) *builder[V4, V6] {
 	return &builder[V4, V6]{
 		tables:         tables,
 		networks:       networks,
+		custom:         custom,
 		number:         1,
 		labels:         map[string]int{},
 		pendingNumbers: map[uint32][]int{},
@@ -378,13 +386,17 @@ func (m *builder[V4, V6]) OnDestinationPort(match ipfw.PortNumberMatch) error {
 	return nil
 }
 
-// OnOption implements ipfw.VMState, an option the VM cannot evaluate being
-// ErrUnsupportedOption.
+// OnOption implements ipfw.VMState, a custom option with no matcher, or an
+// option of a kind the VM does not know, being ErrUnsupportedOption.
 func (m *builder[V4, V6]) OnOption(opt ipfw.Opt) error {
 	switch opt.Kind {
 	case ipfw.OptEstablished, ipfw.OptIn, ipfw.OptOut, ipfw.OptFrag, ipfw.OptICMPTypes, ipfw.OptICMP6Types,
 		ipfw.OptTCPFlags, ipfw.OptSourcePort, ipfw.OptDestinationPort, ipfw.OptProto, ipfw.OptVia,
 		ipfw.OptKeepState, ipfw.OptComment, ipfw.OptDiverted, ipfw.OptAntiSpoof:
+	case ipfw.OptCustom:
+		if !m.custom {
+			return ErrUnsupportedOption
+		}
 	default:
 		return ErrUnsupportedOption
 	}
@@ -534,11 +546,14 @@ func (m *VM[V4, V6]) matchOptions(options []ipfw.Opt, ctx *Context, pkt Packet) 
 // and out the direction of the check, via the context's interface by
 // name, by mask or through a table, frag a non-first fragment, icmptypes
 // and icmp6types an ICMP packet of the family with a type in the set.
-// The options the VM does not emulate follow matchPolicy.
+// The options the VM does not emulate follow matchPolicy, a custom one
+// the configured matcher.
 func (m *VM[V4, V6]) matchOption(opt *ipfw.Opt, ctx *Context, pkt Packet) (bool, int) {
 	switch opt.Kind {
 	case ipfw.OptKeepState, ipfw.OptComment, ipfw.OptDiverted, ipfw.OptAntiSpoof:
 		return matchPolicy(opt.Kind, ctx), noTarget
+	case ipfw.OptCustom:
+		return m.matcher(*opt, ctx, pkt), noTarget
 	case ipfw.OptEstablished:
 		flags, ok := pkt.TCPFlags()
 		return ok && flags&(ipfw.TCPAck|ipfw.TCPRst) != 0, noTarget
