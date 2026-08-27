@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  GOFUMPT_VERSION: v0.9.2
+  GOLANGCI_LINT_VERSION: v2.12.2
+
+jobs:
+  ci:
+    name: Build, lint and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Format (gofumpt)
+        run: |
+          go install mvdan.cc/gofumpt@${GOFUMPT_VERSION}
+          unformatted="$(gofumpt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofumpt: files need formatting:"
+            echo "$unformatted"
+            gofumpt -d .
+            exit 1
+          fi
+
+      - name: Lint (golangci-lint)
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+
+      - name: Test (race)
+        run: go test -race ./...
+
+      - name: Benchmarks compile
+        run: go test -run xxx -bench . -benchtime 1x ./...

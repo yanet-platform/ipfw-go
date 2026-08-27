@@ -6,6 +6,8 @@ A Go port of the Rust [`ipfw`](../ipfw) crate: a streaming, zero-copy parser for
 go get github.com/yanet-platform/ipfw
 ```
 
+Licensed under the Apache License 2.0, see [LICENSE](LICENSE). What changed between releases is in [CHANGELOG.md](CHANGELOG.md).
+
 ## Parsing
 
 The parser reads one line at a time, returns a `Record` for it and pushes the rule body — protocols, targets, ports, options — as string sub-slices of the input into a `State`. `ReduceState` collects them, `DiscardState` drops them.
