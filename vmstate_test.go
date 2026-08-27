@@ -278,11 +278,11 @@ func Test_Resolver_Targets(t *testing.T) {
 			input: "add allow ip from not host.example.com to _X_\n",
 			sources: []ipfw.TargetMatch[net4, net6]{
 				{Neg: true, Kind: ipfw.TargetNetwork4, Net4: must4("192.0.2.1/32")},
-				{Neg: true, Kind: ipfw.TargetNetwork6, Net6: must6("2001:db8::1/128")},
+				{Neg: true, Or: true, Kind: ipfw.TargetNetwork6, Net6: must6("2001:db8::1/128")},
 			},
 			destinations: []ipfw.TargetMatch[net4, net6]{
 				{Kind: ipfw.TargetNetwork4, Net4: must4("192.0.2.0/24")},
-				{Kind: ipfw.TargetNetwork4, Net4: must4("198.51.100.0/24")},
+				{Or: true, Kind: ipfw.TargetNetwork4, Net4: must4("198.51.100.0/24")},
 			},
 		},
 		{

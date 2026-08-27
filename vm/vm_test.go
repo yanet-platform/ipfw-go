@@ -55,8 +55,46 @@ func (fakeServices) ResolveService(name string) (uint16, bool) {
 	return 0, false
 }
 
+// fakeTargets stands one hostname for a network of each family, `_NETS_`
+// for two IPv4 networks and `nothing.example.com` for nothing.
+type fakeTargets struct{}
+
+// ResolveTarget implements ipfw.TargetResolver.
+func (fakeTargets) ResolveTarget(target ipfw.Target) ([]net4, []net6, error) {
+	switch target.Text {
+	case "host.example.com":
+		return []net4{parse4("192.0.2.1/32")}, []net6{parse6("2001:db8::1/128")}, nil
+	case "_NETS_":
+		return []net4{parse4("192.0.2.0/24"), parse4("198.51.100.0/24")}, nil, nil
+	case "nothing.example.com":
+		return nil, nil, nil
+	}
+	return nil, nil, ipfw.ErrExpectedTarget
+}
+
+// parse4 parses an IPv4 network the test wrote itself.
+func parse4(s string) net4 {
+	network, err := xnetip.ParseNetwork4(s)
+	if err != nil {
+		panic(err)
+	}
+	return network
+}
+
+// parse6 parses an IPv6 network the test wrote itself.
+func parse6(s string) net6 {
+	network, err := xnetip.ParseNetwork6(s)
+	if err != nil {
+		panic(err)
+	}
+	return network
+}
+
 // resolving parses networks with xnetip and resolves the fake protocols.
 var resolving = ipfw.Resolvers[net4, net6]{Networks: nets, Protos: fakeProtos{}}
+
+// resolvingTargets is resolving with the fake targets too.
+var resolvingTargets = ipfw.Resolvers[net4, net6]{Networks: nets, Protos: fakeProtos{}, Targets: fakeTargets{}}
 
 // resolvingServices is resolving with the fake services too.
 var resolvingServices = ipfw.Resolvers[net4, net6]{Networks: nets, Protos: fakeProtos{}, Services: fakeServices{}}
@@ -486,6 +524,123 @@ func Test_VM_Build_ServiceNames(t *testing.T) {
 	require.Equal(t, pass, machine.Check(&vm.Context{}, packet.WithTCP(ipfw.TCPSyn, 23, 25)))
 	require.Equal(t, deny, machine.Check(&vm.Context{}, packet.WithTCP(ipfw.TCPSyn, 26, 25)))
 	require.Equal(t, deny, machine.Check(&vm.Context{}, packet.WithTCP(ipfw.TCPSyn, 23, 22)))
+}
+
+// verifies that a name stands for every network the resolver gives, of
+// both families, negated as a whole, and for nothing when it gives none.
+func Test_VM_Check_ResolvedTargets(t *testing.T) {
+	cases := []struct {
+		name    string
+		rules   string
+		packet  vm.Packet
+		verdict ipfw.Action
+	}{
+		{
+			name:    "hostname, its IPv4 address",
+			rules:   "add pass ip from host.example.com to any\nadd deny ip from any to any\n",
+			packet:  tcp4("192.0.2.1", "203.0.113.1"),
+			verdict: pass,
+		},
+		{
+			name:    "hostname, its IPv6 address",
+			rules:   "add pass ip from host.example.com to any\nadd deny ip from any to any\n",
+			packet:  vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8::2")),
+			verdict: pass,
+		},
+		{
+			name:    "hostname, another address",
+			rules:   "add pass ip from host.example.com to any\nadd deny ip from any to any\n",
+			packet:  tcp4("192.0.2.2", "203.0.113.1"),
+			verdict: deny,
+		},
+		{
+			name:    "negated hostname, its IPv4 address",
+			rules:   "add pass ip from not host.example.com to any\nadd deny ip from any to any\n",
+			packet:  tcp4("192.0.2.1", "203.0.113.1"),
+			verdict: deny,
+		},
+		{
+			name:    "negated hostname, its IPv6 address",
+			rules:   "add pass ip from not host.example.com to any\nadd deny ip from any to any\n",
+			packet:  vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8::2")),
+			verdict: deny,
+		},
+		{
+			name:    "negated hostname, another address",
+			rules:   "add pass ip from not host.example.com to any\nadd deny ip from any to any\n",
+			packet:  tcp4("192.0.2.2", "203.0.113.1"),
+			verdict: pass,
+		},
+		{
+			name:    "macro, first network",
+			rules:   "add pass ip from any to _NETS_\nadd deny ip from any to any\n",
+			packet:  tcp4("203.0.113.1", "192.0.2.5"),
+			verdict: pass,
+		},
+		{
+			name:    "macro, second network",
+			rules:   "add pass ip from any to _NETS_\nadd deny ip from any to any\n",
+			packet:  tcp4("203.0.113.1", "198.51.100.5"),
+			verdict: pass,
+		},
+		{
+			name:    "macro, outside",
+			rules:   "add pass ip from any to _NETS_\nadd deny ip from any to any\n",
+			packet:  tcp4("203.0.113.1", "203.0.113.5"),
+			verdict: deny,
+		},
+		{
+			name:    "negated macro, inside",
+			rules:   "add pass ip from any to not _NETS_\nadd deny ip from any to any\n",
+			packet:  tcp4("203.0.113.1", "198.51.100.5"),
+			verdict: deny,
+		},
+		{
+			name:    "negated macro in a group with a network",
+			rules:   "add pass ip from { 203.0.113.0/24 or not _NETS_ } to any\nadd deny ip from any to any\n",
+			packet:  tcp4("198.51.100.5", "203.0.113.1"),
+			verdict: deny,
+		},
+		{
+			name:    "name standing for nothing never matches",
+			rules:   "add pass tcp from { nothing.example.com } to any\nadd deny ip from any to any\n",
+			packet:  tcp4("192.0.2.1", "203.0.113.1"),
+			verdict: deny,
+		},
+		{
+			name:    "negated name standing for nothing never matches either",
+			rules:   "add pass tcp from not nothing.example.com to any\nadd deny ip from any to any\n",
+			packet:  tcp4("192.0.2.1", "203.0.113.1"),
+			verdict: deny,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			machine, err := vm.Build(ipfw.NewParser(tc.rules), resolvingTargets, none)
+			require.NoError(t, err)
+			require.Equal(t, tc.verdict, machine.Check(&vm.Context{}, tc.packet))
+		})
+	}
+}
+
+// verifies that a check over resolved names allocates nothing.
+func Test_VM_Check_Resolved_NoAllocs(t *testing.T) {
+	machine, err := vm.Build(
+		ipfw.NewParser("add deny ip from not host.example.com to _NETS_\nadd pass ip from host.example.com to { _NETS_ or not host.example.com }\nadd deny ip from any to any\n"),
+		resolvingTargets,
+		none,
+	)
+	require.NoError(t, err)
+	packet := tcp4("192.0.2.1", "198.51.100.5")
+	ctx := &vm.Context{}
+	verdict := pass
+	allocs := testing.AllocsPerRun(100, func() {
+		if machine.Check(ctx, packet) != pass {
+			verdict = deny
+		}
+	})
+	require.Equal(t, pass, verdict)
+	require.Zero(t, allocs)
 }
 
 // verifies that me and me6 match the addresses the context lists, in the

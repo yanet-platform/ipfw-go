@@ -510,10 +510,19 @@ func matchProtos(matches []ipfw.ProtoNumberMatch, protocol uint8) bool {
 // matchTargets reports whether the address is one of the targets, none
 // matching nothing.
 //
-// A side left empty by an unresolvable name is a rule that never matches.
+// The networks a name stands for, the ones marked Or after the first,
+// are one target: the address is in any of them, or in none when the
+// name is negated. A side left empty by a name standing for nothing is
+// a rule that never matches.
 func (m *VM[V4, V6]) matchTargets(targets []ipfw.TargetMatch[V4, V6], ctx *Context, addr netip.Addr) bool {
-	for _, target := range targets {
-		if m.matchTarget(target, ctx, addr) != target.Neg {
+	idx := 0
+	for idx < len(targets) {
+		first := targets[idx]
+		hit := m.matchTarget(first, ctx, addr)
+		for idx++; idx < len(targets) && targets[idx].Or; idx++ {
+			hit = hit || m.matchTarget(targets[idx], ctx, addr)
+		}
+		if hit != first.Neg {
 			return true
 		}
 	}

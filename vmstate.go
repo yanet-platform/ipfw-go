@@ -78,6 +78,9 @@ type TargetResolver[V4, V6 any] interface {
 type TargetMatch[V4, V6 any] struct {
 	// Neg is the `not` prefix.
 	Neg bool
+	// Or marks a further network of the same target, OR-ed with the ones
+	// before it under the target's negation.
+	Or bool
 	// Kind is the target kind, never a hostname or a custom one.
 	Kind TargetKind
 	// Name is the table name of a TargetTable.
@@ -268,8 +271,9 @@ func (m *Resolver[V4, V6]) resolvePort(port Port) (uint16, error) {
 // callback of the side.
 //
 // A keyword, a table or a network is one match, a name one per network
-// it stands for. Rejected network text is the error kind of its family, a
-// name with no resolver is ErrUnresolvedTarget.
+// it stands for, every one after the first marked Or. Rejected network
+// text is the error kind of its family, a name with no resolver is
+// ErrUnresolvedTarget.
 func (m *Resolver[V4, V6]) resolveTarget(target Target, side bodySide) error {
 	match := TargetMatch[V4, V6]{Neg: target.Neg, Kind: target.Kind}
 	switch target.Kind {
@@ -295,13 +299,15 @@ func (m *Resolver[V4, V6]) resolveTarget(target Target, side bodySide) error {
 		if err != nil {
 			return err
 		}
-		for _, network := range nets4 {
-			if err := m.emitTarget(side, TargetMatch[V4, V6]{Neg: target.Neg, Kind: TargetNetwork4, Net4: network}); err != nil {
+		for idx, network := range nets4 {
+			match = TargetMatch[V4, V6]{Neg: target.Neg, Or: idx > 0, Kind: TargetNetwork4, Net4: network}
+			if err := m.emitTarget(side, match); err != nil {
 				return err
 			}
 		}
-		for _, network := range nets6 {
-			if err := m.emitTarget(side, TargetMatch[V4, V6]{Neg: target.Neg, Kind: TargetNetwork6, Net6: network}); err != nil {
+		for idx, network := range nets6 {
+			match = TargetMatch[V4, V6]{Neg: target.Neg, Or: idx+len(nets4) > 0, Kind: TargetNetwork6, Net6: network}
+			if err := m.emitTarget(side, match); err != nil {
 				return err
 			}
 		}
