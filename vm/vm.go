@@ -97,6 +97,10 @@ func (m *BuildError) Unwrap() error {
 
 // VM evaluates packets against a built ruleset. Check is safe for
 // concurrent use.
+//
+// The VM is stateless: a matching count rule goes on with the next rule
+// without counting anything, and a check-state rule, having no body, never
+// matches.
 type VM[V4, V6 Network] struct {
 	ops     []op[V4, V6]
 	verdict ipfw.Action
@@ -146,7 +150,9 @@ func Build[V4, V6 Network](
 		case ipfw.RecordInstruction:
 			rule := sink.Rule
 			rule.Record, rule.Action = *rec, rec.Instruction.Action
-			if rule.Action.Kind != ipfw.ActionPass && rule.Action.Kind != ipfw.ActionDeny {
+			switch rule.Action.Kind {
+			case ipfw.ActionPass, ipfw.ActionDeny, ipfw.ActionCount, ipfw.ActionCheckState:
+			default:
 				return nil, &BuildError{Line: rec.Line, Text: rec.Text, Err: ErrUnsupportedAction}
 			}
 			machine.ops = append(machine.ops, rule)
@@ -241,7 +247,11 @@ func (m *VM[V4, V6]) CheckTrace(ctx *Context, pkt Packet, tracer Tracer) (ipfw.A
 		rule := &m.ops[pc]
 		matched := rule.matches(pkt)
 		tracer.Trace(&rule.Record, rule.Action, matched)
-		if matched {
+		if !matched {
+			continue
+		}
+		switch rule.Action.Kind {
+		case ipfw.ActionPass, ipfw.ActionDeny:
 			return rule.Action, true
 		}
 	}

@@ -227,6 +227,39 @@ func Test_VM_CheckTrace_ReportsEveryOp(t *testing.T) {
 	require.Equal(t, []traced{{line: 1, action: ipfw.ActionPass, matched: false}}, tracer.seen)
 }
 
+// verifies that a matching count rule is traced as matched and the search
+// goes on with the next rule.
+func Test_VM_Check_Count(t *testing.T) {
+	machine := build(t, "add count ip from any to any\nadd count tcp from 198.51.100.0/24 to any\nadd pass ip from any to any\n", none)
+	tracer := &recordingTracer{}
+	action, matched := machine.CheckTrace(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.1"), tracer)
+	require.True(t, matched)
+	require.Equal(t, pass, action)
+	require.Equal(t, []traced{
+		{line: 1, action: ipfw.ActionCount, matched: true},
+		{line: 2, action: ipfw.ActionCount, matched: false},
+		{line: 3, action: ipfw.ActionPass, matched: true},
+	}, tracer.seen)
+
+	counting := build(t, "add count ip from any to any\n", vm.Config[net4, net6]{DefaultVerdict: pass})
+	require.Equal(t, pass, counting.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.1")))
+}
+
+// verifies that a check-state rule, with or without a flow, never matches
+// and is traced as such.
+func Test_VM_Check_CheckState(t *testing.T) {
+	machine := build(t, "add check-state\nadd check-state :flow\nadd deny ip from any to any\n", none)
+	tracer := &recordingTracer{}
+	action, matched := machine.CheckTrace(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.1"), tracer)
+	require.True(t, matched)
+	require.Equal(t, deny, action)
+	require.Equal(t, []traced{
+		{line: 1, action: ipfw.ActionCheckState, matched: false},
+		{line: 2, action: ipfw.ActionCheckState, matched: false},
+		{line: 3, action: ipfw.ActionDeny, matched: true},
+	}, tracer.seen)
+}
+
 // verifies that every build error is located at its line and wraps its
 // cause.
 //
@@ -251,10 +284,10 @@ func Test_VM_Build_Errors(t *testing.T) {
 		},
 		{
 			name:      "unsupported action",
-			rules:     "add count ip from any to any\n",
+			rules:     "add skipto 100 ip from any to any\n",
 			resolvers: resolving,
 			line:      1,
-			text:      "add count ip from any to any",
+			text:      "add skipto 100 ip from any to any",
 			cause:     vm.ErrUnsupportedAction,
 		},
 		{
