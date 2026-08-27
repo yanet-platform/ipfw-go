@@ -310,14 +310,16 @@ func (m *Parser) parseBody(s string, state State) (string, fail) {
 	if err.Failed() {
 		return s, err
 	}
-	// Options come before destination ports, tried first over a discarding
-	// state so that a rejected attempt emits nothing.
+	// Options come before destination ports, the first group tried over a
+	// discarding state to tell an option from a port without emitting it.
 	//
 	// `to any established` is an option, `to any domain` a port and `to any
-	// 22 established` both. A token that is not a port leaves the input
-	// where the destination ended, a port the state refuses fails the line.
+	// 22 established` both. An option list failing past its first group
+	// fails the line at the option. A token that is not a port leaves the
+	// input where the destination ended, a port the state refuses fails
+	// the line.
 	if buf, ok := ws1(rest); ok {
-		if _, err = parseOptions(buf, DiscardState{}, m.opts.OptionHook); !err.Failed() {
+		if _, err = parseOptionGroup(buf, DiscardState{}, m.opts.OptionHook); !err.Failed() {
 			return parseOptions(buf, state, m.opts.OptionHook)
 		}
 		if buf, err = parsePorts(buf, state, destinationSide); !err.Failed() {

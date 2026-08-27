@@ -1981,8 +1981,31 @@ func Test_Parser_Next_StateError(t *testing.T) {
 	require.Equal(t, "1:10: state error: boom", err.Error())
 }
 
-// verifies that a line with ports and options, the dry run of the options
-// included, parses into a warmed-up state without allocating.
+// verifies that an option list failing past its first option fails the
+// line at that option.
+//
+// The options before it stay in the state and no port is read out of the
+// keyword.
+func Test_Parser_Next_OptionListFailsAtOption(t *testing.T) {
+	var state ipfw.ReduceState
+	_, err := ipfw.NewParser("add allow ip from any to any established foo\n").Next(&state)
+	require.NotNil(t, err)
+	require.Equal(t, ipfw.ParseError{
+		Kind:   ipfw.ErrUnknownOption,
+		Line:   1,
+		Column: 41,
+		Text:   "add allow ip from any to any established foo",
+	}, *err)
+	require.Equal(t, ipfw.ReduceState{
+		IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+		Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+		Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+		Options:      []ipfw.Opt{{Kind: ipfw.OptEstablished}},
+	}, state)
+}
+
+// verifies that a line with ports and options parses into a warmed-up
+// state without allocating, the first option's dry run included.
 func Test_Parser_Next_OptionsNoAllocs(t *testing.T) {
 	src := "add pass tcp from any to any 22 established\nadd pass tcp from any to any established\n"
 	parser := ipfw.NewParser(src)
@@ -2428,6 +2451,11 @@ func Benchmark_Parser_Next_TenOptions(b *testing.B) {
 	benchmarkNext(b, "add allow tcp from any 1024-65535 to any 22,80,443 in via vlan1?? established"+
 		" keep-state :flow proto tcp tcpflags syn,!ack dst-port 8080,8443 not frag antispoof"+
 		" { src-port 22 or out }\n")
+}
+
+func Benchmark_Parser_Next_OptionsAfterTarget(b *testing.B) {
+	benchmarkNext(b, "add allow tcp from any to any in via vlan1?? established keep-state :flow"+
+		" proto tcp tcpflags syn,!ack dst-port 8080,8443 not frag antispoof { src-port 22 or out }\n")
 }
 
 func Benchmark_Parser_Next_Comment(b *testing.B) {
