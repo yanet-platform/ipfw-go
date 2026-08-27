@@ -377,6 +377,10 @@ func (m *builder[V4, V6]) OnOption(opt ipfw.Opt) error {
 	switch opt.Kind {
 	case ipfw.OptEstablished, ipfw.OptIn, ipfw.OptOut, ipfw.OptFrag, ipfw.OptICMPTypes, ipfw.OptICMP6Types,
 		ipfw.OptTCPFlags, ipfw.OptSourcePort, ipfw.OptDestinationPort, ipfw.OptProto:
+	case ipfw.OptVia:
+		if opt.Via.Kind == ipfw.ViaTable {
+			return ErrUnsupportedOption
+		}
 	default:
 		return ErrUnsupportedOption
 	}
@@ -491,9 +495,9 @@ func (m *VM[V4, V6]) matchOptions(options []ipfw.Opt, ctx *Context, pkt Packet) 
 // established is a TCP packet with ACK or RST set, tcpflags one whose
 // examined flags are exactly the ones to be set, src-port and dst-port a
 // packet whose port is in the range, proto one of the protocol number, in
-// and out the direction of the check, frag a non-first fragment,
-// icmptypes and icmp6types an ICMP packet of the family with a type in
-// the set.
+// and out the direction of the check, via the context's interface by name
+// or by mask, frag a non-first fragment, icmptypes and icmp6types an ICMP
+// packet of the family with a type in the set.
 func (m *VM[V4, V6]) matchOption(opt *ipfw.Opt, ctx *Context, pkt Packet) bool {
 	switch opt.Kind {
 	case ipfw.OptEstablished:
@@ -514,6 +518,8 @@ func (m *VM[V4, V6]) matchOption(opt *ipfw.Opt, ctx *Context, pkt Packet) bool {
 		return ctx.Direction == In
 	case ipfw.OptOut:
 		return ctx.Direction == Out
+	case ipfw.OptVia:
+		return m.matchVia(&opt.Via, ctx)
 	case ipfw.OptFrag:
 		return pkt.IsFragment()
 	case ipfw.OptICMPTypes:
@@ -537,6 +543,18 @@ func matchPorts(matches []ipfw.PortNumberMatch, port uint16) bool {
 		}
 	}
 	return len(matches) > 0 && matches[0].Neg
+}
+
+// matchVia reports whether the context's interface is the one named, or
+// one the mask takes, which a `*` does even for no interface at all.
+func (m *VM[V4, V6]) matchVia(via *ipfw.Via, ctx *Context) bool {
+	switch via.Kind {
+	case ipfw.ViaExact:
+		return ctx.IfName == via.Name
+	case ipfw.ViaMask:
+		return ipfw.MatchIfMask(via.Name, ctx.IfName)
+	}
+	return false
 }
 
 // matchIPProtos reports whether the version is in one of the version

@@ -548,6 +548,105 @@ func Test_VM_Check_Established(t *testing.T) {
 	require.Equal(t, pass, negated.Check(&vm.Context{}, udp))
 }
 
+// verifies that via matches the context's interface by exact name or by
+// mask, an empty name matching nothing but a mask that takes it.
+func Test_VM_Check_Via(t *testing.T) {
+	packet := tcp4("192.0.2.1", "192.0.2.2")
+	cases := []struct {
+		name    string
+		rules   string
+		ifname  string
+		verdict ipfw.Action
+	}{
+		{
+			name:    "exact, same name",
+			rules:   "add pass ip from any to any via eth0\nadd deny ip from any to any\n",
+			ifname:  "eth0",
+			verdict: pass,
+		},
+		{
+			name:    "exact, other name",
+			rules:   "add pass ip from any to any via eth0\nadd deny ip from any to any\n",
+			ifname:  "eth1",
+			verdict: deny,
+		},
+		{
+			name:    "exact, no name",
+			rules:   "add pass ip from any to any via eth0\nadd deny ip from any to any\n",
+			ifname:  "",
+			verdict: deny,
+		},
+		{
+			name:    "mask, match",
+			rules:   "add pass ip from any to any via vlan1???\nadd deny ip from any to any\n",
+			ifname:  "vlan1234",
+			verdict: pass,
+		},
+		{
+			name:    "mask, too short",
+			rules:   "add pass ip from any to any via vlan1???\nadd deny ip from any to any\n",
+			ifname:  "vlan123",
+			verdict: deny,
+		},
+		{
+			name:    "mask, other prefix",
+			rules:   "add pass ip from any to any via vlan1???\nadd deny ip from any to any\n",
+			ifname:  "vlan2234",
+			verdict: deny,
+		},
+		{
+			name:    "star mask takes the empty name",
+			rules:   "add pass ip from any to any via *\nadd deny ip from any to any\n",
+			ifname:  "",
+			verdict: pass,
+		},
+		{
+			name:    "group, first",
+			rules:   "add pass ip from any to any { via eth0 or via eth1 }\nadd deny ip from any to any\n",
+			ifname:  "eth0",
+			verdict: pass,
+		},
+		{
+			name:    "group, second",
+			rules:   "add pass ip from any to any { via eth0 or via eth1 }\nadd deny ip from any to any\n",
+			ifname:  "eth1",
+			verdict: pass,
+		},
+		{
+			name:    "group, neither",
+			rules:   "add pass ip from any to any { via eth0 or via eth1 }\nadd deny ip from any to any\n",
+			ifname:  "eth2",
+			verdict: deny,
+		},
+		{
+			name:    "negated, same name",
+			rules:   "add pass ip from any to any not via eth0\nadd deny ip from any to any\n",
+			ifname:  "eth0",
+			verdict: deny,
+		},
+		{
+			name:    "negated, other name",
+			rules:   "add pass ip from any to any not via eth0\nadd deny ip from any to any\n",
+			ifname:  "eth1",
+			verdict: pass,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			machine := build(t, tc.rules, none)
+			require.Equal(t, tc.verdict, machine.Check(&vm.Context{IfName: tc.ifname}, packet))
+		})
+	}
+
+	loopback := build(t, "add allow ip from me to me { via lo0 or via lo1 }\nadd deny ip from any to any\n", none)
+	local := []netip.Addr{netip.MustParseAddr("192.0.2.1")}
+	between := tcp4("192.0.2.1", "192.0.2.1")
+	require.Equal(t, deny, loopback.Check(&vm.Context{LocalAddrs: local}, between))
+	require.Equal(t, pass, loopback.Check(&vm.Context{LocalAddrs: local, IfName: "lo0"}, between))
+	require.Equal(t, pass, loopback.Check(&vm.Context{LocalAddrs: local, IfName: "lo1"}, between))
+	require.Equal(t, deny, loopback.Check(&vm.Context{IfName: "lo0"}, between))
+}
+
 // verifies that the proto option matches the protocol number, a name
 // resolved on the way in, negated the other way round.
 func Test_VM_Check_ProtoOption(t *testing.T) {
@@ -1297,10 +1396,10 @@ func Test_VM_Build_Errors(t *testing.T) {
 		},
 		{
 			name:      "unsupported option",
-			rules:     "add pass tcp from any to any established via eth0\n",
+			rules:     "add pass tcp from any to any established via table(t)\n",
 			resolvers: resolving,
 			line:      1,
-			text:      "add pass tcp from any to any established via eth0",
+			text:      "add pass tcp from any to any established via table(t)",
 			cause:     vm.ErrUnsupportedOption,
 		},
 		{
