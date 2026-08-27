@@ -375,7 +375,7 @@ func (m *builder[V4, V6]) OnDestinationPort(match ipfw.PortNumberMatch) error {
 // ErrUnsupportedOption.
 func (m *builder[V4, V6]) OnOption(opt ipfw.Opt) error {
 	switch opt.Kind {
-	case ipfw.OptEstablished, ipfw.OptIn, ipfw.OptOut, ipfw.OptFrag:
+	case ipfw.OptEstablished, ipfw.OptIn, ipfw.OptOut, ipfw.OptFrag, ipfw.OptICMPTypes, ipfw.OptICMP6Types:
 	default:
 		return ErrUnsupportedOption
 	}
@@ -488,7 +488,8 @@ func (m *VM[V4, V6]) matchOptions(options []ipfw.Opt, ctx *Context, pkt Packet) 
 // the packet in the context.
 //
 // established is a TCP packet with ACK or RST set, in and out the
-// direction of the check, frag a non-first fragment.
+// direction of the check, frag a non-first fragment, icmptypes and
+// icmp6types an ICMP packet of the family with a type in the set.
 func (m *VM[V4, V6]) matchOption(opt *ipfw.Opt, ctx *Context, pkt Packet) bool {
 	switch opt.Kind {
 	case ipfw.OptEstablished:
@@ -500,6 +501,12 @@ func (m *VM[V4, V6]) matchOption(opt *ipfw.Opt, ctx *Context, pkt Packet) bool {
 		return ctx.Direction == Out
 	case ipfw.OptFrag:
 		return pkt.IsFragment()
+	case ipfw.OptICMPTypes:
+		ty, ok := pkt.ICMPType()
+		return ok && opt.Types.Has(ty)
+	case ipfw.OptICMP6Types:
+		ty, ok := pkt.ICMP6Type()
+		return ok && opt.Types.Has(ty)
 	}
 	return false
 }

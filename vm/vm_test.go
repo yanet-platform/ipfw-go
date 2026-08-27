@@ -548,6 +548,84 @@ func Test_VM_Check_Established(t *testing.T) {
 	require.Equal(t, pass, negated.Check(&vm.Context{}, udp))
 }
 
+// verifies that icmptypes and icmp6types match the type of an ICMP packet
+// of their family when it is in the set, and nothing else.
+func Test_VM_Check_ICMPTypes(t *testing.T) {
+	icmp := func(ty uint8) vm.Packet {
+		return vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")).WithICMP(ty, 0)
+	}
+	icmp6 := func(ty uint8) vm.Packet {
+		return vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8::2")).WithICMP6(ty, 0)
+	}
+	cases := []struct {
+		name    string
+		rules   string
+		packet  vm.Packet
+		verdict ipfw.Action
+	}{
+		{
+			name:    "icmptypes, type in the set",
+			rules:   "add allow icmp from any to { 192.0.2.0/24 } icmptypes 0,8,3,11,12\nadd deny ip from any to any\n",
+			packet:  icmp(8),
+			verdict: pass,
+		},
+		{
+			name:    "icmptypes, type outside the set",
+			rules:   "add allow icmp from any to { 192.0.2.0/24 } icmptypes 0,8,3,11,12\nadd deny ip from any to any\n",
+			packet:  icmp(1),
+			verdict: deny,
+		},
+		{
+			name:    "icmptypes against TCP",
+			rules:   "add allow ip from any to any icmptypes 8\nadd deny ip from any to any\n",
+			packet:  tcp4("192.0.2.1", "192.0.2.2"),
+			verdict: deny,
+		},
+		{
+			name:    "icmptypes against ICMPv6",
+			rules:   "add allow ip from any to any icmptypes 8\nadd deny ip from any to any\n",
+			packet:  icmp6(8),
+			verdict: deny,
+		},
+		{
+			name:    "not icmptypes, type in the set",
+			rules:   "add allow ip from any to any not icmptypes 8\nadd deny ip from any to any\n",
+			packet:  icmp(8),
+			verdict: deny,
+		},
+		{
+			name:    "not icmptypes, type outside the set",
+			rules:   "add allow ip from any to any not icmptypes 8\nadd deny ip from any to any\n",
+			packet:  icmp(0),
+			verdict: pass,
+		},
+		{
+			name:    "icmp6types, type in the set",
+			rules:   "add allow ip from any to { 2001:db8::/32 } icmp6types 1,2,3,4,128,129,133,134,135,136\nadd deny ip from any to any\n",
+			packet:  icmp6(135),
+			verdict: pass,
+		},
+		{
+			name:    "icmp6types, type outside the set",
+			rules:   "add allow ip from any to { 2001:db8::/32 } icmp6types 1,2,3,4,128,129,133,134,135,136\nadd deny ip from any to any\n",
+			packet:  icmp6(130),
+			verdict: deny,
+		},
+		{
+			name:    "icmp6types against ICMP",
+			rules:   "add allow ip from any to any icmp6types 128\nadd deny ip from any to any\n",
+			packet:  icmp(128),
+			verdict: deny,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			machine := build(t, tc.rules, none)
+			require.Equal(t, tc.verdict, machine.Check(&vm.Context{}, tc.packet))
+		})
+	}
+}
+
 // verifies that frag matches a non-first IPv4 fragment only, which, having
 // no transport header, fails a rule with ports first.
 func Test_VM_Check_Frag(t *testing.T) {
@@ -1024,10 +1102,10 @@ func Test_VM_Build_Errors(t *testing.T) {
 		},
 		{
 			name:      "unsupported option",
-			rules:     "add pass tcp from any to any established icmptypes 8\n",
+			rules:     "add pass tcp from any to any established tcpflags syn\n",
 			resolvers: resolving,
 			line:      1,
-			text:      "add pass tcp from any to any established icmptypes 8",
+			text:      "add pass tcp from any to any established tcpflags syn",
 			cause:     vm.ErrUnsupportedOption,
 		},
 		{
