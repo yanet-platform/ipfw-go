@@ -150,6 +150,28 @@ func Test_Packet_Fragment(t *testing.T) {
 	require.False(t, vm.NewIPv6Packet(src6, dst6).IsFragment())
 }
 
+// verifies that a non-first fragment reports no ports, flags or ICMP type,
+// its bytes after the IP header being payload, and the first one does.
+func Test_Packet_FragmentHasNoTransport(t *testing.T) {
+	tcp := vm.NewIPv4Packet(src4, dst4).WithTCP(ipfw.TCPSyn, 50000, 22)
+	_, ok := tcp.WithFragmentOffset(100).SourcePort()
+	require.False(t, ok)
+	_, ok = tcp.WithFragmentOffset(100).DestinationPort()
+	require.False(t, ok)
+	_, ok = tcp.WithFragmentOffset(100).TCPFlags()
+	require.False(t, ok)
+	port, ok := tcp.WithFragmentOffset(0).SourcePort()
+	require.True(t, ok)
+	require.Equal(t, uint16(50000), port)
+
+	icmp := vm.NewIPv4Packet(src4, dst4).WithICMP(8, 0)
+	_, ok = icmp.WithFragmentOffset(100).ICMPType()
+	require.False(t, ok)
+	ty, ok := icmp.ICMPType()
+	require.True(t, ok)
+	require.Equal(t, uint8(8), ty)
+}
+
 // verifies that a buffer shorter than the fields read reports zero
 // values and no presence, without panicking.
 func Test_Packet_ShortBuffer(t *testing.T) {
