@@ -10,7 +10,7 @@ import (
 	"github.com/yanet-platform/ipfw/vm"
 )
 
-var _ vm.TableRegistry[net4, net6] = (*vm.DefaultTables[net4, net6])(nil)
+var _ vm.TableRegistry[net4, net6] = (*vm.DefaultTableRegistry[net4, net6])(nil)
 
 // must4 parses an IPv4 network or fails the test.
 func must4(t *testing.T, s string) net4 {
@@ -31,7 +31,7 @@ func must6(t *testing.T, s string) net6 {
 // verifies that a network lookup finds an address in any network of the
 // table's family and nothing in a missing or empty table.
 func Test_Tables_LookupNetwork(t *testing.T) {
-	tables := vm.NewDefaultTables[net4, net6]()
+	tables := vm.NewDefaultTableRegistry[net4, net6]()
 	tables.AddNetwork4("t", must4(t, "192.0.2.0/24"))
 	tables.AddNetwork4("t", must4(t, "198.51.100.0/25"))
 	tables.AddNetwork6("t", must6(t, "2001:db8::/32"))
@@ -49,7 +49,7 @@ func Test_Tables_LookupNetwork(t *testing.T) {
 // verifies that an interface lookup yields the value of the exact name and
 // nothing for another name or a missing table.
 func Test_Tables_LookupInterface(t *testing.T) {
-	tables := vm.NewDefaultTables[net4, net6]()
+	tables := vm.NewDefaultTableRegistry[net4, net6]()
 	tables.AddInterface("i", "vlan1", "LABEL")
 	tables.AddInterface("i", "vlan2", "")
 	tables.AddInterface("i", "vlan1", "AGAIN")
@@ -71,7 +71,7 @@ func Test_Tables_LookupInterface(t *testing.T) {
 
 // verifies that lookups allocate nothing.
 func Test_Tables_NoAllocs(t *testing.T) {
-	tables := vm.NewDefaultTables[net4, net6]()
+	tables := vm.NewDefaultTableRegistry[net4, net6]()
 	tables.AddNetwork4("t", must4(t, "192.0.2.0/24"))
 	tables.AddNetwork6("t", must6(t, "2001:db8::/32"))
 	tables.AddInterface("i", "vlan1", "LABEL")

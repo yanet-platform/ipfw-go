@@ -2,9 +2,12 @@ package vm
 
 import "net/netip"
 
-// DefaultTables is the default TableRegistry: the networks of a table are scanned
-// in the order added, the interfaces looked up by exact name.
-type DefaultTables[V4, V6 Network] struct {
+// DefaultTableRegistry is the registry a build fills when the Config
+// names none.
+//
+// The networks of a table are scanned in the order added, the interfaces
+// looked up by exact name.
+type DefaultTableRegistry[V4, V6 Network] struct {
 	networks   map[string]*networkTable[V4, V6]
 	interfaces map[string]map[string]string
 }
@@ -17,16 +20,16 @@ type networkTable[V4, V6 Network] struct {
 	V6 []V6
 }
 
-// NewDefaultTables returns an empty registry.
-func NewDefaultTables[V4, V6 Network]() *DefaultTables[V4, V6] {
-	return &DefaultTables[V4, V6]{
+// NewDefaultTableRegistry returns an empty registry.
+func NewDefaultTableRegistry[V4, V6 Network]() *DefaultTableRegistry[V4, V6] {
+	return &DefaultTableRegistry[V4, V6]{
 		networks:   map[string]*networkTable[V4, V6]{},
 		interfaces: map[string]map[string]string{},
 	}
 }
 
 // LookupNetwork implements TableRegistry.
-func (m *DefaultTables[V4, V6]) LookupNetwork(table string, addr netip.Addr) bool {
+func (m *DefaultTableRegistry[V4, V6]) LookupNetwork(table string, addr netip.Addr) bool {
 	networks, ok := m.networks[table]
 	if !ok {
 		return false
@@ -48,26 +51,26 @@ func (m *DefaultTables[V4, V6]) LookupNetwork(table string, addr netip.Addr) boo
 }
 
 // LookupInterface implements TableRegistry.
-func (m *DefaultTables[V4, V6]) LookupInterface(table, ifname string) (string, bool) {
+func (m *DefaultTableRegistry[V4, V6]) LookupInterface(table, ifname string) (string, bool) {
 	value, ok := m.interfaces[table][ifname]
 	return value, ok
 }
 
 // AddNetwork4 implements TableRegistry.
-func (m *DefaultTables[V4, V6]) AddNetwork4(table string, network V4) {
+func (m *DefaultTableRegistry[V4, V6]) AddNetwork4(table string, network V4) {
 	networks := m.network(table)
 	networks.V4 = append(networks.V4, network)
 }
 
 // AddNetwork6 implements TableRegistry.
-func (m *DefaultTables[V4, V6]) AddNetwork6(table string, network V6) {
+func (m *DefaultTableRegistry[V4, V6]) AddNetwork6(table string, network V6) {
 	networks := m.network(table)
 	networks.V6 = append(networks.V6, network)
 }
 
 // AddInterface implements TableRegistry, a later entry for the same name
 // replacing the earlier one.
-func (m *DefaultTables[V4, V6]) AddInterface(table, ifname, value string) {
+func (m *DefaultTableRegistry[V4, V6]) AddInterface(table, ifname, value string) {
 	interfaces, ok := m.interfaces[table]
 	if !ok {
 		interfaces = map[string]string{}
@@ -77,7 +80,7 @@ func (m *DefaultTables[V4, V6]) AddInterface(table, ifname, value string) {
 }
 
 // network returns the network table, created when missing.
-func (m *DefaultTables[V4, V6]) network(table string) *networkTable[V4, V6] {
+func (m *DefaultTableRegistry[V4, V6]) network(table string) *networkTable[V4, V6] {
 	networks, ok := m.networks[table]
 	if !ok {
 		networks = &networkTable[V4, V6]{}

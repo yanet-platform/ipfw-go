@@ -321,7 +321,7 @@ func (m span) Empty() bool {
 func Build[V4, V6 Network](p *ipfw.Parser, cfg Config[V4, V6]) (*VM[V4, V6], error) {
 	tables, verdict := cfg.Tables, cfg.DefaultVerdict
 	if tables == nil {
-		tables = NewDefaultTables[V4, V6]()
+		tables = NewDefaultTableRegistry[V4, V6]()
 	}
 	if verdict.Kind == 0 {
 		verdict = ipfw.Action{Kind: ipfw.ActionDeny}
