@@ -152,22 +152,29 @@ func Test_Packet_Fragment(t *testing.T) {
 
 // verifies that a non-first fragment reports no ports, flags or ICMP type,
 // its bytes after the IP header being payload, and the first one does.
+//
+// The builders edit the bytes in place, so every case builds its own
+// packet.
 func Test_Packet_FragmentHasNoTransport(t *testing.T) {
-	tcp := vm.NewIPv4Packet(src4, dst4).WithTCP(ipfw.TCPSyn, 50000, 22)
-	_, ok := tcp.WithFragmentOffset(100).SourcePort()
+	tcp := func(offset uint16) vm.RawIPv4Packet {
+		return vm.NewIPv4Packet(src4, dst4).WithTCP(ipfw.TCPSyn, 50000, 22).WithFragmentOffset(offset)
+	}
+	icmp := func(offset uint16) vm.RawIPv4Packet {
+		return vm.NewIPv4Packet(src4, dst4).WithICMP(8, 0).WithFragmentOffset(offset)
+	}
+	_, ok := tcp(100).SourcePort()
 	require.False(t, ok)
-	_, ok = tcp.WithFragmentOffset(100).DestinationPort()
+	_, ok = tcp(100).DestinationPort()
 	require.False(t, ok)
-	_, ok = tcp.WithFragmentOffset(100).TCPFlags()
+	_, ok = tcp(100).TCPFlags()
 	require.False(t, ok)
-	port, ok := tcp.WithFragmentOffset(0).SourcePort()
+	_, ok = icmp(100).ICMPType()
+	require.False(t, ok)
+
+	port, ok := tcp(0).SourcePort()
 	require.True(t, ok)
 	require.Equal(t, uint16(50000), port)
-
-	icmp := vm.NewIPv4Packet(src4, dst4).WithICMP(8, 0)
-	_, ok = icmp.WithFragmentOffset(100).ICMPType()
-	require.False(t, ok)
-	ty, ok := icmp.ICMPType()
+	ty, ok := icmp(0).ICMPType()
 	require.True(t, ok)
 	require.Equal(t, uint8(8), ty)
 }
