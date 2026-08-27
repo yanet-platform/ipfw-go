@@ -137,25 +137,21 @@ func parseOption(s string, state State, hook OptionHook, place optionPlace) (str
 	rest, neg := notWS1(s)
 	var buf string
 	var err fail
-	switch {
-	case strings.HasPrefix(rest, "src-port"):
-		buf, err = parsePortsOption(rest[len("src-port"):], state, OptSourcePort, neg, place)
-	case strings.HasPrefix(rest, "dst-port"):
-		buf, err = parsePortsOption(rest[len("dst-port"):], state, OptDestinationPort, neg, place)
-	case strings.HasPrefix(rest, "icmptypes"):
-		buf, err = parseTypesOption(rest[len("icmptypes"):], state, OptICMPTypes, neg, place)
-	case strings.HasPrefix(rest, "icmptype"):
-		buf, err = parseTypesOption(rest[len("icmptype"):], state, OptICMPTypes, neg, place)
-	case strings.HasPrefix(rest, "icmp6types"):
-		buf, err = parseTypesOption(rest[len("icmp6types"):], state, OptICMP6Types, neg, place)
-	case strings.HasPrefix(rest, "keep-state"):
-		buf, err = parseKeepStateOption(rest[len("keep-state"):], state, neg, place)
-	case strings.HasPrefix(rest, "proto"):
-		buf, err = parseProtoOption(rest[len("proto"):], state, neg, place)
-	case strings.HasPrefix(rest, "tcpflags"):
-		buf, err = parseTCPFlagsOption(rest[len("tcpflags"):], state, neg, place)
-	case strings.HasPrefix(rest, "via"):
-		buf, err = parseViaOption(rest[len("via"):], state, neg, place)
+	kind, n := argumentOption(rest)
+	arg := rest[n:]
+	switch kind {
+	case OptSourcePort, OptDestinationPort:
+		buf, err = parsePortsOption(arg, state, kind, neg, place)
+	case OptICMPTypes, OptICMP6Types:
+		buf, err = parseTypesOption(arg, state, kind, neg, place)
+	case OptKeepState:
+		buf, err = parseKeepStateOption(arg, state, neg, place)
+	case OptProto:
+		buf, err = parseProtoOption(arg, state, neg, place)
+	case OptTCPFlags:
+		buf, err = parseTCPFlagsOption(arg, state, neg, place)
+	case OptVia:
+		buf, err = parseViaOption(arg, state, neg, place)
 	default:
 		buf, err = parseKeywordOption(rest, state, hook, neg, place)
 	}
@@ -163,6 +159,53 @@ func parseOption(s string, state State, hook OptionHook, place optionPlace) (str
 		return s, err
 	}
 	return buf, fail{}
+}
+
+// argumentOption tells an option with an argument by its keyword and
+// returns its kind with the keyword's length, zero for none.
+//
+// The first byte narrows the candidates to the one to three keywords
+// starting with it before a prefix is compared.
+func argumentOption(s string) (OptKind, int) {
+	if s == "" {
+		return 0, 0
+	}
+	switch s[0] {
+	case 's':
+		if strings.HasPrefix(s, "src-port") {
+			return OptSourcePort, len("src-port")
+		}
+	case 'd':
+		if strings.HasPrefix(s, "dst-port") {
+			return OptDestinationPort, len("dst-port")
+		}
+	case 'i':
+		switch {
+		case strings.HasPrefix(s, "icmptypes"):
+			return OptICMPTypes, len("icmptypes")
+		case strings.HasPrefix(s, "icmptype"):
+			return OptICMPTypes, len("icmptype")
+		case strings.HasPrefix(s, "icmp6types"):
+			return OptICMP6Types, len("icmp6types")
+		}
+	case 'k':
+		if strings.HasPrefix(s, "keep-state") {
+			return OptKeepState, len("keep-state")
+		}
+	case 'p':
+		if strings.HasPrefix(s, "proto") {
+			return OptProto, len("proto")
+		}
+	case 't':
+		if strings.HasPrefix(s, "tcpflags") {
+			return OptTCPFlags, len("tcpflags")
+		}
+	case 'v':
+		if strings.HasPrefix(s, "via") {
+			return OptVia, len("via")
+		}
+	}
+	return 0, 0
 }
 
 // parseKeywordOption parses an option without an argument, the hook
@@ -467,28 +510,35 @@ func parsePortsOption(
 	}
 }
 
-// keywordOptions are the options without an argument, in the order they
-// are tried.
-var keywordOptions = [...]struct {
-	keyword string
-	kind    OptKind
-}{
-	{"diverted", OptDiverted},
-	{"frag", OptFrag},
-	{"established", OptEstablished},
-	{"in", OptIn},
-	{"out", OptOut},
-	{"antispoof", OptAntiSpoof},
-}
-
-// keywordOption tells an option without an argument by its keyword.
+// keywordOption tells an option without an argument by its keyword, the
+// first byte picking the one candidate before the prefix is compared.
 func keywordOption(s string) (OptKind, string, bool) {
-	for idx := range keywordOptions {
-		if rest, ok := prefix(s, keywordOptions[idx].keyword); ok {
-			return keywordOptions[idx].kind, rest, true
-		}
+	if s == "" {
+		return 0, s, false
 	}
-	return 0, s, false
+	var keyword string
+	var kind OptKind
+	switch s[0] {
+	case 'a':
+		keyword, kind = "antispoof", OptAntiSpoof
+	case 'd':
+		keyword, kind = "diverted", OptDiverted
+	case 'e':
+		keyword, kind = "established", OptEstablished
+	case 'f':
+		keyword, kind = "frag", OptFrag
+	case 'i':
+		keyword, kind = "in", OptIn
+	case 'o':
+		keyword, kind = "out", OptOut
+	default:
+		return 0, s, false
+	}
+	rest, ok := prefix(s, keyword)
+	if !ok {
+		return 0, s, false
+	}
+	return kind, rest, true
 }
 
 // Opt is one rule option with the argument of its kind.

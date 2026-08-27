@@ -97,7 +97,7 @@ From FreeBSD: `skipto N` needs a rule numbered exactly `N`; the VM is stateless,
 
 ## Performance
 
-The parse path (per line) and the match path (per packet) allocate nothing, which `testing.AllocsPerRun` guards. Building a VM allocates. On a developer box: the simplest rule parses in about 0.4 µs, a rule with ten networks in 1.4 µs, one with ten options in 3 µs; a check costs about 30 ns per rule that does not match and 90 ns when the first rule matches, a thousand jumps 41 µs; a 10k-line ruleset builds in 34 ms. Over the Rust crate's production corpus (27 MB, 115k rules) the parser runs at 184 MB/s without allocating, the VM builds in 0.3 s and a packet that matches nothing is checked against every rule in 2.2 ms. Keep the packet as a `vm.Packet` value across checks: converting a raw byte slice to the interface on every call is the one allocation a check can incur.
+The parse path (per line) and the match path (per packet) allocate nothing, which `testing.AllocsPerRun` guards. Building a VM allocates. On a developer box: the simplest rule parses in about 0.4 µs, a rule with ten networks in 1.3 µs, one with ten options in 2.6 µs; a check costs about 30 ns per rule that does not match and 90 ns when the first rule matches, a thousand jumps 41 µs; a 10k-line ruleset builds in 34 ms. Over the Rust crate's production corpus (27 MB, 115k rules) the parser runs at 184 MB/s without allocating, the VM builds in 0.3 s and a packet that matches nothing is checked against every rule in 2.2 ms. Keep the packet as a `vm.Packet` value across checks: converting a raw byte slice to the interface on every call is the one allocation a check can incur.
 
 ```sh
 make test        # go test -race ./...
