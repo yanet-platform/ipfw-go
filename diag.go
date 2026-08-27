@@ -2,6 +2,7 @@ package ipfw
 
 import (
 	"io"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -77,6 +78,30 @@ func DiagStyle() Style {
 		Dimmed:  "\x1b[2m",
 		Reset:   "\x1b[0m",
 	}
+}
+
+// DiagStyleFor is DiagStyle when w is a terminal that takes colour and the
+// zero Style otherwise, so that a rendering piped into a file stays plain.
+//
+// A terminal is a character device the environment does not speak against:
+// NO_COLOR set to anything, or TERM naming a dumb one, means no colour.
+// Anything that is not an *os.File is not a terminal. The check is the one
+// the standard library affords, so a character device that is no terminal,
+// os.DevNull among them, passes for one, and on Windows it says nothing
+// about whether the console takes the escapes.
+func DiagStyleFor(w io.Writer) Style {
+	if os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" {
+		return Style{}
+	}
+	file, ok := w.(*os.File)
+	if !ok || file == nil {
+		return Style{}
+	}
+	info, err := file.Stat()
+	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
+		return Style{}
+	}
+	return DiagStyle()
 }
 
 // WithDiagStyle wraps the parts of the rendering in the style, the zero value

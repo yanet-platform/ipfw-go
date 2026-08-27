@@ -2,6 +2,7 @@ package ipfw_test
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -73,6 +74,41 @@ func Test_Diagnostic_WithDiagStyle_Cut(t *testing.T) {
 	require.Contains(t, styled, "\x1b[2m... \x1b[0m")
 	require.Contains(t, styled, "\x1b[2m ...\x1b[0m")
 	require.Equal(t, ipfw.NewDiagnostic(err, ipfw.WithDiagWidth(48)).String(), plain(styled))
+}
+
+// verifies that a style is chosen for the writer it will be rendered to.
+//
+// The palette for a terminal, nothing for a file, a pipe, a writer that is
+// no file at all, or an environment asking for no colour.
+func Test_DiagStyleFor(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	file, err := os.CreateTemp(t.TempDir(), "diag")
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, file.Close()) })
+	require.Equal(t, ipfw.Style{}, ipfw.DiagStyleFor(file))
+
+	reader, writer, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, reader.Close()) })
+	t.Cleanup(func() { require.NoError(t, writer.Close()) })
+	require.Equal(t, ipfw.Style{}, ipfw.DiagStyleFor(writer))
+
+	require.Equal(t, ipfw.Style{}, ipfw.DiagStyleFor(&strings.Builder{}))
+	require.Equal(t, ipfw.Style{}, ipfw.DiagStyleFor(nil))
+
+	terminal, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, terminal.Close()) })
+	require.Equal(t, ipfw.DiagStyle(), ipfw.DiagStyleFor(terminal))
+
+	t.Setenv("NO_COLOR", "1")
+	require.Equal(t, ipfw.Style{}, ipfw.DiagStyleFor(terminal))
+
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "dumb")
+	require.Equal(t, ipfw.Style{}, ipfw.DiagStyleFor(terminal))
 }
 
 // verifies that the palette of DiagStyle wraps every role in ANSI
