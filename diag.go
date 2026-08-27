@@ -23,8 +23,8 @@ func newDiagnosticOptions() diagnosticOptions {
 // DiagnosticOption configures a Diagnostic, see the With functions.
 type DiagnosticOption func(*diagnosticOptions)
 
-// WithPath names the file in the position line, as `path:line:column`.
-func WithPath(path string) DiagnosticOption {
+// WithDiagPath names the file in the position line, as `path:line:column`.
+func WithDiagPath(path string) DiagnosticOption {
 	return func(opts *diagnosticOptions) {
 		opts.Path = path
 	}
@@ -45,7 +45,7 @@ func WithWidth(width int) DiagnosticOption {
 // adding nothing.
 //
 // A role holds what opens its part and Reset what ends every one. The
-// roles are meant for ANSI escapes, see ColorStyle, but anything a
+// roles are meant for ANSI escapes, see DiagStyle, but anything a
 // consumer's terminal or markup takes will do, and whatever they hold
 // does not count against the width.
 type Style struct {
@@ -63,12 +63,12 @@ type Style struct {
 	Reset string
 }
 
-// ColorStyle is the palette of a terminal that takes ANSI escapes.
+// DiagStyle is the palette of a terminal that takes ANSI escapes.
 //
 // The colours are those of rustc: the error bold red, its message bold,
 // the position and the gutter bold blue, the carets bold yellow, the
 // markers of a cut line faint.
-func ColorStyle() Style {
+func DiagStyle() Style {
 	return Style{
 		Error:   "\x1b[1;91m",
 		Message: "\x1b[1m",
@@ -79,9 +79,9 @@ func ColorStyle() Style {
 	}
 }
 
-// WithStyle wraps the parts of the rendering in the style, the zero value
+// WithDiagStyle wraps the parts of the rendering in the style, the zero value
 // leaving it plain.
-func WithStyle(style Style) DiagnosticOption {
+func WithDiagStyle(style Style) DiagnosticOption {
 	return func(opts *diagnosticOptions) {
 		opts.Style = style
 	}

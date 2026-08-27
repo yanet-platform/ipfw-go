@@ -26,19 +26,19 @@ var unknownAction = &ipfw.ParseError{
 
 // verifies the rustc layout with a path: header, position with a 1-based
 // column, gutter, source line and carets under the whole token.
-func Test_Diagnostic_WithPath(t *testing.T) {
+func Test_Diagnostic_WithDiagPath(t *testing.T) {
 	require.Equal(t, lines(
 		"error: expected action",
 		"  --> fw.conf:3:5",
 		"   |",
 		" 3 | add foobar :any # WOW",
 		"   |     ^^^^^^",
-	), ipfw.NewDiagnostic(unknownAction, ipfw.WithPath("fw.conf")).String())
+	), ipfw.NewDiagnostic(unknownAction, ipfw.WithDiagPath("fw.conf")).String())
 }
 
 // verifies that a style wraps each role of the rendering and nothing
 // else, the layout staying what it is without one.
-func Test_Diagnostic_WithStyle(t *testing.T) {
+func Test_Diagnostic_WithDiagStyle(t *testing.T) {
 	style := ipfw.Style{
 		Error:   "<e>",
 		Message: "<m>",
@@ -55,30 +55,30 @@ func Test_Diagnostic_WithStyle(t *testing.T) {
 		"<i>   | <r>    <s>^^^^^^<r>",
 	), ipfw.NewDiagnostic(
 		unknownAction,
-		ipfw.WithPath("fw.conf"),
-		ipfw.WithStyle(style),
+		ipfw.WithDiagPath("fw.conf"),
+		ipfw.WithDiagStyle(style),
 	).String())
 }
 
 // verifies that a style dims the markers of a cut line on either side and
 // that its escapes leave the layout, the width included, as it was.
-func Test_Diagnostic_WithStyle_Cut(t *testing.T) {
+func Test_Diagnostic_WithDiagStyle_Cut(t *testing.T) {
 	err := &ipfw.ParseError{
 		Kind:   ipfw.ErrExpectedAction,
 		Line:   3,
 		Column: 41,
 		Text:   "add pass ip from 192.0.2.0/24 to any not frobnicate 1024-65535 established",
 	}
-	styled := ipfw.NewDiagnostic(err, ipfw.WithWidth(48), ipfw.WithStyle(ipfw.ColorStyle())).String()
+	styled := ipfw.NewDiagnostic(err, ipfw.WithWidth(48), ipfw.WithDiagStyle(ipfw.DiagStyle())).String()
 	require.Contains(t, styled, "\x1b[2m... \x1b[0m")
 	require.Contains(t, styled, "\x1b[2m ...\x1b[0m")
 	require.Equal(t, ipfw.NewDiagnostic(err, ipfw.WithWidth(48)).String(), plain(styled))
 }
 
-// verifies that the palette of ColorStyle wraps every role in ANSI
+// verifies that the palette of DiagStyle wraps every role in ANSI
 // escapes and that an empty style leaves the rendering untouched.
-func Test_Diagnostic_ColorStyle(t *testing.T) {
-	colored := ipfw.NewDiagnostic(unknownAction, ipfw.WithStyle(ipfw.ColorStyle())).String()
+func Test_Diagnostic_DiagStyle(t *testing.T) {
+	colored := ipfw.NewDiagnostic(unknownAction, ipfw.WithDiagStyle(ipfw.DiagStyle())).String()
 	require.Contains(t, colored, "\x1b[1;91merror\x1b[0m")
 	require.Contains(t, colored, "\x1b[1;94m  --> 3:5\x1b[0m")
 	require.Contains(t, colored, "\x1b[1;93m^^^^^^\x1b[0m")
@@ -87,7 +87,7 @@ func Test_Diagnostic_ColorStyle(t *testing.T) {
 	require.Equal(
 		t,
 		ipfw.NewDiagnostic(unknownAction).String(),
-		ipfw.NewDiagnostic(unknownAction, ipfw.WithStyle(ipfw.Style{})).String(),
+		ipfw.NewDiagnostic(unknownAction, ipfw.WithDiagStyle(ipfw.Style{})).String(),
 	)
 }
 
@@ -105,7 +105,7 @@ func plain(s string) string {
 
 // verifies that without a path the position line holds line and column
 // only.
-func Test_Diagnostic_WithoutPath(t *testing.T) {
+func Test_Diagnostic_WithoutDiagPath(t *testing.T) {
 	require.Equal(t, lines(
 		"error: expected action",
 		"  --> 3:5",
@@ -273,7 +273,7 @@ func Test_Diagnostic_WithWidth(t *testing.T) {
 // verifies that WriteTo writes exactly the rendering and reports its
 // length.
 func Test_Diagnostic_WriteTo(t *testing.T) {
-	diagnostic := ipfw.NewDiagnostic(unknownAction, ipfw.WithPath("fw.conf"))
+	diagnostic := ipfw.NewDiagnostic(unknownAction, ipfw.WithDiagPath("fw.conf"))
 	var buf strings.Builder
 	n, err := diagnostic.WriteTo(&buf)
 	require.NoError(t, err)
