@@ -11,10 +11,17 @@ linters).
 runtime** port of the Rust `ipfw` crate at `../ipfw`: a streaming, zero-copy
 parser for the FreeBSD/macOS `ipfw(8)` ruleset format plus a virtual machine
 that evaluates a packet against the ruleset. Package `ipfw` holds the parser,
-the token types, the `State` interface and the typed `RuleState`; package
-`vm` holds the VM. Tests use `testify`, `rapid` and `xnetip` (concrete
-network types). Read `.roadmap/README.md` for the design and the canonical
-API before touching anything.
+the token types, `State` and the typed layer (`Environment`, `Resolver`,
+`VMState`), package `vm` the VM. Tests use `testify`, `rapid` and `xnetip`.
+Read `.roadmap/README.md` for the design and the canonical API before
+touching anything.
+
+## Layout
+
+Root: `lex.go`, `errors.go`/`diag.go`, `parser.go`, one file per token
+family (`action`, `proto`, `target`, `port`, `opt`, `ifmask`, `table`),
+`hooks.go`, `state.go`, `vmstate.go` (typed layer). `vm/`: `vm.go`,
+`tables.go`, `packet.go`. `internal/synthetic/`: the test ruleset generator.
 
 Priorities: **functionality first, performance second** — but the parse path
 (per line) and the match path (per packet) are allocation-free by design.
@@ -35,11 +42,10 @@ make hooks                                      # once per clone: git config cor
 
 `make lint` = gofumpt check, `go vet`, `golangci-lint` (`errcheck`, `govet`,
 `modernize`, `staticcheck`, `testifylint`, `unused`, see `.golangci.yml`),
-`gopls check -severity=hint` (the editor's hints, `infertypeargs` among
-them — no `golangci-lint` linter covers them), `gocommentlint` (a local
-tool; it inspects the **staged** diff, so `git add -A` before `make lint` —
-the pre-commit hook sees the staged files anyway). `make lint` skips gopls
-and gocommentlint when they are not installed.
+`gopls check -severity=hint` (the editor's hints, e.g. `infertypeargs`),
+`gocommentlint` (a local tool inspecting the **staged** diff, so `git add
+-A` before `make lint` — the pre-commit hook sees the staged files anyway).
+`make lint` skips gopls and gocommentlint when they are not installed.
 All binaries are installed in `$GOPATH/bin`. The module cache
 has every dependency: use `GOPROXY=off go get …` / `GOPROXY=off go mod tidy`.
 

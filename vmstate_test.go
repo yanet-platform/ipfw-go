@@ -1,6 +1,8 @@
 package ipfw_test
 
 import (
+	"fmt"
+	"net/netip"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -428,4 +430,27 @@ func Test_Resolver_NoAllocs(t *testing.T) {
 	})
 	require.True(t, ok)
 	require.Zero(t, allocs)
+}
+
+func ExampleNewResolver() {
+	env := ipfw.Environment[xnetip.Network4, xnetip.Network6]{
+		Networks: ipfw.NetworkParserFuncs[xnetip.Network4, xnetip.Network6]{
+			Parse4:    xnetip.ParseNetwork4,
+			Parse6:    xnetip.ParseNetwork6,
+			FromAddr4: xnetip.Network4FromAddr,
+			FromAddr6: xnetip.Network6FromAddr,
+		},
+	}
+	var typed ipfw.ReduceVMState[xnetip.Network4, xnetip.Network6]
+	rec, err := ipfw.NewParser("add pass ip from 192.0.2.0/24 to 2001:db8::/32 22,80\n").Next(ipfw.NewResolver(&typed, env))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(rec.Instruction.Action, typed.Sources[0].Net4.ContainsAddr(netip.MustParseAddr("192.0.2.7")))
+	fmt.Println(typed.Destinations[0].Kind == ipfw.TargetNetwork6, typed.DestinationPorts[0].Lo, typed.DestinationPorts[1].Lo)
+	// Output:
+	//
+	// pass true
+	// true 22 80
 }

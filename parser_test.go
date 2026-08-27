@@ -2,6 +2,7 @@ package ipfw_test
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -2320,6 +2321,29 @@ func emptyToNil(state ipfw.ReduceState) ipfw.ReduceState {
 		state.Options = nil
 	}
 	return state
+}
+
+func ExampleParser_Next() {
+	parser := ipfw.NewParser("add 100 deny log tcp from 192.0.2.0/24 to any 22 // bots\nadd pass ip from any to any\n")
+	var state ipfw.ReduceState
+	for {
+		rec, err := parser.Next(&state)
+		if err != nil {
+			fmt.Println(ipfw.NewDiagnostic(err))
+			return
+		}
+		if rec.Kind == ipfw.RecordEOF {
+			break
+		}
+		fmt.Printf("%d: %s, log %v, from %q, %d destination ports, comment %q\n",
+			rec.Instruction.Num, rec.Instruction.Action, rec.Instruction.Log.Enabled,
+			state.Sources[0].Text, len(state.DestinationPorts), rec.Instruction.InlineComment)
+		state.Reset()
+	}
+	// Output:
+	//
+	// 100: deny, log true, from "192.0.2.0/24", 1 destination ports, comment " bots"
+	// 0: pass, log false, from "", 0 destination ports, comment ""
 }
 
 // verifies that the whole synthetic ruleset parses into a warmed-up state
