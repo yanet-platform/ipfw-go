@@ -108,39 +108,140 @@ func (m *BuildError) Unwrap() error {
 // without counting anything, and a check-state rule, having no body, never
 // matches.
 type VM[V4, V6 Network] struct {
-	ops     []op[V4, V6]
+	program program[V4, V6]
 	labels  map[string]int
 	tables  TableRegistry[V4, V6]
 	matcher OptionMatcher
 	verdict ipfw.Action
 }
 
-// op is one rule: the record for tracing, the action and the typed tokens
-// of the body as the resolver handed them over.
-type op[V4, V6 Network] struct {
-	// Record is the line the rule came from.
-	Record ipfw.Record
-	// Action is what a match does.
-	Action ipfw.Action
-	// IPProtos are the IP version sets, none meaning any version.
+// program is the rules of a VM laid out for the scan of a check.
+//
+// What a rule is matched by takes one cache line, the tokens of every
+// rule sit in one arena per kind, a rule's tokens being a run of each,
+// and the records and the actions stay aside, so a scan reads memory in
+// order and a build allocates per arena rather than per rule.
+type program[V4, V6 Network] struct {
+	// Rules are the rules in order.
+	Rules []rule
+	// Records are the lines the rules came from, for tracing.
+	Records []ipfw.Record
+	// Actions are what a match of each rule does.
+	Actions []ipfw.Action
+	// IPProtos is the arena of the IP version sets.
 	IPProtos []ipfw.ProtoIPMatch
-	// Protos are the transport protocol numbers, none meaning any protocol.
+	// Protos is the arena of the transport protocols.
 	Protos []ipfw.ProtoNumberMatch
-	// Sources are the sources, none matching nothing.
+	// Sources is the arena of the source targets.
 	Sources []ipfw.TargetMatch[V4, V6]
-	// Destinations are the destinations, none matching nothing.
+	// Destinations is the arena of the destination targets.
 	Destinations []ipfw.TargetMatch[V4, V6]
-	// SourcePorts are the source port ranges, none meaning any port, some
-	// requiring the packet to have ports.
+	// SourcePorts is the arena of the source port ranges.
 	SourcePorts []ipfw.PortNumberMatch
-	// DestinationPorts are the destination port ranges, likewise.
+	// DestinationPorts is the arena of the destination port ranges.
 	DestinationPorts []ipfw.PortNumberMatch
-	// Options are the rule options in order, AND-ed except inside an
-	// or-group.
+	// Options is the arena of the options.
 	Options []ipfw.Opt
+}
+
+// mark returns a rule whose runs all start, empty, where the arenas end.
+func (m *program[V4, V6]) mark() rule {
+	at := func(n int) span {
+		return span{Start: uint32(n), End: uint32(n)}
+	}
+	return rule{
+		IPProtos:         at(len(m.IPProtos)),
+		Protos:           at(len(m.Protos)),
+		Sources:          at(len(m.Sources)),
+		Destinations:     at(len(m.Destinations)),
+		SourcePorts:      at(len(m.SourcePorts)),
+		DestinationPorts: at(len(m.DestinationPorts)),
+		Options:          at(len(m.Options)),
+	}
+}
+
+// close ends every run of the rule where the arenas end now.
+func (m *program[V4, V6]) close(rule rule) rule {
+	rule.IPProtos.End = uint32(len(m.IPProtos))
+	rule.Protos.End = uint32(len(m.Protos))
+	rule.Sources.End = uint32(len(m.Sources))
+	rule.Destinations.End = uint32(len(m.Destinations))
+	rule.SourcePorts.End = uint32(len(m.SourcePorts))
+	rule.DestinationPorts.End = uint32(len(m.DestinationPorts))
+	rule.Options.End = uint32(len(m.Options))
+	return rule
+}
+
+// rule is what a check matches a packet by and where a match goes, one
+// cache line.
+//
+// An empty run of IP versions, protocols or ports means any, an empty run
+// of targets nothing.
+type rule struct {
+	// Kind is the action kind, what a match does.
+	Kind ipfw.ActionKind
+	// TableArg is whether a skipto takes its target from the options.
+	TableArg bool
 	// Jump is the index of the rule a matching skipto continues at, always
 	// past this one: the next rule until the jump is linked.
-	Jump int
+	Jump uint32
+	// IPProtos is the run of the IP version sets.
+	IPProtos span
+	// Protos is the run of the transport protocols.
+	Protos span
+	// Sources is the run of the source targets.
+	Sources span
+	// Destinations is the run of the destination targets.
+	Destinations span
+	// SourcePorts is the run of the source port ranges.
+	SourcePorts span
+	// DestinationPorts is the run of the destination port ranges.
+	DestinationPorts span
+	// Options is the run of the options.
+	Options span
+}
+
+// span is a run of an arena.
+type span struct {
+	// Start is the index of the first element.
+	Start uint32
+	// End is the index after the last element.
+	End uint32
+}
+
+// empty reports whether the run holds nothing.
+func (m span) empty() bool {
+	return m.End == m.Start
+}
+
+// The runs of the arenas, one accessor each so that the scan inlines them.
+
+func (m *program[V4, V6]) ipProtos(at span) []ipfw.ProtoIPMatch {
+	return m.IPProtos[at.Start:at.End]
+}
+
+func (m *program[V4, V6]) protos(at span) []ipfw.ProtoNumberMatch {
+	return m.Protos[at.Start:at.End]
+}
+
+func (m *program[V4, V6]) sources(at span) []ipfw.TargetMatch[V4, V6] {
+	return m.Sources[at.Start:at.End]
+}
+
+func (m *program[V4, V6]) destinations(at span) []ipfw.TargetMatch[V4, V6] {
+	return m.Destinations[at.Start:at.End]
+}
+
+func (m *program[V4, V6]) sourcePorts(at span) []ipfw.PortNumberMatch {
+	return m.SourcePorts[at.Start:at.End]
+}
+
+func (m *program[V4, V6]) destinationPorts(at span) []ipfw.PortNumberMatch {
+	return m.DestinationPorts[at.Start:at.End]
+}
+
+func (m *program[V4, V6]) options(at span) []ipfw.Opt {
+	return m.Options[at.Start:at.End]
 }
 
 // Build reads the whole ruleset from p into a VM, every name resolved
@@ -165,7 +266,7 @@ func Build[V4, V6 Network](p *ipfw.Parser, cfg Config[V4, V6]) (*VM[V4, V6], err
 			if unresolved, ok := sink.Unresolved(); ok && cfg.UnresolvedJumps == UnresolvedJumpsError {
 				return nil, &BuildError{Line: unresolved.Line, Text: unresolved.Text, Err: ErrUnresolvedJump}
 			}
-			m.ops, m.labels = sink.Ops(), sink.Labels()
+			m.program, m.labels = sink.Program, sink.Labels()
 			return m, nil
 		case ipfw.RecordEmpty, ipfw.RecordComment:
 			continue
@@ -186,17 +287,18 @@ func Build[V4, V6 Network](p *ipfw.Parser, cfg Config[V4, V6]) (*VM[V4, V6], err
 }
 
 // builder is the VMState a build reads a line into and the assembler of
-// the rule list.
+// the program.
 //
-// It collects the tokens of the rule under construction and rejects the
-// ones the VM does not take yet, which the parser then positions at the
-// token. Add turns the collected tokens into a rule, numbering it and
-// linking the jumps, Label links the jumps to a label, Table fills the
-// registry.
+// It appends the tokens of the rule under construction to the arenas,
+// rejecting the ones the VM does not take, which the parser then positions
+// at the token. Add closes the rule over them, numbering it and linking the
+// jumps, Label links the jumps to a label, Table fills the registry.
 type builder[V4, V6 Network] struct {
-	// Rule is the rule under construction.
-	Rule     op[V4, V6]
-	ops      []op[V4, V6]
+	// Program is the program under construction.
+	Program program[V4, V6]
+	// start is the rule under construction, its runs open where the arenas
+	// stood when it began.
+	start    rule
 	tables   TableRegistry[V4, V6]
 	networks ipfw.NetworkParser[V4, V6]
 	// custom is whether a custom option has a matcher to go to.
@@ -229,8 +331,8 @@ func newBuilder[V4, V6 Network](
 	}
 }
 
-// Add appends the instruction just read with the tokens collected for it
-// and starts the next rule.
+// Add closes the rule of the instruction just read over the tokens
+// appended for it and starts the next one.
 //
 // An explicit rule number below the running one is ErrRuleNumberOrder, an
 // action the VM cannot run ErrUnsupportedAction. A skipto falls through to
@@ -245,34 +347,38 @@ func (m *builder[V4, V6]) Add(rec *ipfw.Record) error {
 	}
 	m.link(m.pendingNumbers[m.number])
 	delete(m.pendingNumbers, m.number)
-	rule := m.Rule
-	rule.Record, rule.Action = *rec, rec.Instruction.Action
-	switch rule.Action.Kind {
+	idx := len(m.Program.Rules)
+	closed := m.Program.close(m.start)
+	closed.Kind = rec.Instruction.Action.Kind
+	switch closed.Kind {
 	case ipfw.ActionPass, ipfw.ActionDeny, ipfw.ActionCount, ipfw.ActionCheckState:
 	case ipfw.ActionSkipTo:
-		rule.Jump = len(m.ops) + 1
-		switch target := rule.Action.SkipTo; target.Kind {
+		closed.Jump = uint32(idx + 1)
+		switch target := rec.Instruction.Action.SkipTo; target.Kind {
 		case ipfw.SkipToNumber:
-			m.pendingNumbers[target.Number] = append(m.pendingNumbers[target.Number], len(m.ops))
+			m.pendingNumbers[target.Number] = append(m.pendingNumbers[target.Number], idx)
 		case ipfw.SkipToLabel:
-			m.pendingLabels[target.Label] = append(m.pendingLabels[target.Label], len(m.ops))
+			m.pendingLabels[target.Label] = append(m.pendingLabels[target.Label], idx)
 		case ipfw.SkipToTableArg:
+			closed.TableArg = true
 		default:
 			return ErrUnsupportedAction
 		}
 	default:
 		return ErrUnsupportedAction
 	}
-	m.ops = append(m.ops, rule)
+	m.Program.Rules = append(m.Program.Rules, closed)
+	m.Program.Records = append(m.Program.Records, *rec)
+	m.Program.Actions = append(m.Program.Actions, rec.Instruction.Action)
 	m.number++
-	m.Rule = op[V4, V6]{}
+	m.start = m.Program.mark()
 	return nil
 }
 
 // Label records the label as standing for the next rule and links the
 // jumps waiting for it.
 func (m *builder[V4, V6]) Label(name string) {
-	m.labels[name] = len(m.ops)
+	m.labels[name] = len(m.Program.Rules)
 	m.link(m.pendingLabels[name])
 	delete(m.pendingLabels, name)
 }
@@ -307,7 +413,7 @@ func (m *builder[V4, V6]) Table(table *ipfw.Table) error {
 // link points the jumps at the indexes to the next rule.
 func (m *builder[V4, V6]) link(idxs []int) {
 	for _, idx := range idxs {
-		m.ops[idx].Jump = len(m.ops)
+		m.Program.Rules[idx].Jump = uint32(len(m.Program.Rules))
 	}
 }
 
@@ -324,7 +430,7 @@ func (m *builder[V4, V6]) Unresolved() (ipfw.Record, bool) {
 	if first < 0 {
 		return ipfw.Record{}, false
 	}
-	return m.ops[first].Record, true
+	return m.Program.Records[first], true
 }
 
 // lowest returns the smallest of first and the indexes, first when it is
@@ -338,11 +444,6 @@ func lowest(first int, idxs []int) int {
 	return first
 }
 
-// Ops returns the rules assembled so far.
-func (m *builder[V4, V6]) Ops() []op[V4, V6] {
-	return m.ops
-}
-
 // Labels returns the index of the rule after each label.
 func (m *builder[V4, V6]) Labels() map[string]int {
 	return m.labels
@@ -350,37 +451,37 @@ func (m *builder[V4, V6]) Labels() map[string]int {
 
 // OnIPProto implements ipfw.VMState.
 func (m *builder[V4, V6]) OnIPProto(match ipfw.ProtoIPMatch) error {
-	m.Rule.IPProtos = append(m.Rule.IPProtos, match)
+	m.Program.IPProtos = append(m.Program.IPProtos, match)
 	return nil
 }
 
 // OnProto implements ipfw.VMState.
 func (m *builder[V4, V6]) OnProto(match ipfw.ProtoNumberMatch) error {
-	m.Rule.Protos = append(m.Rule.Protos, match)
+	m.Program.Protos = append(m.Program.Protos, match)
 	return nil
 }
 
 // OnSourceTarget implements ipfw.VMState.
 func (m *builder[V4, V6]) OnSourceTarget(match ipfw.TargetMatch[V4, V6]) error {
-	m.Rule.Sources = append(m.Rule.Sources, match)
+	m.Program.Sources = append(m.Program.Sources, match)
 	return nil
 }
 
 // OnDestinationTarget implements ipfw.VMState.
 func (m *builder[V4, V6]) OnDestinationTarget(match ipfw.TargetMatch[V4, V6]) error {
-	m.Rule.Destinations = append(m.Rule.Destinations, match)
+	m.Program.Destinations = append(m.Program.Destinations, match)
 	return nil
 }
 
 // OnSourcePort implements ipfw.VMState.
 func (m *builder[V4, V6]) OnSourcePort(match ipfw.PortNumberMatch) error {
-	m.Rule.SourcePorts = append(m.Rule.SourcePorts, match)
+	m.Program.SourcePorts = append(m.Program.SourcePorts, match)
 	return nil
 }
 
 // OnDestinationPort implements ipfw.VMState.
 func (m *builder[V4, V6]) OnDestinationPort(match ipfw.PortNumberMatch) error {
-	m.Rule.DestinationPorts = append(m.Rule.DestinationPorts, match)
+	m.Program.DestinationPorts = append(m.Program.DestinationPorts, match)
 	return nil
 }
 
@@ -399,7 +500,7 @@ func (m *builder[V4, V6]) OnOption(opt ipfw.Opt) error {
 	default:
 		return ErrUnsupportedOption
 	}
-	m.Rule.Options = append(m.Rule.Options, opt)
+	m.Program.Options = append(m.Program.Options, opt)
 	return nil
 }
 
@@ -411,7 +512,7 @@ func (m *VM[V4, V6]) Tables() TableRegistry[V4, V6] {
 
 // Len is the number of rules.
 func (m *VM[V4, V6]) Len() int {
-	return len(m.ops)
+	return len(m.program.Rules)
 }
 
 // Check runs the packet through the rules and returns the verdict, the
@@ -432,25 +533,26 @@ func (m *VM[V4, V6]) Check(ctx *Context, pkt Packet) ipfw.Action {
 // falls through.
 func (m *VM[V4, V6]) CheckTrace(ctx *Context, pkt Packet, tracer Tracer) (ipfw.Action, bool) {
 	fields := readFields(pkt)
+	program := &m.program
 	pc := 0
-	for pc < len(m.ops) {
-		rule := &m.ops[pc]
+	for pc < len(program.Rules) {
+		rule := &program.Rules[pc]
 		matched, target := m.matches(rule, ctx, pkt, &fields)
 		if tracer != nil {
-			tracer.Trace(&rule.Record, rule.Action, matched)
+			tracer.Trace(&program.Records[pc], program.Actions[pc], matched)
 		}
 		if !matched {
 			pc++
 			continue
 		}
-		switch rule.Action.Kind {
+		switch rule.Kind {
 		case ipfw.ActionPass, ipfw.ActionDeny:
-			return rule.Action, true
+			return program.Actions[pc], true
 		case ipfw.ActionSkipTo:
-			if rule.Action.SkipTo.Kind == ipfw.SkipToTableArg {
+			if rule.TableArg {
 				pc = max(target, pc+1)
 			} else {
-				pc = rule.Jump
+				pc = int(rule.Jump)
 			}
 		default:
 			pc++
@@ -541,39 +643,42 @@ func (m *packetFields) readFragment(pkt Packet) {
 // The target is the index of the rule a table lookup among the options
 // named, noTarget when none did.
 func (m *VM[V4, V6]) matches(
-	rule *op[V4, V6],
+	rule *rule,
 	ctx *Context,
 	pkt Packet,
 	fields *packetFields,
 ) (bool, int) {
-	if !matchIPProtos(rule.IPProtos, fields.version) {
+	program := &m.program
+	if !rule.IPProtos.empty() && !matchIPProtos(program.ipProtos(rule.IPProtos), fields.version) {
 		return false, noTarget
 	}
-	if !matchProtos(rule.Protos, fields.protocol) {
+	if !rule.Protos.empty() && !matchProtos(program.protos(rule.Protos), fields.protocol) {
 		return false, noTarget
 	}
-	if !m.matchTargets(rule.Sources, ctx, fields.source) {
+	if !m.matchTargets(program.sources(rule.Sources), ctx, fields.source) {
 		return false, noTarget
 	}
-	if !m.matchTargets(rule.Destinations, ctx, fields.destination) {
+	if !m.matchTargets(program.destinations(rule.Destinations), ctx, fields.destination) {
 		return false, noTarget
 	}
-	if len(rule.SourcePorts) > 0 {
+	if !rule.SourcePorts.empty() {
 		fields.readPorts(pkt)
-		if !fields.hasSourcePort || !matchPorts(rule.SourcePorts, fields.sourcePort) {
+		ports := program.sourcePorts(rule.SourcePorts)
+		if !fields.hasSourcePort || !matchPorts(ports, fields.sourcePort) {
 			return false, noTarget
 		}
 	}
-	if len(rule.DestinationPorts) > 0 {
+	if !rule.DestinationPorts.empty() {
 		fields.readPorts(pkt)
-		if !fields.hasDestinationPort {
-			return false, noTarget
-		}
-		if !matchPorts(rule.DestinationPorts, fields.destinationPort) {
+		ports := program.destinationPorts(rule.DestinationPorts)
+		if !fields.hasDestinationPort || !matchPorts(ports, fields.destinationPort) {
 			return false, noTarget
 		}
 	}
-	return m.matchOptions(rule.Options, ctx, pkt, fields)
+	if rule.Options.empty() {
+		return true, noTarget
+	}
+	return m.matchOptions(program.options(rule.Options), ctx, pkt, fields)
 }
 
 // matchPorts reports whether the port is in one of the ranges, or, the
