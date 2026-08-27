@@ -8,5 +8,9 @@
 *.out
 testdata/rapid/
 
-# Production rulesets used by the optional corpus tests.
-/.assets/
+# The corpus tests, their helper and the production rulesets they read
+# stay local: none of it is for the repository.
+/corpus_test.go
+/vm/corpus_test.go
+/internal/corpus/
+/testdata/corpus/
