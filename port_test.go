@@ -14,18 +14,18 @@ import (
 // portNumber is a single numeric port match.
 func portNumber(number uint16) ipfw.PortMatch {
 	port := ipfw.Port{Number: number}
-	return ipfw.PortMatch{Range: ipfw.PortRange{Lo: port, Hi: port}}
+	return ipfw.PortMatch{Lo: port, Hi: port}
 }
 
 // portService is a single named port match.
 func portService(name string) ipfw.PortMatch {
 	port := ipfw.Port{Name: name}
-	return ipfw.PortMatch{Range: ipfw.PortRange{Lo: port, Hi: port}}
+	return ipfw.PortMatch{Lo: port, Hi: port}
 }
 
 // portSpan is a port range match.
 func portSpan(lo, hi ipfw.Port) ipfw.PortMatch {
-	return ipfw.PortMatch{Range: ipfw.PortRange{Lo: lo, Hi: hi}}
+	return ipfw.PortMatch{Lo: lo, Hi: hi}
 }
 
 // negated is the match with its negation set.

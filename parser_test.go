@@ -267,10 +267,10 @@ func Test_ReduceState_Reset(t *testing.T) {
 	require.NoError(t, state.OnProto(ipfw.ProtoMatch{Proto: ipfw.Proto{Name: "tcp"}}))
 	require.NoError(t, state.OnSourceTarget(ipfw.Target{Kind: ipfw.TargetAny}))
 	require.NoError(t, state.OnDestinationTarget(ipfw.Target{Kind: ipfw.TargetMe}))
-	single := ipfw.PortRange{Lo: ipfw.Port{Number: 1}, Hi: ipfw.Port{Number: 1}}
-	span := ipfw.PortRange{Lo: ipfw.Port{Number: 2}, Hi: ipfw.Port{Number: 3}}
-	require.NoError(t, state.OnSourcePort(ipfw.PortMatch{Range: single}))
-	require.NoError(t, state.OnDestinationPort(ipfw.PortMatch{Neg: true, Range: span}))
+	single := ipfw.PortMatch{Lo: ipfw.Port{Number: 1}, Hi: ipfw.Port{Number: 1}}
+	span := ipfw.PortMatch{Neg: true, Lo: ipfw.Port{Number: 2}, Hi: ipfw.Port{Number: 3}}
+	require.NoError(t, state.OnSourcePort(single))
+	require.NoError(t, state.OnDestinationPort(span))
 	require.NoError(t, state.OnOption(ipfw.Opt{Kind: ipfw.OptIn}))
 	require.NoError(t, state.OnOption(ipfw.Opt{Kind: ipfw.OptOut, Or: true}))
 	require.Equal(t, ipfw.ReduceState{
@@ -278,8 +278,8 @@ func Test_ReduceState_Reset(t *testing.T) {
 		Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 		Sources:          []ipfw.Target{{Kind: ipfw.TargetAny}},
 		Destinations:     []ipfw.Target{{Kind: ipfw.TargetMe}},
-		SourcePorts:      []ipfw.PortMatch{{Range: single}},
-		DestinationPorts: []ipfw.PortMatch{{Neg: true, Range: span}},
+		SourcePorts:      []ipfw.PortMatch{single},
+		DestinationPorts: []ipfw.PortMatch{span},
 		Options:          []ipfw.Opt{{Kind: ipfw.OptIn}, {Kind: ipfw.OptOut, Or: true}},
 	}, state)
 

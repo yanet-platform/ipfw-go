@@ -565,17 +565,19 @@ type Opt struct {
 	Via Via
 }
 
-// TypeSet is a set of ICMP or ICMPv6 type numbers.
-type TypeSet [4]uint64
+// TypeSet is a set of ICMP or ICMPv6 type numbers, the zero value empty.
+type TypeSet struct {
+	bits [4]uint64
+}
 
 // Add puts ty into the set.
 func (m *TypeSet) Add(ty uint8) {
-	m[ty>>6] |= 1 << (ty & 63)
+	m.bits[ty>>6] |= 1 << (ty & 63)
 }
 
 // Has reports whether ty is in the set.
 func (m TypeSet) Has(ty uint8) bool {
-	return m[ty>>6]&(1<<(ty&63)) != 0
+	return m.bits[ty>>6]&(1<<(ty&63)) != 0
 }
 
 // IsEmpty reports whether the set has no types.

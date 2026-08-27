@@ -188,7 +188,7 @@ func (m *Resolver[V4, V6]) OnDestinationTarget(target Target) error {
 
 // OnSourcePort implements State.
 func (m *Resolver[V4, V6]) OnSourcePort(match PortMatch) error {
-	lo, hi, err := m.resolveRange(match.Range)
+	lo, hi, err := m.resolveRange(match.Lo, match.Hi)
 	if err != nil {
 		return err
 	}
@@ -197,7 +197,7 @@ func (m *Resolver[V4, V6]) OnSourcePort(match PortMatch) error {
 
 // OnDestinationPort implements State.
 func (m *Resolver[V4, V6]) OnDestinationPort(match PortMatch) error {
-	lo, hi, err := m.resolveRange(match.Range)
+	lo, hi, err := m.resolveRange(match.Lo, match.Hi)
 	if err != nil {
 		return err
 	}
@@ -215,7 +215,7 @@ func (m *Resolver[V4, V6]) OnOption(opt Opt) error {
 		}
 		opt.Proto = Proto{Number: number}
 	case OptSourcePort, OptDestinationPort:
-		lo, hi, err := m.resolveRange(opt.Ports)
+		lo, hi, err := m.resolveRange(opt.Ports.Lo, opt.Ports.Hi)
 		if err != nil {
 			return err
 		}
@@ -242,16 +242,16 @@ func (m *Resolver[V4, V6]) resolveProto(proto Proto) (uint8, error) {
 
 // resolveRange turns both ends of a port range into numbers, a name
 // through the resolver.
-func (m *Resolver[V4, V6]) resolveRange(ports PortRange) (uint16, uint16, error) {
-	lo, err := m.resolvePort(ports.Lo)
+func (m *Resolver[V4, V6]) resolveRange(lo, hi Port) (uint16, uint16, error) {
+	first, err := m.resolvePort(lo)
 	if err != nil {
 		return 0, 0, err
 	}
-	hi, err := m.resolvePort(ports.Hi)
+	last, err := m.resolvePort(hi)
 	if err != nil {
 		return 0, 0, err
 	}
-	return lo, hi, nil
+	return first, last, nil
 }
 
 // resolvePort turns a port into its number, a name through the resolver.

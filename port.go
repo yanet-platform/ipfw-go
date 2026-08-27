@@ -25,8 +25,10 @@ type PortRange struct {
 type PortMatch struct {
 	// Neg is the `not` prefix.
 	Neg bool
-	// Range is the port range.
-	Range PortRange
+	// Lo is the first port of the range.
+	Lo Port
+	// Hi is the last port of the range, Lo for a single port.
+	Hi Port
 }
 
 // ParseSourcePorts parses the source port part of a rule body into state.
@@ -58,7 +60,7 @@ func parsePorts(s string, state State, side bodySide) (string, fail) {
 		if err.Failed() {
 			return s, err
 		}
-		match := PortMatch{Neg: neg, Range: portRange}
+		match := PortMatch{Neg: neg, Lo: portRange.Lo, Hi: portRange.Hi}
 		if err = failFrom(emitPort(state, side, match), rest); err.Failed() {
 			return s, err
 		}
