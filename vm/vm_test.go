@@ -548,6 +548,73 @@ func Test_VM_Check_Established(t *testing.T) {
 	require.Equal(t, pass, negated.Check(&vm.Context{}, udp))
 }
 
+// verifies that tcpflags matches a TCP packet whose examined flags are
+// exactly the ones to be set, and never a packet without TCP flags.
+func Test_VM_Check_TCPFlags(t *testing.T) {
+	udp := vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")).WithUDP(50000, 22)
+	cases := []struct {
+		name    string
+		rules   string
+		packet  vm.Packet
+		verdict ipfw.Action
+	}{
+		{
+			name:    "tcp rule, syn and not ack, SYN",
+			rules:   "add allow tcp from any to any tcpflags syn,!ack\nadd deny ip from any to any\n",
+			packet:  tcp4Flags(ipfw.TCPSyn),
+			verdict: pass,
+		},
+		{
+			name:    "tcp rule, syn and not ack, ACK",
+			rules:   "add allow tcp from any to any tcpflags syn,!ack\nadd deny ip from any to any\n",
+			packet:  tcp4Flags(ipfw.TCPAck),
+			verdict: deny,
+		},
+		{
+			name:    "ip rule, syn and not ack, SYN",
+			rules:   "add allow ip from any to any tcpflags syn,!ack\nadd deny ip from any to any\n",
+			packet:  tcp4Flags(ipfw.TCPSyn),
+			verdict: pass,
+		},
+		{
+			name:    "ip rule, syn and not ack, SYN with ACK",
+			rules:   "add allow ip from any to any tcpflags syn,!ack\nadd deny ip from any to any\n",
+			packet:  tcp4Flags(ipfw.TCPSyn | ipfw.TCPAck),
+			verdict: deny,
+		},
+		{
+			name:    "ip rule, syn and not ack, SYN with PSH outside the mask",
+			rules:   "add allow ip from any to any tcpflags syn,!ack\nadd deny ip from any to any\n",
+			packet:  tcp4Flags(ipfw.TCPSyn | ipfw.TCPPsh),
+			verdict: pass,
+		},
+		{
+			name:    "ip rule, syn and not ack, UDP",
+			rules:   "add allow ip from any to any tcpflags syn,!ack\nadd deny ip from any to any\n",
+			packet:  udp,
+			verdict: deny,
+		},
+		{
+			name:    "not tcpflags, UDP",
+			rules:   "add allow ip from any to any not tcpflags rst\nadd deny ip from any to any\n",
+			packet:  udp,
+			verdict: pass,
+		},
+		{
+			name:    "not tcpflags, RST",
+			rules:   "add allow ip from any to any not tcpflags rst\nadd deny ip from any to any\n",
+			packet:  tcp4Flags(ipfw.TCPRst),
+			verdict: deny,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			machine := build(t, tc.rules, none)
+			require.Equal(t, tc.verdict, machine.Check(&vm.Context{}, tc.packet))
+		})
+	}
+}
+
 // verifies that icmptypes and icmp6types match the type of an ICMP packet
 // of their family when it is in the set, and nothing else.
 func Test_VM_Check_ICMPTypes(t *testing.T) {
@@ -1102,10 +1169,10 @@ func Test_VM_Build_Errors(t *testing.T) {
 		},
 		{
 			name:      "unsupported option",
-			rules:     "add pass tcp from any to any established tcpflags syn\n",
+			rules:     "add pass tcp from any to any established src-port 22\n",
 			resolvers: resolving,
 			line:      1,
-			text:      "add pass tcp from any to any established tcpflags syn",
+			text:      "add pass tcp from any to any established src-port 22",
 			cause:     vm.ErrUnsupportedOption,
 		},
 		{
