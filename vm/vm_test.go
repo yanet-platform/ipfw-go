@@ -361,6 +361,69 @@ func Test_VM_Check_UnresolvedJumpsFallThrough(t *testing.T) {
 	}, tracer.seen)
 }
 
+// verifies that me and me6 match the addresses the context lists, in the
+// packet's family only, so one VM gives different verdicts per context.
+func Test_VM_Check_Me(t *testing.T) {
+	machine := build(t, "add pass ip from me to me\nadd pass ip from me6 to any\nadd deny ip from any to any\n", none)
+	local4 := &vm.Context{LocalAddrs: []netip.Addr{netip.MustParseAddr("192.0.2.1")}}
+	other4 := &vm.Context{LocalAddrs: []netip.Addr{netip.MustParseAddr("198.51.100.1"), netip.MustParseAddr("192.0.2.1")}}
+	local6 := &vm.Context{LocalAddrs: []netip.Addr{netip.MustParseAddr("2001:db8::1")}}
+	cases := []struct {
+		name    string
+		ctx     *vm.Context
+		packet  vm.Packet
+		verdict ipfw.Action
+	}{
+		{
+			name:    "IPv4 packet between local addresses",
+			ctx:     local4,
+			packet:  tcp4("192.0.2.1", "192.0.2.1"),
+			verdict: pass,
+		},
+		{
+			name:    "IPv4 packet, local among several",
+			ctx:     other4,
+			packet:  tcp4("192.0.2.1", "198.51.100.1"),
+			verdict: pass,
+		},
+		{
+			name:    "IPv4 packet, destination not local",
+			ctx:     local4,
+			packet:  tcp4("192.0.2.1", "192.0.2.2"),
+			verdict: deny,
+		},
+		{
+			name:    "IPv4 packet, no local addresses",
+			ctx:     &vm.Context{},
+			packet:  tcp4("192.0.2.1", "192.0.2.1"),
+			verdict: deny,
+		},
+		{
+			name:    "IPv4 packet, only IPv6 addresses local",
+			ctx:     local6,
+			packet:  tcp4("192.0.2.1", "192.0.2.1"),
+			verdict: deny,
+		},
+		{
+			name:    "IPv6 packet from a local address",
+			ctx:     local6,
+			packet:  vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8::2")),
+			verdict: pass,
+		},
+		{
+			name:    "IPv6 packet, me never matches it",
+			ctx:     &vm.Context{LocalAddrs: []netip.Addr{netip.MustParseAddr("2001:db8::2")}},
+			packet:  vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8::2")),
+			verdict: deny,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.verdict, machine.Check(tc.ctx, tc.packet))
+		})
+	}
+}
+
 // verifies that a table target matches the addresses of its networks of
 // either family, negated or not, and that a missing table matches nothing.
 func Test_VM_Check_Tables(t *testing.T) {
@@ -458,8 +521,8 @@ func Test_VM_Build_UnsupportedRecord(t *testing.T) {
 // verifies that every build error is located at its line and wraps its
 // cause.
 //
-// A line that does not parse, an action, a target kind, ports and options
-// the VM does not take yet, a protocol name with no resolver, a hostname.
+// A line that does not parse, an action, ports and options the VM does not
+// take yet, a protocol name with no resolver, a hostname, table entries.
 func Test_VM_Build_Errors(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -540,14 +603,6 @@ func Test_VM_Build_Errors(t *testing.T) {
 			line:      3,
 			text:      "add skipto :BACK ip from any to any",
 			cause:     vm.ErrUnresolvedJump,
-		},
-		{
-			name:      "unsupported target",
-			rules:     "add pass ip from me to any\n",
-			resolvers: resolving,
-			line:      1,
-			text:      "add pass ip from me to any",
-			cause:     vm.ErrUnsupportedTarget,
 		},
 		{
 			name:      "unsupported ports",
@@ -646,9 +701,9 @@ func Test_VM_Build_NumericProto(t *testing.T) {
 
 // verifies that a check allocates nothing.
 func Test_VM_Check_NoAllocs(t *testing.T) {
-	machine := build(t, "table t add 203.0.113.0/24\nadd deny udp from any to any\nadd deny ip from 198.51.100.0/24 to table(t)\nadd skipto :NEXT ip from table(t) to any\nadd pass tcp from 192.0.2.0/24 to { any or 2001:db8::/32 }\n:NEXT\nadd deny ip from any to any\n", none)
+	machine := build(t, "table t add 203.0.113.0/24\nadd deny udp from any to any\nadd deny ip from 198.51.100.0/24 to table(t)\nadd skipto :NEXT ip from table(t) to any\nadd deny ip from me6 to me\nadd pass tcp from 192.0.2.0/24 to { me or 2001:db8::/32 }\n:NEXT\nadd deny ip from any to any\n", none)
 	packet := tcp4("192.0.2.1", "192.0.2.1")
-	ctx := &vm.Context{}
+	ctx := &vm.Context{LocalAddrs: []netip.Addr{netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("192.0.2.1")}}
 	verdict := pass
 	allocs := testing.AllocsPerRun(100, func() {
 		if machine.Check(ctx, packet) != pass {

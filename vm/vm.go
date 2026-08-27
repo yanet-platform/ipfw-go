@@ -3,6 +3,7 @@ package vm
 import (
 	"errors"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -71,7 +72,6 @@ var (
 	ErrUnresolvedJump    = errors.New("skipto to a rule that never appears")
 	ErrUnsupportedOption = errors.New("unsupported option")
 	ErrUnsupportedAction = errors.New("unsupported action")
-	ErrUnsupportedTarget = errors.New("unsupported target")
 	ErrUnsupportedPort   = errors.New("unsupported port")
 	ErrUnsupportedRecord = errors.New("unsupported record")
 )
@@ -342,18 +342,12 @@ func (m *builder[V4, V6]) OnProto(match ipfw.ProtoNumberMatch) error {
 
 // OnSourceTarget implements ipfw.VMState.
 func (m *builder[V4, V6]) OnSourceTarget(match ipfw.TargetMatch[V4, V6]) error {
-	if err := checkTarget(match); err != nil {
-		return err
-	}
 	m.Rule.Sources = append(m.Rule.Sources, match)
 	return nil
 }
 
 // OnDestinationTarget implements ipfw.VMState.
 func (m *builder[V4, V6]) OnDestinationTarget(match ipfw.TargetMatch[V4, V6]) error {
-	if err := checkTarget(match); err != nil {
-		return err
-	}
 	m.Rule.Destinations = append(m.Rule.Destinations, match)
 	return nil
 }
@@ -371,15 +365,6 @@ func (m *builder[V4, V6]) OnDestinationPort(ipfw.PortNumberMatch) error {
 // OnOption implements ipfw.VMState.
 func (m *builder[V4, V6]) OnOption(ipfw.Opt) error {
 	return ErrUnsupportedOption
-}
-
-// checkTarget rejects the target kinds a check cannot match yet.
-func checkTarget[V4, V6 any](target ipfw.TargetMatch[V4, V6]) error {
-	switch target.Kind {
-	case ipfw.TargetAny, ipfw.TargetTable, ipfw.TargetNetwork4, ipfw.TargetNetwork6:
-		return nil
-	}
-	return ErrUnsupportedTarget
 }
 
 // Tables is the registry the ruleset filled, the one configured or a
@@ -410,7 +395,7 @@ func (m *VM[V4, V6]) CheckTrace(ctx *Context, pkt Packet, tracer Tracer) (ipfw.A
 	pc := 0
 	for pc < len(m.ops) {
 		rule := &m.ops[pc]
-		matched := rule.matches(pkt, m.tables)
+		matched := m.matches(rule, ctx, pkt)
 		tracer.Trace(&rule.Record, rule.Action, matched)
 		if !matched {
 			pc++
@@ -436,17 +421,17 @@ func (nopTracer) Trace(*ipfw.Record, ipfw.Action, bool) {}
 
 // matches reports whether the packet satisfies the body of the rule: the
 // IP versions, the protocols, the sources and the destinations.
-func (m *op[V4, V6]) matches(pkt Packet, tables TableRegistry[V4, V6]) bool {
-	if !matchIPProtos(m.IPProtos, pkt.Version()) {
+func (m *VM[V4, V6]) matches(rule *op[V4, V6], ctx *Context, pkt Packet) bool {
+	if !matchIPProtos(rule.IPProtos, pkt.Version()) {
 		return false
 	}
-	if !matchProtos(m.Protos, pkt.Protocol()) {
+	if !matchProtos(rule.Protos, pkt.Protocol()) {
 		return false
 	}
-	if !matchTargets(m.Sources, pkt.SourceAddr(), tables) {
+	if !m.matchTargets(rule.Sources, ctx, pkt.SourceAddr()) {
 		return false
 	}
-	return matchTargets(m.Destinations, pkt.DestinationAddr(), tables)
+	return m.matchTargets(rule.Destinations, ctx, pkt.DestinationAddr())
 }
 
 // matchIPProtos reports whether the version is in one of the version
@@ -492,31 +477,29 @@ func matchProtos(matches []ipfw.ProtoNumberMatch, protocol uint8) bool {
 // matching nothing.
 //
 // A side left empty by an unresolvable name is a rule that never matches.
-func matchTargets[V4, V6 Network](
-	targets []ipfw.TargetMatch[V4, V6],
-	addr netip.Addr,
-	tables TableRegistry[V4, V6],
-) bool {
+func (m *VM[V4, V6]) matchTargets(targets []ipfw.TargetMatch[V4, V6], ctx *Context, addr netip.Addr) bool {
 	for _, target := range targets {
-		if matchTarget(target, addr, tables) != target.Neg {
+		if m.matchTarget(target, ctx, addr) != target.Neg {
 			return true
 		}
 	}
 	return false
 }
 
-// matchTarget reports whether the address is the target's, a missing
-// table holding nothing.
-func matchTarget[V4, V6 Network](
-	target ipfw.TargetMatch[V4, V6],
-	addr netip.Addr,
-	tables TableRegistry[V4, V6],
-) bool {
+// matchTarget reports whether the address is the target's.
+//
+// me and me6 are the context's addresses of the packet's family, a
+// missing table holds nothing.
+func (m *VM[V4, V6]) matchTarget(target ipfw.TargetMatch[V4, V6], ctx *Context, addr netip.Addr) bool {
 	switch target.Kind {
 	case ipfw.TargetAny:
 		return true
+	case ipfw.TargetMe:
+		return addr.Is4() && slices.Contains(ctx.LocalAddrs, addr)
+	case ipfw.TargetMe6:
+		return addr.Is6() && slices.Contains(ctx.LocalAddrs, addr)
 	case ipfw.TargetTable:
-		return tables.LookupNetwork(target.Name, addr)
+		return m.tables.LookupNetwork(target.Name, addr)
 	case ipfw.TargetNetwork4:
 		return addr.Is4() && target.Net4.ContainsAddr(addr)
 	case ipfw.TargetNetwork6:
