@@ -478,9 +478,9 @@ func trimRightSpace(s string) string {
 	return s[:end]
 }
 
-// All iterates over the records until the input ends or a line fails, the
+// Records iterates over the records until the input ends or a line fails, the
 // failure being the last value yielded.
-func (m *Parser) All(state State) iter.Seq2[*Record, *ParseError] {
+func (m *Parser) Records(state State) iter.Seq2[*Record, *ParseError] {
 	return func(yield func(*Record, *ParseError) bool) {
 		for {
 			record, err := m.Next(state)

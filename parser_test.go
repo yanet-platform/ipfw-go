@@ -224,7 +224,7 @@ func Test_Parser_All_StopsAtError(t *testing.T) {
 	parser := ipfw.NewParser(":A\n# c\nbad\n:B\n")
 	var records []ipfw.Record
 	var errs []*ipfw.ParseError
-	for rec, err := range parser.All(ipfw.DiscardState{}) {
+	for rec, err := range parser.Records(ipfw.DiscardState{}) {
 		if rec != nil {
 			records = append(records, *rec)
 		}
@@ -244,14 +244,14 @@ func Test_Parser_All_StopsAtError(t *testing.T) {
 // honours an early break.
 func Test_Parser_All_EOFAndBreak(t *testing.T) {
 	count := 0
-	for _, err := range ipfw.NewParser(":A\n:B\n").All(ipfw.DiscardState{}) {
+	for _, err := range ipfw.NewParser(":A\n:B\n").Records(ipfw.DiscardState{}) {
 		require.Nil(t, err)
 		count++
 	}
 	require.Equal(t, 2, count)
 
 	count = 0
-	for range ipfw.NewParser(":A\n:B\n").All(ipfw.DiscardState{}) {
+	for range ipfw.NewParser(":A\n:B\n").Records(ipfw.DiscardState{}) {
 		count++
 		break
 	}
@@ -2010,14 +2010,14 @@ func Test_Parser_Next_OptionsNoAllocs(t *testing.T) {
 	src := "add pass tcp from any to any 22 established\nadd pass tcp from any to any established\n"
 	parser := ipfw.NewParser(src)
 	var state ipfw.ReduceState
-	for _, err := range parser.All(&state) {
+	for _, err := range parser.Records(&state) {
 		require.Nil(t, err)
 	}
 	ok := true
 	allocs := testing.AllocsPerRun(100, func() {
 		parser.Reset(src)
 		state.Reset()
-		for _, err := range parser.All(&state) {
+		for _, err := range parser.Records(&state) {
 			if err != nil {
 				ok = false
 			}
@@ -2375,7 +2375,7 @@ func Test_Parser_SyntheticRuleset_NoAllocs(t *testing.T) {
 	src := synthetic.Ruleset()
 	parser := ipfw.NewParser(src)
 	var state ipfw.ReduceState
-	for _, err := range parser.All(&state) {
+	for _, err := range parser.Records(&state) {
 		require.Nil(t, err)
 	}
 	ok := true
