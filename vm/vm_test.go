@@ -307,7 +307,7 @@ func Test_VM_Build_Errors(t *testing.T) {
 			cfg:   resolving,
 			line:  1,
 			text:  "add pass ip from host.example.com to any",
-			cause: vm.ErrUnresolvedHostname,
+			cause: ipfw.ErrUnresolvedTarget,
 		},
 	}
 	for _, tc := range cases {

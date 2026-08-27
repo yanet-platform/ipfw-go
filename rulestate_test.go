@@ -51,10 +51,57 @@ func tokensOf(state *ipfw.RuleState[net4, net6]) ruleTokens {
 	}
 }
 
-// newRuleState is a typed state over xnetip with the given custom target
-// handler.
-func newRuleState(custom ipfw.CustomTargetFunc[net4, net6]) *ipfw.RuleState[net4, net6] {
-	return ipfw.NewRuleState[net4, net6](nets, custom)
+// newRuleState is a typed state over xnetip with the given target
+// resolver.
+func newRuleState(targets ipfw.TargetResolver[net4, net6]) *ipfw.RuleState[net4, net6] {
+	return ipfw.NewRuleState[net4, net6](nets, targets)
+}
+
+// must4 parses IPv4 network text or panics.
+func must4(text string) net4 {
+	network, err := xnetip.ParseNetwork4(text)
+	if err != nil {
+		panic(err)
+	}
+	return network
+}
+
+// must6 parses IPv6 network text or panics.
+func must6(text string) net6 {
+	network, err := xnetip.ParseNetwork6(text)
+	if err != nil {
+		panic(err)
+	}
+	return network
+}
+
+// fakeTargets resolves the names the tests use and hands out the same
+// slices every time.
+//
+// A hostname stands for a host of each family, a `_NAME_` macro for two
+// IPv4 networks, `local` for one, `inet` for nothing, anything else is
+// rejected.
+type fakeTargets struct {
+	nets4 []net4
+	nets6 []net6
+}
+
+// ResolveTarget implements ipfw.TargetResolver.
+func (m *fakeTargets) ResolveTarget(target ipfw.Target) ([]net4, []net6, error) {
+	m.nets4, m.nets6 = m.nets4[:0], m.nets6[:0]
+	switch text := target.Text; {
+	case text == "host.example.com":
+		m.nets4 = append(m.nets4, must4("192.0.2.1/32"))
+		m.nets6 = append(m.nets6, must6("2001:db8::1/128"))
+	case len(text) > 2 && text[0] == '_' && text[len(text)-1] == '_':
+		m.nets4 = append(m.nets4, must4("192.0.2.0/24"), must4("198.51.100.0/24"))
+	case text == "local":
+		m.nets4 = append(m.nets4, must4("203.0.113.0/24"))
+	case text == "inet":
+	default:
+		return nil, nil, ipfw.ErrExpectedTarget
+	}
+	return m.nets4, m.nets6, nil
 }
 
 // network4 is a parsed IPv4 network target.
@@ -137,17 +184,6 @@ func Test_RuleState_Networks(t *testing.T) {
 				}
 			},
 		},
-		{
-			name:  "hostname is kept without a resolver",
-			input: "add allow ip from host.example.com to any\n",
-			tokens: func(*testing.T) ruleTokens {
-				return ruleTokens{
-					ipProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
-					sources:      []ipfw.TargetMatch[net4, net6]{{Kind: ipfw.TargetHostname, Name: "host.example.com"}},
-					destinations: []ipfw.TargetMatch[net4, net6]{anyTarget},
-				}
-			},
-		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -160,8 +196,8 @@ func Test_RuleState_Networks(t *testing.T) {
 	}
 }
 
-// verifies that network text the consumer's parser rejects and targets of
-// no known shape fail the line at the token.
+// verifies that network text the consumer's parser rejects, and names with
+// no resolver to stand them for networks, fail the line at the token.
 func Test_RuleState_Errors(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -189,13 +225,23 @@ func Test_RuleState_Errors(t *testing.T) {
 			},
 		},
 		{
-			name:  "custom target without a handler",
+			name:  "custom target without a resolver",
 			input: "add allow ip from 2a02::g to any\n",
 			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedTarget,
+				Kind:   ipfw.ErrUnresolvedTarget,
 				Line:   1,
 				Column: 18,
 				Text:   "add allow ip from 2a02::g to any",
+			},
+		},
+		{
+			name:  "hostname without a resolver",
+			input: "add allow ip from any to host.example.com\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrUnresolvedTarget,
+				Line:   1,
+				Column: 25,
+				Text:   "add allow ip from any to host.example.com",
 			},
 		},
 	}
@@ -247,56 +293,64 @@ func Test_RuleState_NoAllocs(t *testing.T) {
 	require.Zero(t, allocs)
 }
 
-// customTargets is a custom target handler for the extra syntax.
+// verifies that a resolver stands hostnames and targets of unknown shape
+// for networks of both families, one match per network.
 //
-// It maps `_NAME_` to the table `NAME`, `inet` to the table `inet` and
-// `local` to a parsed network.
-func customTargets(target ipfw.Target) (ipfw.TargetMatch[net4, net6], error) {
-	match := ipfw.TargetMatch[net4, net6]{Neg: target.Neg}
-	switch text := target.Text; {
-	case text == "inet":
-		match.Kind, match.Name = ipfw.TargetTable, "inet"
-	case len(text) > 2 && text[0] == '_' && text[len(text)-1] == '_':
-		match.Kind, match.Name = ipfw.TargetTable, text[1:len(text)-1]
-	case text == "local":
-		network, err := xnetip.ParseNetwork4("192.0.2.0/24")
-		if err != nil {
-			return ipfw.TargetMatch[net4, net6]{}, err
-		}
-		match.Kind, match.Net4 = ipfw.TargetNetwork4, network
-	default:
-		return ipfw.TargetMatch[net4, net6]{}, ipfw.ErrExpectedTarget
+// The negation is copied to each, and a name standing for nothing empties
+// the side.
+func Test_RuleState_ResolveTargets(t *testing.T) {
+	anyTarget := ipfw.TargetMatch[net4, net6]{Kind: ipfw.TargetAny}
+	cases := []struct {
+		name         string
+		input        string
+		sources      []ipfw.TargetMatch[net4, net6]
+		destinations []ipfw.TargetMatch[net4, net6]
+	}{
+		{
+			name:  "hostname and macro",
+			input: "add allow ip from not host.example.com to _X_\n",
+			sources: []ipfw.TargetMatch[net4, net6]{
+				{Neg: true, Kind: ipfw.TargetNetwork4, Net4: must4("192.0.2.1/32")},
+				{Neg: true, Kind: ipfw.TargetNetwork6, Net6: must6("2001:db8::1/128")},
+			},
+			destinations: []ipfw.TargetMatch[net4, net6]{
+				{Kind: ipfw.TargetNetwork4, Net4: must4("192.0.2.0/24")},
+				{Kind: ipfw.TargetNetwork4, Net4: must4("198.51.100.0/24")},
+			},
+		},
+		{
+			name:  "resolved name inside a group keeps the order",
+			input: "add allow ip from { 192.0.2.5 or local or ::1 } to any\n",
+			sources: []ipfw.TargetMatch[net4, net6]{
+				{Kind: ipfw.TargetNetwork4, Net4: must4("192.0.2.5")},
+				{Kind: ipfw.TargetNetwork4, Net4: must4("203.0.113.0/24")},
+				{Kind: ipfw.TargetNetwork6, Net6: must6("::1")},
+			},
+			destinations: []ipfw.TargetMatch[net4, net6]{anyTarget},
+		},
+		{
+			name:         "name standing for nothing empties the side",
+			input:        "add allow ip from inet to any\n",
+			sources:      nil,
+			destinations: []ipfw.TargetMatch[net4, net6]{anyTarget},
+		},
 	}
-	return match, nil
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			state := newRuleState(&fakeTargets{})
+			_, err := ipfw.NewParser(tc.input).Next(state)
+			require.Nil(t, err)
+			require.Equal(t, tc.sources, state.Sources)
+			require.Equal(t, tc.destinations, state.Destinations)
+		})
+	}
 }
 
-// verifies that a custom target handler turns targets of no known shape
-// into typed ones and that what it rejects fails the line at the token.
-//
-// The negation is the handler's to copy.
-func Test_RuleState_CustomTarget(t *testing.T) {
-	state := newRuleState(customTargets)
-	_, err := ipfw.NewParser("add allow ip from not _X_ to inet\n").Next(state)
-	require.Nil(t, err)
-	require.Equal(t, ruleTokens{
-		ipProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
-		sources:  []ipfw.TargetMatch[net4, net6]{{Neg: true, Kind: ipfw.TargetTable, Name: "X"}},
-		destinations: []ipfw.TargetMatch[net4, net6]{
-			{Kind: ipfw.TargetTable, Name: "inet"},
-		},
-	}, tokensOf(state))
-
-	state = newRuleState(customTargets)
-	_, err = ipfw.NewParser("add allow ip from local to any\n").Next(state)
-	require.Nil(t, err)
-	require.Equal(t, ruleTokens{
-		ipProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
-		sources:      []ipfw.TargetMatch[net4, net6]{network4(t, "192.0.2.0/24")},
-		destinations: []ipfw.TargetMatch[net4, net6]{anyTarget},
-	}, tokensOf(state))
-
-	state = newRuleState(customTargets)
-	_, err = ipfw.NewParser("add allow ip from bogus to any\n").Next(state)
+// verifies that a resolver's error rejects the target at the token, an
+// ErrorKind keeping its kind.
+func Test_RuleState_ResolveTargets_Error(t *testing.T) {
+	state := newRuleState(&fakeTargets{})
+	_, err := ipfw.NewParser("add allow ip from bogus to any\n").Next(state)
 	require.NotNil(t, err)
 	require.Equal(t, ipfw.ParseError{
 		Kind:   ipfw.ErrExpectedTarget,
@@ -306,12 +360,12 @@ func Test_RuleState_CustomTarget(t *testing.T) {
 	}, *err)
 }
 
-// verifies that a line with custom targets parses into a warmed-up typed
-// state without allocating.
-func Test_RuleState_Custom_NoAllocs(t *testing.T) {
-	src := "add allow ip from { _X_ or inet } to local\n"
+// verifies that a line with resolved names parses into a warmed-up typed
+// state without allocating, the resolver reusing its slices.
+func Test_RuleState_ResolveTargets_NoAllocs(t *testing.T) {
+	src := "add allow ip from { _X_ or host.example.com } to { local or inet }\n"
 	parser := ipfw.NewParser(src)
-	state := newRuleState(customTargets)
+	state := newRuleState(&fakeTargets{})
 	_, _ = parser.Next(state)
 	ok := true
 	allocs := testing.AllocsPerRun(100, func() {

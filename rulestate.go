@@ -62,20 +62,25 @@ type ServiceResolver interface {
 	ResolveService(name string) (uint16, bool)
 }
 
-// HostnameResolver turns a hostname into its addresses.
-type HostnameResolver interface {
-	// ResolveHostname reports the addresses of a hostname, false when unknown.
-	ResolveHostname(name string) ([]netip.Addr, bool)
+// TargetResolver turns a target the parser could only name, a hostname or
+// a target of unknown shape, into the networks it stands for.
+type TargetResolver[V4, V6 any] interface {
+	// ResolveTarget returns the networks of both families the target stands
+	// for, none meaning a target that matches nothing.
+	//
+	// An error rejects the target, an ErrorKind keeping its kind. The
+	// slices belong to the resolver and are read before its next call.
+	ResolveTarget(target Target) ([]V4, []V6, error)
 }
 
-// TargetMatch is a typed source or destination: a keyword, a name or a
+// TargetMatch is a typed source or destination: a keyword, a table or a
 // parsed network of the consumer's types.
 type TargetMatch[V4, V6 any] struct {
 	// Neg is the `not` prefix.
 	Neg bool
-	// Kind is the target kind.
+	// Kind is the target kind, never a hostname or a custom one.
 	Kind TargetKind
-	// Name is the hostname or the table name.
+	// Name is the table name of a TargetTable.
 	Name string
 	// Net4 is the network of a TargetNetwork4.
 	Net4 V4
@@ -83,17 +88,12 @@ type TargetMatch[V4, V6 any] struct {
 	Net6 V6
 }
 
-// CustomTargetFunc turns a target of unknown shape into a typed one, the
-// negation being its to copy.
-//
-// An error rejects the target, an ErrorKind keeping its kind.
-type CustomTargetFunc[V4, V6 any] func(t Target) (TargetMatch[V4, V6], error)
-
 // RuleState is the State that turns the raw tokens of a rule into typed
 // values, networks parsed with the consumer's types.
 //
-// Names stay names: protocol, service and hostname resolution is the
-// consumer's, the VM doing it when it builds.
+// A hostname or a target of unknown shape becomes the networks its
+// resolver stands it for, one match each. Protocol and service names stay
+// names, the VM resolving them when it builds.
 type RuleState[V4, V6 any] struct {
 	// IPProtos holds the IP version keywords.
 	IPProtos []ProtoIPMatch
@@ -110,14 +110,14 @@ type RuleState[V4, V6 any] struct {
 	// Options holds the rule options.
 	Options []Opt
 
-	nets   NetworkParser[V4, V6]
-	custom CustomTargetFunc[V4, V6]
+	nets    NetworkParser[V4, V6]
+	targets TargetResolver[V4, V6]
 }
 
-// NewRuleState returns a state parsing networks with nets, custom taking
-// the targets of unknown shape and nil rejecting them.
-func NewRuleState[V4, V6 any](nets NetworkParser[V4, V6], custom CustomTargetFunc[V4, V6]) *RuleState[V4, V6] {
-	return &RuleState[V4, V6]{nets: nets, custom: custom}
+// NewRuleState returns a state parsing networks with nets, targets
+// resolving hostnames and targets of unknown shape and nil rejecting them.
+func NewRuleState[V4, V6 any](nets NetworkParser[V4, V6], targets TargetResolver[V4, V6]) *RuleState[V4, V6] {
+	return &RuleState[V4, V6]{nets: nets, targets: targets}
 }
 
 // Reset empties every slice and keeps its capacity for the next line.
@@ -145,21 +145,21 @@ func (m *RuleState[V4, V6]) OnProto(match ProtoMatch) error {
 
 // OnSourceTarget implements State.
 func (m *RuleState[V4, V6]) OnSourceTarget(target Target) error {
-	match, err := m.typedTarget(target)
+	sources, err := m.appendTarget(m.Sources, target)
 	if err != nil {
 		return err
 	}
-	m.Sources = append(m.Sources, match)
+	m.Sources = sources
 	return nil
 }
 
 // OnDestinationTarget implements State.
 func (m *RuleState[V4, V6]) OnDestinationTarget(target Target) error {
-	match, err := m.typedTarget(target)
+	destinations, err := m.appendTarget(m.Destinations, target)
 	if err != nil {
 		return err
 	}
-	m.Destinations = append(m.Destinations, match)
+	m.Destinations = destinations
 	return nil
 }
 
@@ -181,32 +181,46 @@ func (m *RuleState[V4, V6]) OnOption(opt Opt) error {
 	return nil
 }
 
-// typedTarget turns a raw target into a typed one, network text parsed
-// with the consumer's parser.
+// appendTarget appends the typed matches of a raw target, one for a
+// keyword, a table or a network, one per network of a resolved name.
 //
-// A rejected text is the error kind of its family.
-func (m *RuleState[V4, V6]) typedTarget(target Target) (TargetMatch[V4, V6], error) {
+// Rejected network text is the error kind of its family, a name with no
+// resolver is ErrUnresolvedTarget.
+func (m *RuleState[V4, V6]) appendTarget(
+	matches []TargetMatch[V4, V6],
+	target Target,
+) ([]TargetMatch[V4, V6], error) {
 	match := TargetMatch[V4, V6]{Neg: target.Neg, Kind: target.Kind}
 	switch target.Kind {
 	case TargetNetwork4:
 		network, err := m.nets.ParseNetwork4(target.Text)
 		if err != nil {
-			return TargetMatch[V4, V6]{}, ErrExpectedIPv4Network
+			return matches, ErrExpectedIPv4Network
 		}
 		match.Net4 = network
 	case TargetNetwork6:
 		network, err := m.nets.ParseNetwork6(target.Text)
 		if err != nil {
-			return TargetMatch[V4, V6]{}, ErrExpectedIPv6Network
+			return matches, ErrExpectedIPv6Network
 		}
 		match.Net6 = network
-	case TargetHostname, TargetTable:
+	case TargetTable:
 		match.Name = target.Text
-	case TargetCustom:
-		if m.custom == nil {
-			return TargetMatch[V4, V6]{}, ErrExpectedTarget
+	case TargetHostname, TargetCustom:
+		if m.targets == nil {
+			return matches, ErrUnresolvedTarget
 		}
-		return m.custom(target)
+		nets4, nets6, err := m.targets.ResolveTarget(target)
+		if err != nil {
+			return matches, err
+		}
+		for _, network := range nets4 {
+			matches = append(matches, TargetMatch[V4, V6]{Neg: target.Neg, Kind: TargetNetwork4, Net4: network})
+		}
+		for _, network := range nets6 {
+			matches = append(matches, TargetMatch[V4, V6]{Neg: target.Neg, Kind: TargetNetwork6, Net6: network})
+		}
+		return matches, nil
 	}
-	return match, nil
+	return append(matches, match), nil
 }

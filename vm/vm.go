@@ -57,10 +57,9 @@ type Config[V4, V6 any] struct {
 	Protos ipfw.ProtoResolver
 	// Services resolves service names, nil making every name an error.
 	Services ipfw.ServiceResolver
-	// Hostnames resolves hostnames, nil making every hostname an error.
-	Hostnames ipfw.HostnameResolver
-	// CustomTarget takes targets of unknown shape, nil rejecting them.
-	CustomTarget ipfw.CustomTargetFunc[V4, V6]
+	// Targets stands hostnames and targets of unknown shape for networks,
+	// nil making them an error.
+	Targets ipfw.TargetResolver[V4, V6]
 	// Tables is the table registry, nil meaning a fresh default one.
 	Tables TableRegistry[V4, V6]
 	// DefaultVerdict is the action when no rule matches, the zero value
@@ -74,16 +73,15 @@ type Config[V4, V6 any] struct {
 
 // The errors a build reports, wrapped in a BuildError.
 var (
-	ErrRuleNumberOrder    = errors.New("rule number goes backwards")
-	ErrUnresolvedJump     = errors.New("skipto to a label that never appears")
-	ErrUnresolvedProto    = errors.New("unresolved protocol name")
-	ErrUnresolvedService  = errors.New("unresolved service name")
-	ErrUnresolvedHostname = errors.New("unresolved hostname")
-	ErrUnsupportedOption  = errors.New("unsupported option")
-	ErrUnsupportedAction  = errors.New("unsupported action")
-	ErrUnsupportedTarget  = errors.New("unsupported target")
-	ErrUnsupportedPort    = errors.New("unsupported port")
-	ErrUnsupportedRecord  = errors.New("unsupported record")
+	ErrRuleNumberOrder   = errors.New("rule number goes backwards")
+	ErrUnresolvedJump    = errors.New("skipto to a label that never appears")
+	ErrUnresolvedProto   = errors.New("unresolved protocol name")
+	ErrUnresolvedService = errors.New("unresolved service name")
+	ErrUnsupportedOption = errors.New("unsupported option")
+	ErrUnsupportedAction = errors.New("unsupported action")
+	ErrUnsupportedTarget = errors.New("unsupported target")
+	ErrUnsupportedPort   = errors.New("unsupported port")
+	ErrUnsupportedRecord = errors.New("unsupported record")
 )
 
 // BuildError is a build failure located at a line of the ruleset.
@@ -141,7 +139,7 @@ func Build[V4, V6 Network](
 	if machine.verdict.Kind == 0 {
 		machine.verdict = ipfw.Action{Kind: ipfw.ActionDeny}
 	}
-	state := ipfw.NewRuleState(nets, cfg.CustomTarget)
+	state := ipfw.NewRuleState(nets, cfg.Targets)
 	for {
 		state.Reset()
 		rec, parseErr := p.Next(state)
@@ -210,8 +208,6 @@ func checkTarget[V4, V6 any](target ipfw.TargetMatch[V4, V6]) error {
 	switch target.Kind {
 	case ipfw.TargetAny, ipfw.TargetNetwork4, ipfw.TargetNetwork6:
 		return nil
-	case ipfw.TargetHostname:
-		return ErrUnresolvedHostname
 	}
 	return ErrUnsupportedTarget
 }

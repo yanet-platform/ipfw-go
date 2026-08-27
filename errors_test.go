@@ -61,6 +61,11 @@ func Test_ErrorKind_Error(t *testing.T) {
 		{name: "unknown option", kind: ipfw.ErrUnknownOption, message: "unknown option"},
 		{name: "expected target", kind: ipfw.ErrExpectedTarget, message: "expected target"},
 		{
+			name:    "unresolved target",
+			kind:    ipfw.ErrUnresolvedTarget,
+			message: "unresolved target name",
+		},
+		{
 			name:    "expected hostname escape close",
 			kind:    ipfw.ErrExpectedHostnameEscapeClose,
 			message: "expected closing `'` of a quoted hostname",
