@@ -104,6 +104,7 @@ func (m *BuildError) Unwrap() error {
 // matches.
 type VM[V4, V6 Network] struct {
 	ops     []op[V4, V6]
+	labels  map[string]int
 	tables  TableRegistry[V4, V6]
 	verdict ipfw.Action
 }
@@ -162,7 +163,7 @@ func Build[V4, V6 Network](
 			if unresolved, ok := sink.Unresolved(); ok && cfg.UnresolvedJumps == UnresolvedJumpsError {
 				return nil, &BuildError{Line: unresolved.Line, Text: unresolved.Text, Err: ErrUnresolvedJump}
 			}
-			machine.ops = sink.Ops()
+			machine.ops, machine.labels = sink.Ops(), sink.Labels()
 			return machine, nil
 		case ipfw.RecordEmpty, ipfw.RecordComment:
 			continue
@@ -249,6 +250,7 @@ func (m *builder[V4, V6]) Add(rec *ipfw.Record) error {
 			m.pendingNumbers[target.Number] = append(m.pendingNumbers[target.Number], len(m.ops))
 		case ipfw.SkipToLabel:
 			m.pendingLabels[target.Label] = append(m.pendingLabels[target.Label], len(m.ops))
+		case ipfw.SkipToTableArg:
 		default:
 			return ErrUnsupportedAction
 		}
@@ -335,6 +337,11 @@ func (m *builder[V4, V6]) Ops() []op[V4, V6] {
 	return m.ops
 }
 
+// Labels returns the index of the rule after each label.
+func (m *builder[V4, V6]) Labels() map[string]int {
+	return m.labels
+}
+
 // OnIPProto implements ipfw.VMState.
 func (m *builder[V4, V6]) OnIPProto(match ipfw.ProtoIPMatch) error {
 	m.Rule.IPProtos = append(m.Rule.IPProtos, match)
@@ -378,9 +385,6 @@ func (m *builder[V4, V6]) OnOption(opt ipfw.Opt) error {
 	case ipfw.OptEstablished, ipfw.OptIn, ipfw.OptOut, ipfw.OptFrag, ipfw.OptICMPTypes, ipfw.OptICMP6Types,
 		ipfw.OptTCPFlags, ipfw.OptSourcePort, ipfw.OptDestinationPort, ipfw.OptProto:
 	case ipfw.OptVia:
-		if opt.Via.Kind == ipfw.ViaTable {
-			return ErrUnsupportedOption
-		}
 	default:
 		return ErrUnsupportedOption
 	}
@@ -411,12 +415,15 @@ func (m *VM[V4, V6]) Check(ctx *Context, pkt Packet) ipfw.Action {
 // CheckTrace is Check reporting every rule evaluated to tracer, and
 // whether a rule terminated the search.
 //
-// A matching skipto continues at its linked rule, every jump going forward.
+// A matching skipto continues at its linked rule, a skipto tablearg at
+// the rule the table lookup of its options named, every jump going
+// forward: a tablearg with no target, or one at or before the rule,
+// falls through.
 func (m *VM[V4, V6]) CheckTrace(ctx *Context, pkt Packet, tracer Tracer) (ipfw.Action, bool) {
 	pc := 0
 	for pc < len(m.ops) {
 		rule := &m.ops[pc]
-		matched := m.matches(rule, ctx, pkt)
+		matched, target := m.matches(rule, ctx, pkt)
 		tracer.Trace(&rule.Record, rule.Action, matched)
 		if !matched {
 			pc++
@@ -426,7 +433,11 @@ func (m *VM[V4, V6]) CheckTrace(ctx *Context, pkt Packet, tracer Tracer) (ipfw.A
 		case ipfw.ActionPass, ipfw.ActionDeny:
 			return rule.Action, true
 		case ipfw.ActionSkipTo:
-			pc = rule.Jump
+			if rule.Action.SkipTo.Kind == ipfw.SkipToTableArg {
+				pc = max(target, pc+1)
+			} else {
+				pc = rule.Jump
+			}
 		default:
 			pc++
 		}
@@ -441,95 +452,36 @@ type nopTracer struct{}
 func (nopTracer) Trace(*ipfw.Record, ipfw.Action, bool) {}
 
 // matches reports whether the packet satisfies the body of the rule and
-// then its options.
-func (m *VM[V4, V6]) matches(rule *op[V4, V6], ctx *Context, pkt Packet) bool {
+// then its options, and the tablearg target the options yield.
+//
+// The target is the index of the rule a table lookup among the options
+// named, noTarget when none did.
+func (m *VM[V4, V6]) matches(rule *op[V4, V6], ctx *Context, pkt Packet) (bool, int) {
 	if !matchIPProtos(rule.IPProtos, pkt.Version()) {
-		return false
+		return false, noTarget
 	}
 	if !matchProtos(rule.Protos, pkt.Protocol()) {
-		return false
+		return false, noTarget
 	}
 	if !m.matchTargets(rule.Sources, ctx, pkt.SourceAddr()) {
-		return false
+		return false, noTarget
 	}
 	if !m.matchTargets(rule.Destinations, ctx, pkt.DestinationAddr()) {
-		return false
+		return false, noTarget
 	}
 	if len(rule.SourcePorts) > 0 {
 		port, ok := pkt.SourcePort()
 		if !ok || !matchPorts(rule.SourcePorts, port) {
-			return false
+			return false, noTarget
 		}
 	}
 	if len(rule.DestinationPorts) > 0 {
 		port, ok := pkt.DestinationPort()
 		if !ok || !matchPorts(rule.DestinationPorts, port) {
-			return false
+			return false, noTarget
 		}
 	}
 	return m.matchOptions(rule.Options, ctx, pkt)
-}
-
-// matchOptions folds the options left to right: an option starting a
-// term must find the previous term true, one marked Or extends the term.
-func (m *VM[V4, V6]) matchOptions(options []ipfw.Opt, ctx *Context, pkt Packet) bool {
-	term := true
-	for idx := range options {
-		opt := &options[idx]
-		hit := m.matchOption(opt, ctx, pkt) != opt.Neg
-		if opt.Or {
-			term = term || hit
-			continue
-		}
-		if !term {
-			return false
-		}
-		term = hit
-	}
-	return term
-}
-
-// matchOption reports whether the option, its negation aside, holds for
-// the packet in the context.
-//
-// established is a TCP packet with ACK or RST set, tcpflags one whose
-// examined flags are exactly the ones to be set, src-port and dst-port a
-// packet whose port is in the range, proto one of the protocol number, in
-// and out the direction of the check, via the context's interface by name
-// or by mask, frag a non-first fragment, icmptypes and icmp6types an ICMP
-// packet of the family with a type in the set.
-func (m *VM[V4, V6]) matchOption(opt *ipfw.Opt, ctx *Context, pkt Packet) bool {
-	switch opt.Kind {
-	case ipfw.OptEstablished:
-		flags, ok := pkt.TCPFlags()
-		return ok && flags&(ipfw.TCPAck|ipfw.TCPRst) != 0
-	case ipfw.OptTCPFlags:
-		flags, ok := pkt.TCPFlags()
-		return ok && flags&opt.TCPFlags.Mask == opt.TCPFlags.Set
-	case ipfw.OptSourcePort:
-		port, ok := pkt.SourcePort()
-		return ok && opt.Ports.Lo.Number <= port && port <= opt.Ports.Hi.Number
-	case ipfw.OptDestinationPort:
-		port, ok := pkt.DestinationPort()
-		return ok && opt.Ports.Lo.Number <= port && port <= opt.Ports.Hi.Number
-	case ipfw.OptProto:
-		return pkt.Protocol() == opt.Proto.Number
-	case ipfw.OptIn:
-		return ctx.Direction == In
-	case ipfw.OptOut:
-		return ctx.Direction == Out
-	case ipfw.OptVia:
-		return m.matchVia(&opt.Via, ctx)
-	case ipfw.OptFrag:
-		return pkt.IsFragment()
-	case ipfw.OptICMPTypes:
-		ty, ok := pkt.ICMPType()
-		return ok && opt.Types.Has(ty)
-	case ipfw.OptICMP6Types:
-		ty, ok := pkt.ICMP6Type()
-		return ok && opt.Types.Has(ty)
-	}
-	return false
 }
 
 // matchPorts reports whether the port is in one of the ranges, or, the
@@ -545,16 +497,101 @@ func matchPorts(matches []ipfw.PortNumberMatch, port uint16) bool {
 	return len(matches) > 0 && matches[0].Neg
 }
 
-// matchVia reports whether the context's interface is the one named, or
-// one the mask takes, which a `*` does even for no interface at all.
-func (m *VM[V4, V6]) matchVia(via *ipfw.Via, ctx *Context) bool {
+// noTarget is the tablearg target of a rule whose options named none.
+const noTarget = -1
+
+// matchOptions folds the options left to right: an option starting a
+// term must find the previous term true, one marked Or extends the term.
+//
+// The target is the first one an option yields.
+func (m *VM[V4, V6]) matchOptions(options []ipfw.Opt, ctx *Context, pkt Packet) (bool, int) {
+	term, target := true, noTarget
+	for idx := range options {
+		opt := &options[idx]
+		raw, found := m.matchOption(opt, ctx, pkt)
+		if target == noTarget {
+			target = found
+		}
+		hit := raw != opt.Neg
+		if opt.Or {
+			term = term || hit
+			continue
+		}
+		if !term {
+			return false, noTarget
+		}
+		term = hit
+	}
+	return term, target
+}
+
+// matchOption reports whether the option, its negation aside, holds for
+// the packet in the context, and the tablearg target it yields.
+//
+// established is a TCP packet with ACK or RST set, tcpflags one whose
+// examined flags are exactly the ones to be set, src-port and dst-port a
+// packet whose port is in the range, proto one of the protocol number, in
+// and out the direction of the check, via the context's interface by
+// name, by mask or through a table, frag a non-first fragment, icmptypes
+// and icmp6types an ICMP packet of the family with a type in the set.
+func (m *VM[V4, V6]) matchOption(opt *ipfw.Opt, ctx *Context, pkt Packet) (bool, int) {
+	switch opt.Kind {
+	case ipfw.OptEstablished:
+		flags, ok := pkt.TCPFlags()
+		return ok && flags&(ipfw.TCPAck|ipfw.TCPRst) != 0, noTarget
+	case ipfw.OptTCPFlags:
+		flags, ok := pkt.TCPFlags()
+		return ok && flags&opt.TCPFlags.Mask == opt.TCPFlags.Set, noTarget
+	case ipfw.OptSourcePort:
+		port, ok := pkt.SourcePort()
+		return ok && opt.Ports.Lo.Number <= port && port <= opt.Ports.Hi.Number, noTarget
+	case ipfw.OptDestinationPort:
+		port, ok := pkt.DestinationPort()
+		return ok && opt.Ports.Lo.Number <= port && port <= opt.Ports.Hi.Number, noTarget
+	case ipfw.OptProto:
+		return pkt.Protocol() == opt.Proto.Number, noTarget
+	case ipfw.OptIn:
+		return ctx.Direction == In, noTarget
+	case ipfw.OptOut:
+		return ctx.Direction == Out, noTarget
+	case ipfw.OptVia:
+		return m.matchVia(&opt.Via, ctx)
+	case ipfw.OptFrag:
+		return pkt.IsFragment(), noTarget
+	case ipfw.OptICMPTypes:
+		ty, ok := pkt.ICMPType()
+		return ok && opt.Types.Has(ty), noTarget
+	case ipfw.OptICMP6Types:
+		ty, ok := pkt.ICMP6Type()
+		return ok && opt.Types.Has(ty), noTarget
+	}
+	return false, noTarget
+}
+
+// matchVia reports whether the context's interface is the one named, one
+// the mask takes or one the table lists, and the target of the table entry.
+//
+// A mask like `*` takes even no interface at all. The value of a table
+// entry names the label a tablearg jumps to, the target being the rule
+// after it, or none when no label is so named. The value written in the
+// option is not consulted.
+func (m *VM[V4, V6]) matchVia(via *ipfw.Via, ctx *Context) (bool, int) {
 	switch via.Kind {
 	case ipfw.ViaExact:
-		return ctx.IfName == via.Name
+		return ctx.IfName == via.Name, noTarget
 	case ipfw.ViaMask:
-		return ipfw.MatchIfMask(via.Name, ctx.IfName)
+		return ipfw.MatchIfMask(via.Name, ctx.IfName), noTarget
+	case ipfw.ViaTable:
+		value, ok := m.tables.LookupInterface(via.Name, ctx.IfName)
+		if !ok {
+			return false, noTarget
+		}
+		if target, ok := m.labels[value]; ok {
+			return true, target
+		}
+		return true, noTarget
 	}
-	return false
+	return false, noTarget
 }
 
 // matchIPProtos reports whether the version is in one of the version

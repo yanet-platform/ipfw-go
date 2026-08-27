@@ -1278,18 +1278,141 @@ func Test_VM_Build_Tables(t *testing.T) {
 	require.False(t, fresh.Tables().LookupNetwork("t", netip.MustParseAddr("192.0.2.1")))
 }
 
-// verifies that a record of a kind the VM does not know, as a command
-// hook may produce, is a build error at its line.
-func Test_VM_Build_UnsupportedRecord(t *testing.T) {
-	hook := func(line string, _ ipfw.State) (ipfw.Record, int, error) {
-		return ipfw.Record{Kind: 100}, len(line), nil
+// verifies that a record or an action of a kind the VM does not know, as
+// a command hook may produce, is a build error at its line.
+func Test_VM_Build_UnsupportedKinds(t *testing.T) {
+	invented := func(line string, _ ipfw.State) (ipfw.Record, int, error) {
+		if line[0] == 'f' {
+			return ipfw.Record{Kind: 100}, len(line), nil
+		}
+		return ipfw.Record{
+			Kind:        ipfw.RecordInstruction,
+			Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: 100}},
+		}, len(line), nil
 	}
-	_, err := vm.Build(ipfw.NewParser("add pass ip from any to any\nfrobnicate now\n", ipfw.WithCommandHook(hook)), resolving, none)
-	var buildErr *vm.BuildError
-	require.ErrorAs(t, err, &buildErr)
-	require.Equal(t, 2, buildErr.Line)
-	require.Equal(t, "frobnicate now", buildErr.Text)
-	require.ErrorIs(t, err, vm.ErrUnsupportedRecord)
+	cases := []struct {
+		name  string
+		rules string
+		cause error
+	}{
+		{
+			name:  "record",
+			rules: "add pass ip from any to any\nfrobnicate now\n",
+			cause: vm.ErrUnsupportedRecord,
+		},
+		{
+			name:  "action",
+			rules: "add pass ip from any to any\nwarp somewhere\n",
+			cause: vm.ErrUnsupportedAction,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := vm.Build(ipfw.NewParser(tc.rules, ipfw.WithCommandHook(invented)), resolving, none)
+			var buildErr *vm.BuildError
+			require.ErrorAs(t, err, &buildErr)
+			require.Equal(t, 2, buildErr.Line)
+			require.ErrorIs(t, err, tc.cause)
+		})
+	}
+}
+
+// verifies that via table(NAME) matches an interface the table lists and
+// that skipto tablearg then continues at the label the entry's value names.
+//
+// A value naming no label, or a label before the rule, falls through to the
+// next rule, and an entry added after the build counts.
+func Test_VM_Check_TableArg(t *testing.T) {
+	packet := tcp4("192.0.2.1", "192.0.2.2")
+	corpus := build(t, "table t create type iface\n\nadd skipto tablearg ip from any to any via table(t) in\ntable t add vlan1234 :INBOUND\nadd deny ip from any to any\n\n:INBOUND\nadd pass ip from any to any\n", none)
+	require.Equal(t, pass, corpus.Check(&vm.Context{IfName: "vlan1234"}, packet))
+	require.Equal(t, deny, corpus.Check(&vm.Context{IfName: "eth0"}, packet))
+	require.Equal(t, deny, corpus.Check(&vm.Context{IfName: "vlan1234", Direction: vm.Out}, packet))
+
+	two := build(t, "table j add vlan1 :ONE\ntable j add vlan2 :TWO\ntable j add vlan3 :NOWHERE\nadd skipto tablearg ip from any to any via table(j)\nadd deny ip from any to any\n:ONE\nadd pass ip from any to any\n:TWO\nadd count ip from any to any\nadd deny ip from any to any\n", none)
+	cases := []struct {
+		ifname  string
+		verdict ipfw.Action
+		seen    []traced
+	}{
+		{
+			ifname:  "vlan1",
+			verdict: pass,
+			seen: []traced{
+				{line: 4, action: ipfw.ActionSkipTo, matched: true},
+				{line: 7, action: ipfw.ActionPass, matched: true},
+			},
+		},
+		{
+			ifname:  "vlan2",
+			verdict: deny,
+			seen: []traced{
+				{line: 4, action: ipfw.ActionSkipTo, matched: true},
+				{line: 9, action: ipfw.ActionCount, matched: true},
+				{line: 10, action: ipfw.ActionDeny, matched: true},
+			},
+		},
+		{
+			ifname:  "vlan3",
+			verdict: deny,
+			seen: []traced{
+				{line: 4, action: ipfw.ActionSkipTo, matched: true},
+				{line: 5, action: ipfw.ActionDeny, matched: true},
+			},
+		},
+		{
+			ifname:  "vlan4",
+			verdict: deny,
+			seen: []traced{
+				{line: 4, action: ipfw.ActionSkipTo, matched: false},
+				{line: 5, action: ipfw.ActionDeny, matched: true},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.ifname, func(t *testing.T) {
+			tracer := &recordingTracer{}
+			action, matched := two.CheckTrace(&vm.Context{IfName: tc.ifname}, packet, tracer)
+			require.True(t, matched)
+			require.Equal(t, tc.verdict, action)
+			require.Equal(t, tc.seen, tracer.seen)
+		})
+	}
+
+	two.Tables().AddInterface("j", "vlan4", "ONE")
+	require.Equal(t, pass, two.Check(&vm.Context{IfName: "vlan4"}, packet))
+
+	backward := build(t, "add count ip from any to any\n:BACK\ntable j add vlan1 :BACK\nadd skipto tablearg ip from any to any via table(j)\nadd pass ip from any to any\n", none)
+	tracer := &recordingTracer{}
+	action, matched := backward.CheckTrace(&vm.Context{IfName: "vlan1"}, packet, tracer)
+	require.True(t, matched)
+	require.Equal(t, pass, action)
+	require.Equal(t, []traced{
+		{line: 1, action: ipfw.ActionCount, matched: true},
+		{line: 4, action: ipfw.ActionSkipTo, matched: true},
+		{line: 5, action: ipfw.ActionPass, matched: true},
+	}, tracer.seen)
+
+	plain := build(t, "table t add eth0 whatever\nadd pass ip from any to any via table(t)\nadd pass ip from any to any not via table(t) in\nadd deny ip from any to any\n", none)
+	require.Equal(t, pass, plain.Check(&vm.Context{IfName: "eth0"}, packet))
+	require.Equal(t, pass, plain.Check(&vm.Context{IfName: "eth1"}, packet))
+	require.Equal(t, deny, plain.Check(&vm.Context{IfName: "eth1", Direction: vm.Out}, packet))
+	require.Equal(t, pass, plain.Check(&vm.Context{IfName: "eth0", Direction: vm.Out}, packet))
+}
+
+// verifies that a check through a table jump allocates nothing.
+func Test_VM_TableArg_NoAllocs(t *testing.T) {
+	machine := build(t, "table j add vlan1 :ONE\nadd skipto tablearg ip from any to any via table(j)\nadd deny ip from any to any\n:ONE\nadd pass ip from any to any\n", none)
+	packet := tcp4("192.0.2.1", "192.0.2.2")
+	ctx := &vm.Context{IfName: "vlan1"}
+	verdict := pass
+	allocs := testing.AllocsPerRun(100, func() {
+		if machine.Check(ctx, packet) != pass {
+			verdict = deny
+		}
+	})
+	require.Equal(t, pass, verdict)
+	require.Zero(t, allocs)
 }
 
 // verifies that every build error is located at its line and wraps its
@@ -1313,14 +1436,6 @@ func Test_VM_Build_Errors(t *testing.T) {
 			line:      2,
 			text:      "add foobar :any",
 			cause:     ipfw.ErrExpectedAction,
-		},
-		{
-			name:      "unsupported action",
-			rules:     "add skipto tablearg ip from any to any\n",
-			resolvers: resolving,
-			line:      1,
-			text:      "add skipto tablearg ip from any to any",
-			cause:     vm.ErrUnsupportedAction,
 		},
 		{
 			name:      "rule number going backwards",
@@ -1396,10 +1511,10 @@ func Test_VM_Build_Errors(t *testing.T) {
 		},
 		{
 			name:      "unsupported option",
-			rules:     "add pass tcp from any to any established via table(t)\n",
+			rules:     "add pass tcp from any to any established keep-state\n",
 			resolvers: resolving,
 			line:      1,
-			text:      "add pass tcp from any to any established via table(t)",
+			text:      "add pass tcp from any to any established keep-state",
 			cause:     vm.ErrUnsupportedOption,
 		},
 		{
