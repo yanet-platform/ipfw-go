@@ -10,14 +10,37 @@ Licensed under the Apache License 2.0, see [LICENSE](LICENSE).
 
 ## What it gives you
 
-- **Nothing allocates on the hot paths.** Parsing a line and checking a packet allocate zero bytes, and `testing.AllocsPerRun` guards both. The input is one string and every token is a sub-slice of it, so a 27 MB ruleset parses at 184 MB/s without touching the heap.
-- **No dependencies.** The runtime is the standard library. Tests reach for testify, rapid and xnetip, your build does not.
-- **Your network types, not ours.** The typed layer is generic over the IPv4 and IPv6 types you already use, plugged in with a literal. Nothing forces a wrapper on you.
-- **Strict parsing with errors that point.** No token is dropped or guessed. A line that does not fit the grammar is a `*ParseError` with a line, a column and the text, rendered by `Diag` with a caret under the offending token, coloured when a terminal is watching.
-- **Names are yours to resolve.** Protocols, services, hostnames and macros go through your resolvers, so `/etc/services`, a DNS cache or a macro expander plug in where you need them, and an unresolvable name fails the line instead of matching quietly.
-- **The grammar is extensible.** A command or an option the format does not know goes to a hook that reuses the exported sub-parsers, and the VM asks your matcher what it means.
-- **A virtual machine, not only a parser.** Build a ruleset once and check packets against it: protocols, addresses, ports, tables, interfaces, ICMP types, TCP flags, jumps and labels, a configurable default verdict, and a tracer that reports every rule a check evaluated.
-- **Tested where it counts.** Property tests, fuzzing with a checked-in corpus, allocation guards, race tests, and regression runs over production rulesets of 115k rules.
+- **Nothing allocates on the hot paths.**
+
+  Parsing a line and checking a packet allocate zero bytes, and `testing.AllocsPerRun` guards both. The input is one string and every token is a sub-slice of it, so a 27 MB ruleset parses at 184 MB/s without touching the heap.
+
+- **No dependencies.**
+
+  The runtime is the standard library. Tests reach for testify, rapid and xnetip, your build does not.
+
+- **Your network types, not ours.**
+
+  The typed layer is generic over the IPv4 and IPv6 types you already use, plugged in with a literal. Nothing forces a wrapper on you.
+
+- **Strict parsing with errors that point.**
+
+  No token is dropped or guessed. A line that does not fit the grammar is a `*ParseError` with a line, a column and the text, rendered by `Diag` with a caret under the offending token, coloured when a terminal is watching.
+
+- **Names are yours to resolve.**
+
+  Protocols, services, hostnames and macros go through your resolvers, so `/etc/services`, a DNS cache or a macro expander plug in where you need them, and an unresolvable name fails the line instead of matching quietly.
+
+- **The grammar is extensible.**
+
+  A command or an option the format does not know goes to a hook that reuses the exported sub-parsers, and the VM asks your matcher what it means.
+
+- **A virtual machine, not only a parser.**
+
+  Build a ruleset once and check packets against it: protocols, addresses, ports, tables, interfaces, ICMP types, TCP flags, jumps and labels, a configurable default verdict, and a tracer that reports every rule a check evaluated.
+
+- **Tested where it counts.**
+
+  Property tests, fuzzing with a checked-in corpus, allocation guards, race tests, and regression runs over production rulesets of 115k rules.
 
 ## How it fits together
 
