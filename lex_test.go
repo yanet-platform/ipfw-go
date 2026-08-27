@@ -254,7 +254,7 @@ func Test_OpenGroup_Table(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			g, rest := openGroup(tc.input)
-			require.Equal(t, tc.braced, g.braced)
+			require.Equal(t, tc.braced, g.Braced)
 			require.Equal(t, tc.rest, rest)
 		})
 	}
@@ -312,7 +312,7 @@ func Test_Group_Next_Table(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rest, more, err := group{braced: tc.braced}.next(tc.input)
+			rest, more, err := group{Braced: tc.braced}.Next(tc.input)
 			require.Equal(t, tc.kind, err.Kind)
 			require.Equal(t, tc.at, err.At)
 			require.Equal(t, tc.more, more)
@@ -420,7 +420,7 @@ func groupLetters(s string) (string, []string, fail) {
 		elements = append(elements, element)
 		var more bool
 		var err fail
-		rest, more, err = g.next(afterElement)
+		rest, more, err = g.Next(afterElement)
 		if err.Failed() {
 			return s, elements, err
 		}
@@ -514,7 +514,7 @@ func groupElements(s string) (string, int, fail) {
 		}
 		count++
 		var more bool
-		rest, more, err = g.next(afterElement)
+		rest, more, err = g.Next(afterElement)
 		if err.Failed() {
 			return s, count, err
 		}

@@ -11,8 +11,10 @@ type Tables[V4, V6 Network] struct {
 
 // networkTable holds the networks of one table by family.
 type networkTable[V4, V6 Network] struct {
-	v4 []V4
-	v6 []V6
+	// V4 are the IPv4 networks in the order added.
+	V4 []V4
+	// V6 are the IPv6 networks in the order added.
+	V6 []V6
 }
 
 // NewTables returns an empty registry.
@@ -30,14 +32,14 @@ func (m *Tables[V4, V6]) LookupNetwork(table string, addr netip.Addr) bool {
 		return false
 	}
 	if addr.Is4() {
-		for _, network := range networks.v4 {
+		for _, network := range networks.V4 {
 			if network.ContainsAddr(addr) {
 				return true
 			}
 		}
 		return false
 	}
-	for _, network := range networks.v6 {
+	for _, network := range networks.V6 {
 		if network.ContainsAddr(addr) {
 			return true
 		}
@@ -54,13 +56,13 @@ func (m *Tables[V4, V6]) LookupInterface(table, ifname string) (string, bool) {
 // AddNetwork4 implements TableRegistry.
 func (m *Tables[V4, V6]) AddNetwork4(table string, network V4) {
 	networks := m.network(table)
-	networks.v4 = append(networks.v4, network)
+	networks.V4 = append(networks.V4, network)
 }
 
 // AddNetwork6 implements TableRegistry.
 func (m *Tables[V4, V6]) AddNetwork6(table string, network V6) {
 	networks := m.network(table)
-	networks.v6 = append(networks.v6, network)
+	networks.V6 = append(networks.V6, network)
 }
 
 // AddInterface implements TableRegistry, a later entry for the same name

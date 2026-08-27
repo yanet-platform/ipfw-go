@@ -192,7 +192,9 @@ func parseUint(s string, max uint64) (uint64, string, bool) {
 // The callers drive it with direct calls: an element parser passed as a
 // function value is an indirect call the compiler cannot inline.
 type group struct {
-	braced bool
+	// Braced is whether the list is in braces, `or` separating the
+	// elements and `}` ending it.
+	Braced bool
 }
 
 // openGroup consumes the opening brace and the spaces after it when there is
@@ -202,17 +204,17 @@ func openGroup(s string) (group, string) {
 	if !ok {
 		return group{}, s
 	}
-	return group{braced: true}, skipSpace(rest)
+	return group{Braced: true}, skipSpace(rest)
 }
 
-// next reads what follows an element and reports whether another one comes.
+// Next reads what follows an element and reports whether another one comes.
 //
 // Inside braces `or` goes on with the next element, the spaces after it
 // skipped, and `}` ends the list. Anything else is ErrExpectedOr at the
 // first non-space byte, the input being returned unchanged. A lone element
 // ends the list with the input untouched.
-func (m group) next(s string) (string, bool, fail) {
-	if !m.braced {
+func (m group) Next(s string) (string, bool, fail) {
+	if !m.Braced {
 		return s, false, fail{}
 	}
 	rest := skipSpace(s)

@@ -311,22 +311,22 @@ type span struct {
 	End uint32
 }
 
-// empty reports whether the run holds nothing.
-func (m span) empty() bool {
+// Empty reports whether the run holds nothing.
+func (m span) Empty() bool {
 	return m.End == m.Start
 }
 
 // Build reads the whole ruleset from p into a VM, every name resolved
 // within the configured environment on the way in.
 func Build[V4, V6 Network](p *ipfw.Parser, cfg Config[V4, V6]) (*VM[V4, V6], error) {
-	m := &VM[V4, V6]{tables: cfg.Tables, matcher: cfg.OptionMatcher, verdict: cfg.DefaultVerdict}
-	if m.tables == nil {
-		m.tables = NewTables[V4, V6]()
+	tables, verdict := cfg.Tables, cfg.DefaultVerdict
+	if tables == nil {
+		tables = NewTables[V4, V6]()
 	}
-	if m.verdict.Kind == 0 {
-		m.verdict = ipfw.Action{Kind: ipfw.ActionDeny}
+	if verdict.Kind == 0 {
+		verdict = ipfw.Action{Kind: ipfw.ActionDeny}
 	}
-	sink := newBuilder(m.tables, cfg.Environment.Networks, cfg.OptionMatcher != nil)
+	sink := newBuilder(tables, cfg.Environment.Networks, cfg.OptionMatcher != nil)
 	state := ipfw.NewResolver(sink, cfg.Environment)
 	for {
 		rec, parseErr := p.Next(state)
@@ -338,8 +338,13 @@ func Build[V4, V6 Network](p *ipfw.Parser, cfg Config[V4, V6]) (*VM[V4, V6], err
 			if unresolved, ok := sink.Unresolved(); ok && cfg.UnresolvedJumps == UnresolvedJumpsError {
 				return nil, &BuildError{Line: unresolved.Line, Text: unresolved.Text, Err: ErrUnresolvedJump}
 			}
-			m.program, m.labels = sink.Program(), sink.Labels()
-			return m, nil
+			return &VM[V4, V6]{
+				program: sink.Program(),
+				labels:  sink.Labels(),
+				tables:  tables,
+				matcher: cfg.OptionMatcher,
+				verdict: verdict,
+			}, nil
 		case ipfw.RecordEmpty, ipfw.RecordComment:
 			continue
 		case ipfw.RecordInstruction:
@@ -607,71 +612,81 @@ func (m *VM[V4, V6]) CheckTrace(ctx *Context, pkt Packet, tracer Tracer) (ipfw.A
 // call and an address conversion each, most of the time of a rule that
 // does not match.
 type packetFields struct {
-	version     IPVersion
-	protocol    uint8
-	source      netip.Addr
-	destination netip.Addr
+	// Version is the IP version.
+	Version IPVersion
+	// Protocol is the transport protocol number.
+	Protocol uint8
+	// Source is the source address.
+	Source netip.Addr
+	// Destination is the destination address.
+	Destination netip.Addr
+	// SourcePort is the source port, after ReadPorts.
+	SourcePort uint16
+	// HasSourcePort is whether the packet carries a source port.
+	HasSourcePort bool
+	// DestinationPort is the destination port, after ReadPorts.
+	DestinationPort uint16
+	// HasDestinationPort is whether the packet carries a destination port.
+	HasDestinationPort bool
+	// Flags are the TCP flags, after ReadFlags.
+	Flags ipfw.TCPFlag
+	// HasFlags is whether the packet carries TCP flags.
+	HasFlags bool
+	// ICMPType is the ICMP type, after ReadICMP.
+	ICMPType uint8
+	// HasICMPType is whether the packet is ICMP.
+	HasICMPType bool
+	// ICMP6Type is the ICMPv6 type, after ReadICMP.
+	ICMP6Type uint8
+	// HasICMP6Type is whether the packet is ICMPv6.
+	HasICMP6Type bool
+	// Fragment is whether the packet is a non-first fragment, after
+	// ReadFragment.
+	Fragment bool
 
-	ports              bool
-	sourcePort         uint16
-	hasSourcePort      bool
-	destinationPort    uint16
-	hasDestinationPort bool
-
-	tcp      bool
-	flags    ipfw.TCPFlag
-	hasFlags bool
-
-	icmp         bool
-	icmpType     uint8
-	hasICMPType  bool
-	icmp6Type    uint8
-	hasICMP6Type bool
-
-	fragmentation bool
-	fragment      bool
+	ports, tcp, icmp, fragmentation bool
 }
 
 // readFields takes the fields every rule looks at from the packet.
 func readFields(pkt Packet) packetFields {
 	return packetFields{
-		version:     pkt.Version(),
-		protocol:    pkt.Protocol(),
-		source:      pkt.SourceAddr(),
-		destination: pkt.DestinationAddr(),
+		Version:     pkt.Version(),
+		Protocol:    pkt.Protocol(),
+		Source:      pkt.SourceAddr(),
+		Destination: pkt.DestinationAddr(),
 	}
 }
 
-// readPorts takes the ports on first use.
-func (m *packetFields) readPorts(pkt Packet) {
+// ReadPorts takes the ports on first use.
+func (m *packetFields) ReadPorts(pkt Packet) {
 	if !m.ports {
-		m.sourcePort, m.hasSourcePort = pkt.SourcePort()
-		m.destinationPort, m.hasDestinationPort = pkt.DestinationPort()
+		m.SourcePort, m.HasSourcePort = pkt.SourcePort()
+		m.DestinationPort, m.HasDestinationPort = pkt.DestinationPort()
 		m.ports = true
 	}
 }
 
-// readFlags takes the TCP flags on first use.
-func (m *packetFields) readFlags(pkt Packet) {
+// ReadFlags takes the TCP flags on first use.
+func (m *packetFields) ReadFlags(pkt Packet) {
 	if !m.tcp {
-		m.flags, m.hasFlags = pkt.TCPFlags()
+		m.Flags, m.HasFlags = pkt.TCPFlags()
 		m.tcp = true
 	}
 }
 
-// readICMP takes the ICMP and ICMPv6 types on first use.
-func (m *packetFields) readICMP(pkt Packet) {
+// ReadICMP takes the ICMP and ICMPv6 types on first use.
+func (m *packetFields) ReadICMP(pkt Packet) {
 	if !m.icmp {
-		m.icmpType, m.hasICMPType = pkt.ICMPType()
-		m.icmp6Type, m.hasICMP6Type = pkt.ICMP6Type()
+		m.ICMPType, m.HasICMPType = pkt.ICMPType()
+		m.ICMP6Type, m.HasICMP6Type = pkt.ICMP6Type()
 		m.icmp = true
 	}
 }
 
-// readFragment takes whether the packet is a fragment on first use.
-func (m *packetFields) readFragment(pkt Packet) {
+// ReadFragment takes whether the packet is a fragment on first use.
+func (m *packetFields) ReadFragment(pkt Packet) {
 	if !m.fragmentation {
-		m.fragment = pkt.IsFragment()
+		m.Fragment = pkt.IsFragment()
 		m.fragmentation = true
 	}
 }
@@ -688,33 +703,33 @@ func (m *VM[V4, V6]) matches(
 	fields *packetFields,
 ) (bool, int) {
 	program := &m.program
-	if !rule.IPProtos.empty() && !matchIPProtos(program.IPProtos(rule.IPProtos), fields.version) {
+	if !rule.IPProtos.Empty() && !matchIPProtos(program.IPProtos(rule.IPProtos), fields.Version) {
 		return false, noTarget
 	}
-	if !rule.Protos.empty() && !matchProtos(program.Protos(rule.Protos), fields.protocol) {
+	if !rule.Protos.Empty() && !matchProtos(program.Protos(rule.Protos), fields.Protocol) {
 		return false, noTarget
 	}
-	if !m.matchTargets(program.Sources(rule.Sources), ctx, fields.source) {
+	if !m.matchTargets(program.Sources(rule.Sources), ctx, fields.Source) {
 		return false, noTarget
 	}
-	if !m.matchTargets(program.Destinations(rule.Destinations), ctx, fields.destination) {
+	if !m.matchTargets(program.Destinations(rule.Destinations), ctx, fields.Destination) {
 		return false, noTarget
 	}
-	if !rule.SourcePorts.empty() {
-		fields.readPorts(pkt)
+	if !rule.SourcePorts.Empty() {
+		fields.ReadPorts(pkt)
 		ports := program.SourcePorts(rule.SourcePorts)
-		if !fields.hasSourcePort || !matchPorts(ports, fields.sourcePort) {
+		if !fields.HasSourcePort || !matchPorts(ports, fields.SourcePort) {
 			return false, noTarget
 		}
 	}
-	if !rule.DestinationPorts.empty() {
-		fields.readPorts(pkt)
+	if !rule.DestinationPorts.Empty() {
+		fields.ReadPorts(pkt)
 		ports := program.DestinationPorts(rule.DestinationPorts)
-		if !fields.hasDestinationPort || !matchPorts(ports, fields.destinationPort) {
+		if !fields.HasDestinationPort || !matchPorts(ports, fields.DestinationPort) {
 			return false, noTarget
 		}
 	}
-	if rule.Options.empty() {
+	if rule.Options.Empty() {
 		return true, noTarget
 	}
 	return m.matchOptions(program.Options(rule.Options), ctx, pkt, fields)
@@ -789,19 +804,19 @@ func (m *VM[V4, V6]) matchOption(
 	case ipfw.OptCustom:
 		return m.matcher(*opt, ctx, pkt), noTarget
 	case ipfw.OptEstablished:
-		fields.readFlags(pkt)
-		return fields.hasFlags && fields.flags&(ipfw.TCPAck|ipfw.TCPRst) != 0, noTarget
+		fields.ReadFlags(pkt)
+		return fields.HasFlags && fields.Flags&(ipfw.TCPAck|ipfw.TCPRst) != 0, noTarget
 	case ipfw.OptTCPFlags:
-		fields.readFlags(pkt)
-		return fields.hasFlags && fields.flags&opt.TCPFlags.Mask == opt.TCPFlags.Set, noTarget
+		fields.ReadFlags(pkt)
+		return fields.HasFlags && fields.Flags&opt.TCPFlags.Mask == opt.TCPFlags.Set, noTarget
 	case ipfw.OptSourcePort:
-		fields.readPorts(pkt)
-		return fields.hasSourcePort && inRange(fields.sourcePort, opt.Ports), noTarget
+		fields.ReadPorts(pkt)
+		return fields.HasSourcePort && inRange(fields.SourcePort, opt.Ports), noTarget
 	case ipfw.OptDestinationPort:
-		fields.readPorts(pkt)
-		return fields.hasDestinationPort && inRange(fields.destinationPort, opt.Ports), noTarget
+		fields.ReadPorts(pkt)
+		return fields.HasDestinationPort && inRange(fields.DestinationPort, opt.Ports), noTarget
 	case ipfw.OptProto:
-		return fields.protocol == opt.Proto.Number, noTarget
+		return fields.Protocol == opt.Proto.Number, noTarget
 	case ipfw.OptIn:
 		return ctx.Direction == In, noTarget
 	case ipfw.OptOut:
@@ -809,14 +824,14 @@ func (m *VM[V4, V6]) matchOption(
 	case ipfw.OptVia:
 		return m.matchVia(&opt.Via, ctx)
 	case ipfw.OptFrag:
-		fields.readFragment(pkt)
-		return fields.fragment, noTarget
+		fields.ReadFragment(pkt)
+		return fields.Fragment, noTarget
 	case ipfw.OptICMPTypes:
-		fields.readICMP(pkt)
-		return fields.hasICMPType && opt.Types.Has(fields.icmpType), noTarget
+		fields.ReadICMP(pkt)
+		return fields.HasICMPType && opt.Types.Has(fields.ICMPType), noTarget
 	case ipfw.OptICMP6Types:
-		fields.readICMP(pkt)
-		return fields.hasICMP6Type && opt.Types.Has(fields.icmp6Type), noTarget
+		fields.ReadICMP(pkt)
+		return fields.HasICMP6Type && opt.Types.Has(fields.ICMP6Type), noTarget
 	}
 	return false, noTarget
 }

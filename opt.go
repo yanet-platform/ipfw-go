@@ -112,7 +112,7 @@ const (
 func parseOptionGroup(s string, state State, hook OptionHook) (string, fail) {
 	g, rest := openGroup(s)
 	place := topLevel
-	if g.braced {
+	if g.Braced {
 		place = groupFirst
 	}
 	for {
@@ -121,7 +121,7 @@ func parseOptionGroup(s string, state State, hook OptionHook) (string, fail) {
 			return s, err
 		}
 		var more bool
-		if rest, more, err = g.next(buf); err.Failed() {
+		if rest, more, err = g.Next(buf); err.Failed() {
 			return s, err
 		}
 		if !more {

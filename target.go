@@ -58,7 +58,7 @@ func parseTargets(s string, state State, side bodySide) (string, fail) {
 			return s, err
 		}
 		var more bool
-		rest, more, err = g.next(afterElement)
+		rest, more, err = g.Next(afterElement)
 		if err.Failed() {
 			return s, err
 		}
