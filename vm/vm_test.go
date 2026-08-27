@@ -260,6 +260,50 @@ func Test_VM_Check_CheckState(t *testing.T) {
 	}, tracer.seen)
 }
 
+// verifies that a matching skipto continues at the rule with that number
+// and a mismatching one falls through.
+func Test_VM_Check_SkipToNumber(t *testing.T) {
+	machine := build(t, "add skipto 1500 ip from any to 192.0.2.4\nadd deny ip from any to any\nadd 1500 allow tcp from any to any\n", none)
+	require.Equal(t, pass, machine.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.4")))
+	require.Equal(t, deny, machine.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.5")))
+
+	icmp := vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.4")).WithICMP(8, 0)
+	tracer := &recordingTracer{}
+	_, matched := machine.CheckTrace(&vm.Context{}, icmp, tracer)
+	require.False(t, matched)
+	require.Equal(t, []traced{
+		{line: 1, action: ipfw.ActionSkipTo, matched: true},
+		{line: 3, action: ipfw.ActionPass, matched: false},
+	}, tracer.seen)
+}
+
+// verifies that explicit rule numbers place the jump targets: a skipto
+// lands on the rule numbered exactly so, the rules between are skipped.
+func Test_VM_Check_RuleNumbers(t *testing.T) {
+	machine := build(t, "add skipto 50 ip from any to 192.0.2.0/24\nadd deny ip from any to any\nadd 50 count ip from any to any\nadd 1500 count ip from any to any\nadd pass ip from any to any\n", none)
+	require.Equal(t, 5, machine.Len())
+
+	tracer := &recordingTracer{}
+	action, matched := machine.CheckTrace(&vm.Context{}, tcp4("198.51.100.1", "192.0.2.9"), tracer)
+	require.True(t, matched)
+	require.Equal(t, pass, action)
+	require.Equal(t, []traced{
+		{line: 1, action: ipfw.ActionSkipTo, matched: true},
+		{line: 3, action: ipfw.ActionCount, matched: true},
+		{line: 4, action: ipfw.ActionCount, matched: true},
+		{line: 5, action: ipfw.ActionPass, matched: true},
+	}, tracer.seen)
+
+	tracer = &recordingTracer{}
+	action, matched = machine.CheckTrace(&vm.Context{}, tcp4("198.51.100.1", "203.0.113.9"), tracer)
+	require.True(t, matched)
+	require.Equal(t, deny, action)
+	require.Equal(t, []traced{
+		{line: 1, action: ipfw.ActionSkipTo, matched: false},
+		{line: 2, action: ipfw.ActionDeny, matched: true},
+	}, tracer.seen)
+}
+
 // verifies that every build error is located at its line and wraps its
 // cause.
 //
@@ -284,11 +328,51 @@ func Test_VM_Build_Errors(t *testing.T) {
 		},
 		{
 			name:      "unsupported action",
-			rules:     "add skipto 100 ip from any to any\n",
+			rules:     "add skipto :LABEL ip from any to any\n",
 			resolvers: resolving,
 			line:      1,
-			text:      "add skipto 100 ip from any to any",
+			text:      "add skipto :LABEL ip from any to any",
 			cause:     vm.ErrUnsupportedAction,
+		},
+		{
+			name:      "rule number going backwards",
+			rules:     "add 100 pass ip from any to any\nadd 50 deny ip from any to any\n",
+			resolvers: resolving,
+			line:      2,
+			text:      "add 50 deny ip from any to any",
+			cause:     vm.ErrRuleNumberOrder,
+		},
+		{
+			name:      "rule number repeated",
+			rules:     "add 100 pass ip from any to any\nadd 100 deny ip from any to any\n",
+			resolvers: resolving,
+			line:      2,
+			text:      "add 100 deny ip from any to any",
+			cause:     vm.ErrRuleNumberOrder,
+		},
+		{
+			name:      "skipto to a number that never appears",
+			rules:     "add deny udp from any to any\nadd skipto 7 ip from any to any\nadd pass ip from any to any\n",
+			resolvers: resolving,
+			line:      2,
+			text:      "add skipto 7 ip from any to any",
+			cause:     vm.ErrUnresolvedJump,
+		},
+		{
+			name:      "skipto to its own number",
+			rules:     "add 50 skipto 50 ip from any to any\nadd pass ip from any to any\n",
+			resolvers: resolving,
+			line:      1,
+			text:      "add 50 skipto 50 ip from any to any",
+			cause:     vm.ErrUnresolvedJump,
+		},
+		{
+			name:      "skipto backwards",
+			rules:     "add 50 pass udp from any to any\nadd 100 skipto 50 ip from any to any\n",
+			resolvers: resolving,
+			line:      2,
+			text:      "add 100 skipto 50 ip from any to any",
+			cause:     vm.ErrUnresolvedJump,
 		},
 		{
 			name:      "unsupported target",

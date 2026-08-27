@@ -66,7 +66,7 @@ type Config[V4, V6 any] struct {
 // The errors a build reports, wrapped in a BuildError.
 var (
 	ErrRuleNumberOrder   = errors.New("rule number goes backwards")
-	ErrUnresolvedJump    = errors.New("skipto to a label that never appears")
+	ErrUnresolvedJump    = errors.New("skipto to a rule that never appears")
 	ErrUnsupportedOption = errors.New("unsupported option")
 	ErrUnsupportedAction = errors.New("unsupported action")
 	ErrUnsupportedTarget = errors.New("unsupported target")
@@ -121,6 +121,9 @@ type op[V4, V6 Network] struct {
 	Sources []ipfw.TargetMatch[V4, V6]
 	// Destinations are the destinations, none matching nothing.
 	Destinations []ipfw.TargetMatch[V4, V6]
+	// Jump is the index of the rule a matching skipto continues at, always
+	// past this one.
+	Jump int
 }
 
 // Build reads the whole ruleset from p into a VM, every name resolved
@@ -134,42 +137,112 @@ func Build[V4, V6 Network](
 	if machine.verdict.Kind == 0 {
 		machine.verdict = ipfw.Action{Kind: ipfw.ActionDeny}
 	}
-	var sink builder[V4, V6]
-	state := ipfw.NewResolver(&sink, resolvers)
+	sink := newBuilder[V4, V6]()
+	state := ipfw.NewResolver(sink, resolvers)
 	for {
-		sink.Rule = op[V4, V6]{}
 		rec, parseErr := p.Next(state)
 		if parseErr != nil {
 			return nil, &BuildError{Line: parseErr.Line, Text: parseErr.Text, Err: parseErr}
 		}
 		switch rec.Kind {
 		case ipfw.RecordEOF:
+			if unresolved, ok := sink.Unresolved(); ok {
+				return nil, &BuildError{Line: unresolved.Line, Text: unresolved.Text, Err: ErrUnresolvedJump}
+			}
+			machine.ops = sink.Ops()
 			return machine, nil
 		case ipfw.RecordEmpty, ipfw.RecordComment:
 			continue
 		case ipfw.RecordInstruction:
-			rule := sink.Rule
-			rule.Record, rule.Action = *rec, rec.Instruction.Action
-			switch rule.Action.Kind {
-			case ipfw.ActionPass, ipfw.ActionDeny, ipfw.ActionCount, ipfw.ActionCheckState:
-			default:
-				return nil, &BuildError{Line: rec.Line, Text: rec.Text, Err: ErrUnsupportedAction}
+			if err := sink.Add(rec); err != nil {
+				return nil, &BuildError{Line: rec.Line, Text: rec.Text, Err: err}
 			}
-			machine.ops = append(machine.ops, rule)
 		default:
 			return nil, &BuildError{Line: rec.Line, Text: rec.Text, Err: ErrUnsupportedRecord}
 		}
 	}
 }
 
-// builder is the VMState a build reads a line into.
+// builder is the VMState a build reads a line into and the assembler of
+// the rule list.
 //
 // It collects the tokens of the rule under construction and rejects the
 // ones the VM does not take yet, which the parser then positions at the
-// token.
+// token. Add turns the collected tokens into a rule, numbering it and
+// linking the jumps.
 type builder[V4, V6 Network] struct {
 	// Rule is the rule under construction.
 	Rule op[V4, V6]
+	ops  []op[V4, V6]
+	// number is the rule number the next instruction gets, an explicit one
+	// moving it forward.
+	number uint32
+	// pending holds, by rule number, the indexes of the skipto rules waiting
+	// for the rule with that number.
+	pending map[uint32][]int
+}
+
+func newBuilder[V4, V6 Network]() *builder[V4, V6] {
+	return &builder[V4, V6]{number: 1, pending: map[uint32][]int{}}
+}
+
+// Add appends the instruction just read with the tokens collected for it
+// and starts the next rule.
+//
+// An explicit rule number below the running one is ErrRuleNumberOrder, an
+// action the VM cannot run ErrUnsupportedAction. A skipto to a number is
+// linked when the rule with that number is added, so a jump to the rule's
+// own or an earlier number stays unresolved.
+func (m *builder[V4, V6]) Add(rec *ipfw.Record) error {
+	if num := rec.Instruction.Num; num != 0 {
+		if num < m.number {
+			return ErrRuleNumberOrder
+		}
+		m.number = num
+	}
+	for _, idx := range m.pending[m.number] {
+		m.ops[idx].Jump = len(m.ops)
+	}
+	delete(m.pending, m.number)
+	rule := m.Rule
+	rule.Record, rule.Action = *rec, rec.Instruction.Action
+	switch rule.Action.Kind {
+	case ipfw.ActionPass, ipfw.ActionDeny, ipfw.ActionCount, ipfw.ActionCheckState:
+	case ipfw.ActionSkipTo:
+		if rule.Action.SkipTo.Kind != ipfw.SkipToNumber {
+			return ErrUnsupportedAction
+		}
+		target := rule.Action.SkipTo.Number
+		m.pending[target] = append(m.pending[target], len(m.ops))
+	default:
+		return ErrUnsupportedAction
+	}
+	m.ops = append(m.ops, rule)
+	m.number++
+	m.Rule = op[V4, V6]{}
+	return nil
+}
+
+// Unresolved returns the record of the first skipto whose rule never
+// appeared.
+func (m *builder[V4, V6]) Unresolved() (ipfw.Record, bool) {
+	first := -1
+	for _, idxs := range m.pending {
+		for _, idx := range idxs {
+			if first < 0 || idx < first {
+				first = idx
+			}
+		}
+	}
+	if first < 0 {
+		return ipfw.Record{}, false
+	}
+	return m.ops[first].Record, true
+}
+
+// Ops returns the rules assembled so far.
+func (m *builder[V4, V6]) Ops() []op[V4, V6] {
+	return m.ops
 }
 
 // OnIPProto implements ipfw.VMState.
@@ -242,17 +315,25 @@ func (m *VM[V4, V6]) Check(ctx *Context, pkt Packet) ipfw.Action {
 
 // CheckTrace is Check reporting every rule evaluated to tracer, and
 // whether a rule terminated the search.
+//
+// A matching skipto continues at its linked rule, every jump going forward.
 func (m *VM[V4, V6]) CheckTrace(ctx *Context, pkt Packet, tracer Tracer) (ipfw.Action, bool) {
-	for pc := 0; pc < len(m.ops); pc++ {
+	pc := 0
+	for pc < len(m.ops) {
 		rule := &m.ops[pc]
 		matched := rule.matches(pkt)
 		tracer.Trace(&rule.Record, rule.Action, matched)
 		if !matched {
+			pc++
 			continue
 		}
 		switch rule.Action.Kind {
 		case ipfw.ActionPass, ipfw.ActionDeny:
 			return rule.Action, true
+		case ipfw.ActionSkipTo:
+			pc = rule.Jump
+		default:
+			pc++
 		}
 	}
 	return ipfw.Action{}, false

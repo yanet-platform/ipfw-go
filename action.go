@@ -68,7 +68,8 @@ type SkipTo struct {
 	Kind SkipToKind
 	// Label is the target label without the colon.
 	Label string
-	// Number is the target rule number.
+	// Number is the target rule number, a jump landing on the rule numbered
+	// exactly so.
 	Number uint32
 }
 
