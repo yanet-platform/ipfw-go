@@ -16,7 +16,7 @@ var state ipfw.ReduceState
 for {
 	rec, err := parser.Next(&state) // err is a *ipfw.ParseError with line, column and text
 	if err != nil {
-		fmt.Println(ipfw.NewDiagnostic(err)) // rustc-style rendering
+		fmt.Println(ipfw.NewDiagnostic(err)) // rustc-style rendering, ipfw.WithStyle(ipfw.ColorStyle()) to colour it
 		return
 	}
 	if rec.Kind == ipfw.RecordEOF {

@@ -12,6 +12,8 @@ type diagnosticOptions struct {
 	Path string
 	// Width is the room the rendering may take, unlimited when zero.
 	Width int
+	// Style wraps the parts of the rendering, the zero value none.
+	Style Style
 }
 
 func newDiagnosticOptions() diagnosticOptions {
@@ -39,6 +41,52 @@ func WithWidth(width int) DiagnosticOption {
 	}
 }
 
+// Style is what each part of a rendering is wrapped in, the zero value
+// adding nothing.
+//
+// A role holds what opens its part and Reset what ends every one. The
+// roles are meant for ANSI escapes, see ColorStyle, but anything a
+// consumer's terminal or markup takes will do, and whatever they hold
+// does not count against the width.
+type Style struct {
+	// Error opens the word `error`.
+	Error string
+	// Message opens the text of the error.
+	Message string
+	// Info opens the position line and the gutter.
+	Info string
+	// Span opens the carets.
+	Span string
+	// Dimmed opens the markers of a cut line.
+	Dimmed string
+	// Reset ends every role.
+	Reset string
+}
+
+// ColorStyle is the palette of a terminal that takes ANSI escapes.
+//
+// The colours are those of rustc: the error bold red, its message bold,
+// the position and the gutter bold blue, the carets bold yellow, the
+// markers of a cut line faint.
+func ColorStyle() Style {
+	return Style{
+		Error:   "\x1b[1;91m",
+		Message: "\x1b[1m",
+		Info:    "\x1b[1;94m",
+		Span:    "\x1b[1;93m",
+		Dimmed:  "\x1b[2m",
+		Reset:   "\x1b[0m",
+	}
+}
+
+// WithStyle wraps the parts of the rendering in the style, the zero value
+// leaving it plain.
+func WithStyle(style Style) DiagnosticOption {
+	return func(opts *diagnosticOptions) {
+		opts.Style = style
+	}
+}
+
 // Diagnostic renders a ParseError the way rustc reports errors.
 //
 // The rendering is the message, the position, and the source line with
@@ -61,17 +109,27 @@ func NewDiagnostic(err *ParseError, options ...DiagnosticOption) Diagnostic {
 // String renders the diagnostic, a trailing newline included.
 func (m Diagnostic) String() string {
 	var b strings.Builder
+	style := m.opts.Style
 	number := strconv.Itoa(m.err.Line)
 	gutter := strings.Repeat(" ", len(number))
-	line, caret := m.sourceLine(len(number))
+	line, caret, left, right := m.sourceLine(len(number))
+	carets := strings.Repeat("^", caretLen(line, caret))
 
-	b.WriteString("error: ")
+	b.WriteString(style.Error)
+	b.WriteString("error")
+	style.reset(&b, style.Error)
+	b.WriteString(style.Message)
+	b.WriteString(": ")
 	b.WriteString(m.err.Kind.Error())
 	if m.err.Err != nil {
 		b.WriteString(": ")
 		b.WriteString(m.err.Err.Error())
 	}
-	b.WriteString("\n ")
+	style.reset(&b, style.Message)
+
+	b.WriteByte('\n')
+	b.WriteString(style.Info)
+	b.WriteByte(' ')
 	b.WriteString(gutter)
 	b.WriteString("--> ")
 	if m.opts.Path != "" {
@@ -81,19 +139,63 @@ func (m Diagnostic) String() string {
 	b.WriteString(number)
 	b.WriteByte(':')
 	b.WriteString(strconv.Itoa(m.err.Column + 1))
-	b.WriteString("\n ")
+	style.reset(&b, style.Info)
+
+	b.WriteByte('\n')
+	b.WriteString(style.Info)
+	b.WriteByte(' ')
 	b.WriteString(gutter)
-	b.WriteString(" |\n ")
+	b.WriteString(" |")
+	style.reset(&b, style.Info)
+
+	b.WriteByte('\n')
+	b.WriteString(style.Info)
+	b.WriteByte(' ')
 	b.WriteString(number)
 	b.WriteString(" | ")
-	b.WriteString(line)
-	b.WriteString("\n ")
+	style.reset(&b, style.Info)
+	style.writeLine(&b, line, left, right)
+
+	b.WriteByte('\n')
+	b.WriteString(style.Info)
+	b.WriteByte(' ')
 	b.WriteString(gutter)
 	b.WriteString(" | ")
+	style.reset(&b, style.Info)
 	b.WriteString(strings.Repeat(" ", caret))
-	b.WriteString(strings.Repeat("^", caretLen(line, caret)))
+	b.WriteString(style.Span)
+	b.WriteString(carets)
+	style.reset(&b, style.Span)
 	b.WriteByte('\n')
 	return b.String()
+}
+
+// reset ends a role, nothing having opened it when the role is empty.
+func (m Style) reset(b *strings.Builder, role string) {
+	if role != "" {
+		b.WriteString(m.Reset)
+	}
+}
+
+// writeLine writes the source line with the markers of its cut sides
+// dimmed.
+func (m Style) writeLine(b *strings.Builder, line string, left, right bool) {
+	if left {
+		b.WriteString(m.Dimmed)
+		b.WriteString(line[:markerLen])
+		m.reset(b, m.Dimmed)
+		line = line[markerLen:]
+	}
+	var marker string
+	if right {
+		marker, line = line[len(line)-markerLen:], line[:len(line)-markerLen]
+	}
+	b.WriteString(line)
+	if right {
+		b.WriteString(m.Dimmed)
+		b.WriteString(marker)
+		m.reset(b, m.Dimmed)
+	}
 }
 
 // WriteTo writes the rendering to w.
@@ -102,20 +204,23 @@ func (m Diagnostic) WriteTo(w io.Writer) (int64, error) {
 	return int64(n), err
 }
 
-// sourceLine returns the source line as displayed and the caret column in
-// it, the caret clamped to the last byte.
+// markerLen is the length of the marker of a cut side, `... `.
+const markerLen = 4
+
+// sourceLine returns the source line as displayed, the caret column in it,
+// the caret clamped to the last byte, and which sides were cut.
 //
 // When the line does not fit the room left by the gutter, the four cases
 // of the reference apply: cut on the right when the caret is in the first
 // half of the room, on the left when the room reaches the end of the line
 // from the caret, on both sides otherwise. Each cut side loses four bytes
 // to its marker, so the caret column is the same before and after.
-func (m Diagnostic) sourceLine(gutter int) (string, int) {
+func (m Diagnostic) sourceLine(gutter int) (string, int, bool, bool) {
 	text := m.err.Text
 	caret := min(max(m.err.Column, 0), max(len(text)-1, 0))
-	room := max(m.opts.Width-gutter-4, 8)
+	room := max(m.opts.Width-gutter-markerLen, 8)
 	if m.opts.Width <= 0 || len(text) <= room {
-		return text, caret
+		return text, caret, false, false
 	}
 	var start, end int
 	switch {
@@ -127,13 +232,14 @@ func (m Diagnostic) sourceLine(gutter int) (string, int) {
 		start, end = caret-room/2, caret-room/2+room
 	}
 	line := text[start:end]
-	if start > 0 {
-		line = "... " + line[4:]
+	left, right := start > 0, end < len(text)
+	if left {
+		line = "... " + line[markerLen:]
 	}
-	if end < len(text) {
-		line = line[:len(line)-4] + " ..."
+	if right {
+		line = line[:len(line)-markerLen] + " ..."
 	}
-	return line, caret - start
+	return line, caret - start, left, right
 }
 
 // caretLen is the length of the token under the caret, up to the next

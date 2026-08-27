@@ -36,6 +36,73 @@ func Test_Diagnostic_WithPath(t *testing.T) {
 	), ipfw.NewDiagnostic(unknownAction, ipfw.WithPath("fw.conf")).String())
 }
 
+// verifies that a style wraps each role of the rendering and nothing
+// else, the layout staying what it is without one.
+func Test_Diagnostic_WithStyle(t *testing.T) {
+	style := ipfw.Style{
+		Error:   "<e>",
+		Message: "<m>",
+		Info:    "<i>",
+		Span:    "<s>",
+		Dimmed:  "<d>",
+		Reset:   "<r>",
+	}
+	require.Equal(t, lines(
+		"<e>error<r><m>: expected action<r>",
+		"<i>  --> fw.conf:3:5<r>",
+		"<i>   |<r>",
+		"<i> 3 | <r>add foobar :any # WOW",
+		"<i>   | <r>    <s>^^^^^^<r>",
+	), ipfw.NewDiagnostic(
+		unknownAction,
+		ipfw.WithPath("fw.conf"),
+		ipfw.WithStyle(style),
+	).String())
+}
+
+// verifies that a style dims the markers of a cut line on either side and
+// that its escapes leave the layout, the width included, as it was.
+func Test_Diagnostic_WithStyle_Cut(t *testing.T) {
+	err := &ipfw.ParseError{
+		Kind:   ipfw.ErrExpectedAction,
+		Line:   3,
+		Column: 41,
+		Text:   "add pass ip from 192.0.2.0/24 to any not frobnicate 1024-65535 established",
+	}
+	styled := ipfw.NewDiagnostic(err, ipfw.WithWidth(48), ipfw.WithStyle(ipfw.ColorStyle())).String()
+	require.Contains(t, styled, "\x1b[2m... \x1b[0m")
+	require.Contains(t, styled, "\x1b[2m ...\x1b[0m")
+	require.Equal(t, ipfw.NewDiagnostic(err, ipfw.WithWidth(48)).String(), plain(styled))
+}
+
+// verifies that the palette of ColorStyle wraps every role in ANSI
+// escapes and that an empty style leaves the rendering untouched.
+func Test_Diagnostic_ColorStyle(t *testing.T) {
+	colored := ipfw.NewDiagnostic(unknownAction, ipfw.WithStyle(ipfw.ColorStyle())).String()
+	require.Contains(t, colored, "\x1b[1;91merror\x1b[0m")
+	require.Contains(t, colored, "\x1b[1;94m  --> 3:5\x1b[0m")
+	require.Contains(t, colored, "\x1b[1;93m^^^^^^\x1b[0m")
+	require.Equal(t, plain(ipfw.NewDiagnostic(unknownAction).String()), plain(colored))
+
+	require.Equal(
+		t,
+		ipfw.NewDiagnostic(unknownAction).String(),
+		ipfw.NewDiagnostic(unknownAction, ipfw.WithStyle(ipfw.Style{})).String(),
+	)
+}
+
+// plain strips the ANSI escapes from a rendering.
+func plain(s string) string {
+	for {
+		start := strings.Index(s, "\x1b[")
+		if start < 0 {
+			return s
+		}
+		end := strings.IndexByte(s[start:], 'm')
+		s = s[:start] + s[start+end+1:]
+	}
+}
+
 // verifies that without a path the position line holds line and column
 // only.
 func Test_Diagnostic_WithoutPath(t *testing.T) {
