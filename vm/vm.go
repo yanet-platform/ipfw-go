@@ -37,7 +37,7 @@ type Tracer interface {
 	Trace(rec *ipfw.Record, action ipfw.Action, matched bool)
 }
 
-// UnresolvedJumps is what a `skipto` to a label that never appears does.
+// UnresolvedJumps is what a skipto no later rule or label satisfies does.
 type UnresolvedJumps uint8
 
 // The policies: an error when building, or falling through at check time.
@@ -57,7 +57,8 @@ type Config[V4, V6 any] struct {
 	// DefaultVerdict is the action when no rule matches, the zero value
 	// meaning deny.
 	DefaultVerdict ipfw.Action
-	// UnresolvedJumps is the policy for jumps to a label that never appears.
+	// UnresolvedJumps is the policy for a skipto no later rule or label
+	// satisfies.
 	UnresolvedJumps UnresolvedJumps
 	// OptionMatcher matches custom options, nil making them a build error.
 	OptionMatcher OptionMatcher
@@ -122,7 +123,7 @@ type op[V4, V6 Network] struct {
 	// Destinations are the destinations, none matching nothing.
 	Destinations []ipfw.TargetMatch[V4, V6]
 	// Jump is the index of the rule a matching skipto continues at, always
-	// past this one.
+	// past this one: the next rule until the jump is linked.
 	Jump int
 }
 
@@ -146,7 +147,7 @@ func Build[V4, V6 Network](
 		}
 		switch rec.Kind {
 		case ipfw.RecordEOF:
-			if unresolved, ok := sink.Unresolved(); ok {
+			if unresolved, ok := sink.Unresolved(); ok && cfg.UnresolvedJumps == UnresolvedJumpsError {
 				return nil, &BuildError{Line: unresolved.Line, Text: unresolved.Text, Err: ErrUnresolvedJump}
 			}
 			machine.ops = sink.Ops()
@@ -157,6 +158,8 @@ func Build[V4, V6 Network](
 			if err := sink.Add(rec); err != nil {
 				return nil, &BuildError{Line: rec.Line, Text: rec.Text, Err: err}
 			}
+		case ipfw.RecordLabel:
+			sink.Label(rec.Label)
 		default:
 			return nil, &BuildError{Line: rec.Line, Text: rec.Text, Err: ErrUnsupportedRecord}
 		}
@@ -169,7 +172,7 @@ func Build[V4, V6 Network](
 // It collects the tokens of the rule under construction and rejects the
 // ones the VM does not take yet, which the parser then positions at the
 // token. Add turns the collected tokens into a rule, numbering it and
-// linking the jumps.
+// linking the jumps, Label links the jumps to a label.
 type builder[V4, V6 Network] struct {
 	// Rule is the rule under construction.
 	Rule op[V4, V6]
@@ -177,22 +180,31 @@ type builder[V4, V6 Network] struct {
 	// number is the rule number the next instruction gets, an explicit one
 	// moving it forward.
 	number uint32
-	// pending holds, by rule number, the indexes of the skipto rules waiting
-	// for the rule with that number.
-	pending map[uint32][]int
+	// labels is the index of the rule after each label, the last
+	// occurrence winning.
+	labels map[string]int
+	// pendingNumbers and pendingLabels hold, by rule number and by label,
+	// the indexes of the skipto rules waiting for them.
+	pendingNumbers map[uint32][]int
+	pendingLabels  map[string][]int
 }
 
 func newBuilder[V4, V6 Network]() *builder[V4, V6] {
-	return &builder[V4, V6]{number: 1, pending: map[uint32][]int{}}
+	return &builder[V4, V6]{
+		number:         1,
+		labels:         map[string]int{},
+		pendingNumbers: map[uint32][]int{},
+		pendingLabels:  map[string][]int{},
+	}
 }
 
 // Add appends the instruction just read with the tokens collected for it
 // and starts the next rule.
 //
 // An explicit rule number below the running one is ErrRuleNumberOrder, an
-// action the VM cannot run ErrUnsupportedAction. A skipto to a number is
-// linked when the rule with that number is added, so a jump to the rule's
-// own or an earlier number stays unresolved.
+// action the VM cannot run ErrUnsupportedAction. A skipto falls through to
+// the next rule until the rule numbered so, or the label, comes after it
+// and links the jump, so every jump goes forward.
 func (m *builder[V4, V6]) Add(rec *ipfw.Record) error {
 	if num := rec.Instruction.Num; num != 0 {
 		if num < m.number {
@@ -200,20 +212,22 @@ func (m *builder[V4, V6]) Add(rec *ipfw.Record) error {
 		}
 		m.number = num
 	}
-	for _, idx := range m.pending[m.number] {
-		m.ops[idx].Jump = len(m.ops)
-	}
-	delete(m.pending, m.number)
+	m.link(m.pendingNumbers[m.number])
+	delete(m.pendingNumbers, m.number)
 	rule := m.Rule
 	rule.Record, rule.Action = *rec, rec.Instruction.Action
 	switch rule.Action.Kind {
 	case ipfw.ActionPass, ipfw.ActionDeny, ipfw.ActionCount, ipfw.ActionCheckState:
 	case ipfw.ActionSkipTo:
-		if rule.Action.SkipTo.Kind != ipfw.SkipToNumber {
+		rule.Jump = len(m.ops) + 1
+		switch target := rule.Action.SkipTo; target.Kind {
+		case ipfw.SkipToNumber:
+			m.pendingNumbers[target.Number] = append(m.pendingNumbers[target.Number], len(m.ops))
+		case ipfw.SkipToLabel:
+			m.pendingLabels[target.Label] = append(m.pendingLabels[target.Label], len(m.ops))
+		default:
 			return ErrUnsupportedAction
 		}
-		target := rule.Action.SkipTo.Number
-		m.pending[target] = append(m.pending[target], len(m.ops))
 	default:
 		return ErrUnsupportedAction
 	}
@@ -223,21 +237,46 @@ func (m *builder[V4, V6]) Add(rec *ipfw.Record) error {
 	return nil
 }
 
-// Unresolved returns the record of the first skipto whose rule never
-// appeared.
+// Label records the label as standing for the next rule and links the
+// jumps waiting for it.
+func (m *builder[V4, V6]) Label(name string) {
+	m.labels[name] = len(m.ops)
+	m.link(m.pendingLabels[name])
+	delete(m.pendingLabels, name)
+}
+
+// link points the jumps at the indexes to the next rule.
+func (m *builder[V4, V6]) link(idxs []int) {
+	for _, idx := range idxs {
+		m.ops[idx].Jump = len(m.ops)
+	}
+}
+
+// Unresolved returns the record of the first skipto still waiting for its
+// rule number or label.
 func (m *builder[V4, V6]) Unresolved() (ipfw.Record, bool) {
 	first := -1
-	for _, idxs := range m.pending {
-		for _, idx := range idxs {
-			if first < 0 || idx < first {
-				first = idx
-			}
-		}
+	for _, idxs := range m.pendingNumbers {
+		first = lowest(first, idxs)
+	}
+	for _, idxs := range m.pendingLabels {
+		first = lowest(first, idxs)
 	}
 	if first < 0 {
 		return ipfw.Record{}, false
 	}
 	return m.ops[first].Record, true
+}
+
+// lowest returns the smallest of first and the indexes, first when it is
+// not negative and smaller than all of them.
+func lowest(first int, idxs []int) int {
+	for _, idx := range idxs {
+		if first < 0 || idx < first {
+			first = idx
+		}
+	}
+	return first
 }
 
 // Ops returns the rules assembled so far.

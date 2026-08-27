@@ -304,6 +304,63 @@ func Test_VM_Check_RuleNumbers(t *testing.T) {
 	}, tracer.seen)
 }
 
+// verifies that a matching skipto to a label continues at the rule after
+// the label, a mismatching one at the next rule.
+func Test_VM_Check_SkipToLabel(t *testing.T) {
+	machine := build(t, "add skipto :SECTION tcp from 192.0.2.4 to any\nadd deny ip from any to any\n:SECTION\nadd pass tcp from any to 203.0.113.1\nadd deny ip from any to any\n", none)
+	require.Equal(t, 4, machine.Len())
+	require.Equal(t, pass, machine.Check(&vm.Context{}, tcp4("192.0.2.4", "203.0.113.1")))
+	require.Equal(t, deny, machine.Check(&vm.Context{}, tcp4("192.0.2.1", "203.0.113.1")))
+	require.Equal(t, deny, machine.Check(&vm.Context{}, tcp4("192.0.2.4", "203.0.113.2")))
+
+	tracer := &recordingTracer{}
+	_, matched := machine.CheckTrace(&vm.Context{}, tcp4("192.0.2.4", "203.0.113.2"), tracer)
+	require.True(t, matched)
+	require.Equal(t, []traced{
+		{line: 1, action: ipfw.ActionSkipTo, matched: true},
+		{line: 4, action: ipfw.ActionPass, matched: false},
+		{line: 5, action: ipfw.ActionDeny, matched: true},
+	}, tracer.seen)
+}
+
+// verifies that a label with no rule after it ends the search, and that
+// a jump lands on the first occurrence of a repeated label after it.
+func Test_VM_Check_Labels(t *testing.T) {
+	ending := build(t, "add skipto :END ip from any to any\nadd deny ip from any to any\n:END\n", vm.Config[net4, net6]{DefaultVerdict: pass})
+	tracer := &recordingTracer{}
+	_, matched := ending.CheckTrace(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.2"), tracer)
+	require.False(t, matched)
+	require.Equal(t, []traced{{line: 1, action: ipfw.ActionSkipTo, matched: true}}, tracer.seen)
+	require.Equal(t, pass, ending.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.2")))
+
+	repeated := build(t, "add skipto :A ip from any to any\n:A\nadd count ip from any to any\n:A\nadd pass ip from any to any\n", none)
+	tracer = &recordingTracer{}
+	action, matched := repeated.CheckTrace(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.2"), tracer)
+	require.True(t, matched)
+	require.Equal(t, pass, action)
+	require.Equal(t, []traced{
+		{line: 1, action: ipfw.ActionSkipTo, matched: true},
+		{line: 3, action: ipfw.ActionCount, matched: true},
+		{line: 5, action: ipfw.ActionPass, matched: true},
+	}, tracer.seen)
+}
+
+// verifies that under the fall-through policy an unresolved skipto, to a
+// label or to a number, matches and goes on with the next rule.
+func Test_VM_Check_UnresolvedJumpsFallThrough(t *testing.T) {
+	cfg := vm.Config[net4, net6]{UnresolvedJumps: vm.UnresolvedJumpsFallThrough}
+	machine := build(t, "add skipto :NOWHERE ip from any to any\nadd skipto 7 ip from any to any\nadd pass ip from any to any\n", cfg)
+	tracer := &recordingTracer{}
+	action, matched := machine.CheckTrace(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.2"), tracer)
+	require.True(t, matched)
+	require.Equal(t, pass, action)
+	require.Equal(t, []traced{
+		{line: 1, action: ipfw.ActionSkipTo, matched: true},
+		{line: 2, action: ipfw.ActionSkipTo, matched: true},
+		{line: 3, action: ipfw.ActionPass, matched: true},
+	}, tracer.seen)
+}
+
 // verifies that every build error is located at its line and wraps its
 // cause.
 //
@@ -328,10 +385,10 @@ func Test_VM_Build_Errors(t *testing.T) {
 		},
 		{
 			name:      "unsupported action",
-			rules:     "add skipto :LABEL ip from any to any\n",
+			rules:     "add skipto tablearg ip from any to any\n",
 			resolvers: resolving,
 			line:      1,
-			text:      "add skipto :LABEL ip from any to any",
+			text:      "add skipto tablearg ip from any to any",
 			cause:     vm.ErrUnsupportedAction,
 		},
 		{
@@ -375,6 +432,22 @@ func Test_VM_Build_Errors(t *testing.T) {
 			cause:     vm.ErrUnresolvedJump,
 		},
 		{
+			name:      "skipto to a label that never appears",
+			rules:     "add skipto :NOWHERE ip from any to any\nadd pass ip from any to any\n",
+			resolvers: resolving,
+			line:      1,
+			text:      "add skipto :NOWHERE ip from any to any",
+			cause:     vm.ErrUnresolvedJump,
+		},
+		{
+			name:      "skipto to a label before it",
+			rules:     "add count ip from any to any\n:BACK\nadd skipto :BACK ip from any to any\n",
+			resolvers: resolving,
+			line:      3,
+			text:      "add skipto :BACK ip from any to any",
+			cause:     vm.ErrUnresolvedJump,
+		},
+		{
 			name:      "unsupported target",
 			rules:     "add pass ip from me to any\n",
 			resolvers: resolving,
@@ -400,10 +473,10 @@ func Test_VM_Build_Errors(t *testing.T) {
 		},
 		{
 			name:      "unsupported record",
-			rules:     ":LABEL\n",
+			rules:     "table t add 192.0.2.0/24\n",
 			resolvers: resolving,
 			line:      1,
-			text:      ":LABEL",
+			text:      "table t add 192.0.2.0/24",
 			cause:     vm.ErrUnsupportedRecord,
 		},
 		{
