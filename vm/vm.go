@@ -388,9 +388,10 @@ func (m *builder[V4, V6]) OnDestinationPort(match ipfw.PortNumberMatch) error {
 // option of a kind the VM does not know, being ErrUnsupportedOption.
 func (m *builder[V4, V6]) OnOption(opt ipfw.Opt) error {
 	switch opt.Kind {
-	case ipfw.OptEstablished, ipfw.OptIn, ipfw.OptOut, ipfw.OptFrag, ipfw.OptICMPTypes, ipfw.OptICMP6Types,
-		ipfw.OptTCPFlags, ipfw.OptSourcePort, ipfw.OptDestinationPort, ipfw.OptProto, ipfw.OptVia,
-		ipfw.OptKeepState, ipfw.OptComment, ipfw.OptDiverted, ipfw.OptAntiSpoof:
+	case ipfw.OptEstablished, ipfw.OptIn, ipfw.OptOut, ipfw.OptFrag, ipfw.OptICMPTypes,
+		ipfw.OptICMP6Types, ipfw.OptTCPFlags, ipfw.OptSourcePort, ipfw.OptDestinationPort,
+		ipfw.OptProto, ipfw.OptVia, ipfw.OptKeepState, ipfw.OptComment, ipfw.OptDiverted,
+		ipfw.OptAntiSpoof:
 	case ipfw.OptCustom:
 		if !m.custom {
 			return ErrUnsupportedOption
@@ -416,25 +417,28 @@ func (m *VM[V4, V6]) Len() int {
 // Check runs the packet through the rules and returns the verdict, the
 // default one when no rule terminates the search.
 func (m *VM[V4, V6]) Check(ctx *Context, pkt Packet) ipfw.Action {
-	if action, matched := m.CheckTrace(ctx, pkt, nopTracer{}); matched {
+	if action, matched := m.CheckTrace(ctx, pkt, nil); matched {
 		return action
 	}
 	return m.verdict
 }
 
-// CheckTrace is Check reporting every rule evaluated to tracer, and
-// whether a rule terminated the search.
+// CheckTrace is Check reporting every rule evaluated to tracer, nil
+// reporting nothing, and whether a rule terminated the search.
 //
 // A matching skipto continues at its linked rule, a skipto tablearg at
 // the rule the table lookup of its options named, every jump going
 // forward: a tablearg with no target, or one at or before the rule,
 // falls through.
 func (m *VM[V4, V6]) CheckTrace(ctx *Context, pkt Packet, tracer Tracer) (ipfw.Action, bool) {
+	fields := readFields(pkt)
 	pc := 0
 	for pc < len(m.ops) {
 		rule := &m.ops[pc]
-		matched, target := m.matches(rule, ctx, pkt)
-		tracer.Trace(&rule.Record, rule.Action, matched)
+		matched, target := m.matches(rule, ctx, pkt, &fields)
+		if tracer != nil {
+			tracer.Trace(&rule.Record, rule.Action, matched)
+		}
 		if !matched {
 			pc++
 			continue
@@ -455,43 +459,121 @@ func (m *VM[V4, V6]) CheckTrace(ctx *Context, pkt Packet, tracer Tracer) (ipfw.A
 	return ipfw.Action{}, false
 }
 
-// nopTracer is the tracer of Check.
-type nopTracer struct{}
+// packetFields is what the matchers read from a packet, taken once per
+// check: what every rule needs up front, the rest on first use.
+//
+// Reading them through the Packet interface at every rule cost a dynamic
+// call and an address conversion each, most of the time of a rule that
+// does not match.
+type packetFields struct {
+	version     IPVersion
+	protocol    uint8
+	source      netip.Addr
+	destination netip.Addr
 
-// Trace implements Tracer.
-func (nopTracer) Trace(*ipfw.Record, ipfw.Action, bool) {}
+	ports              bool
+	sourcePort         uint16
+	hasSourcePort      bool
+	destinationPort    uint16
+	hasDestinationPort bool
+
+	tcp      bool
+	flags    ipfw.TCPFlag
+	hasFlags bool
+
+	icmp         bool
+	icmpType     uint8
+	hasICMPType  bool
+	icmp6Type    uint8
+	hasICMP6Type bool
+
+	fragmentation bool
+	fragment      bool
+}
+
+// readFields takes the fields every rule looks at from the packet.
+func readFields(pkt Packet) packetFields {
+	return packetFields{
+		version:     pkt.Version(),
+		protocol:    pkt.Protocol(),
+		source:      pkt.SourceAddr(),
+		destination: pkt.DestinationAddr(),
+	}
+}
+
+// readPorts takes the ports on first use.
+func (m *packetFields) readPorts(pkt Packet) {
+	if !m.ports {
+		m.sourcePort, m.hasSourcePort = pkt.SourcePort()
+		m.destinationPort, m.hasDestinationPort = pkt.DestinationPort()
+		m.ports = true
+	}
+}
+
+// readFlags takes the TCP flags on first use.
+func (m *packetFields) readFlags(pkt Packet) {
+	if !m.tcp {
+		m.flags, m.hasFlags = pkt.TCPFlags()
+		m.tcp = true
+	}
+}
+
+// readICMP takes the ICMP and ICMPv6 types on first use.
+func (m *packetFields) readICMP(pkt Packet) {
+	if !m.icmp {
+		m.icmpType, m.hasICMPType = pkt.ICMPType()
+		m.icmp6Type, m.hasICMP6Type = pkt.ICMP6Type()
+		m.icmp = true
+	}
+}
+
+// readFragment takes whether the packet is a fragment on first use.
+func (m *packetFields) readFragment(pkt Packet) {
+	if !m.fragmentation {
+		m.fragment = pkt.IsFragment()
+		m.fragmentation = true
+	}
+}
 
 // matches reports whether the packet satisfies the body of the rule and
 // then its options, and the tablearg target the options yield.
 //
 // The target is the index of the rule a table lookup among the options
 // named, noTarget when none did.
-func (m *VM[V4, V6]) matches(rule *op[V4, V6], ctx *Context, pkt Packet) (bool, int) {
-	if !matchIPProtos(rule.IPProtos, pkt.Version()) {
+func (m *VM[V4, V6]) matches(
+	rule *op[V4, V6],
+	ctx *Context,
+	pkt Packet,
+	fields *packetFields,
+) (bool, int) {
+	if !matchIPProtos(rule.IPProtos, fields.version) {
 		return false, noTarget
 	}
-	if !matchProtos(rule.Protos, pkt.Protocol()) {
+	if !matchProtos(rule.Protos, fields.protocol) {
 		return false, noTarget
 	}
-	if !m.matchTargets(rule.Sources, ctx, pkt.SourceAddr()) {
+	if !m.matchTargets(rule.Sources, ctx, fields.source) {
 		return false, noTarget
 	}
-	if !m.matchTargets(rule.Destinations, ctx, pkt.DestinationAddr()) {
+	if !m.matchTargets(rule.Destinations, ctx, fields.destination) {
 		return false, noTarget
 	}
 	if len(rule.SourcePorts) > 0 {
-		port, ok := pkt.SourcePort()
-		if !ok || !matchPorts(rule.SourcePorts, port) {
+		fields.readPorts(pkt)
+		if !fields.hasSourcePort || !matchPorts(rule.SourcePorts, fields.sourcePort) {
 			return false, noTarget
 		}
 	}
 	if len(rule.DestinationPorts) > 0 {
-		port, ok := pkt.DestinationPort()
-		if !ok || !matchPorts(rule.DestinationPorts, port) {
+		fields.readPorts(pkt)
+		if !fields.hasDestinationPort {
+			return false, noTarget
+		}
+		if !matchPorts(rule.DestinationPorts, fields.destinationPort) {
 			return false, noTarget
 		}
 	}
-	return m.matchOptions(rule.Options, ctx, pkt)
+	return m.matchOptions(rule.Options, ctx, pkt, fields)
 }
 
 // matchPorts reports whether the port is in one of the ranges, or, the
@@ -514,11 +596,16 @@ const noTarget = -1
 // term must find the previous term true, one marked Or extends the term.
 //
 // The target is the first one an option yields.
-func (m *VM[V4, V6]) matchOptions(options []ipfw.Opt, ctx *Context, pkt Packet) (bool, int) {
+func (m *VM[V4, V6]) matchOptions(
+	options []ipfw.Opt,
+	ctx *Context,
+	pkt Packet,
+	fields *packetFields,
+) (bool, int) {
 	term, target := true, noTarget
 	for idx := range options {
 		opt := &options[idx]
-		raw, found := m.matchOption(opt, ctx, pkt)
+		raw, found := m.matchOption(opt, ctx, pkt, fields)
 		if target == noTarget {
 			target = found
 		}
@@ -545,27 +632,32 @@ func (m *VM[V4, V6]) matchOptions(options []ipfw.Opt, ctx *Context, pkt Packet) 
 // name, by mask or through a table, frag a non-first fragment, icmptypes
 // and icmp6types an ICMP packet of the family with a type in the set.
 // The options the VM does not emulate follow matchPolicy, a custom one
-// the configured matcher.
-func (m *VM[V4, V6]) matchOption(opt *ipfw.Opt, ctx *Context, pkt Packet) (bool, int) {
+// the configured matcher, which sees the packet itself.
+func (m *VM[V4, V6]) matchOption(
+	opt *ipfw.Opt,
+	ctx *Context,
+	pkt Packet,
+	fields *packetFields,
+) (bool, int) {
 	switch opt.Kind {
 	case ipfw.OptKeepState, ipfw.OptComment, ipfw.OptDiverted, ipfw.OptAntiSpoof:
 		return matchPolicy(opt.Kind, ctx), noTarget
 	case ipfw.OptCustom:
 		return m.matcher(*opt, ctx, pkt), noTarget
 	case ipfw.OptEstablished:
-		flags, ok := pkt.TCPFlags()
-		return ok && flags&(ipfw.TCPAck|ipfw.TCPRst) != 0, noTarget
+		fields.readFlags(pkt)
+		return fields.hasFlags && fields.flags&(ipfw.TCPAck|ipfw.TCPRst) != 0, noTarget
 	case ipfw.OptTCPFlags:
-		flags, ok := pkt.TCPFlags()
-		return ok && flags&opt.TCPFlags.Mask == opt.TCPFlags.Set, noTarget
+		fields.readFlags(pkt)
+		return fields.hasFlags && fields.flags&opt.TCPFlags.Mask == opt.TCPFlags.Set, noTarget
 	case ipfw.OptSourcePort:
-		port, ok := pkt.SourcePort()
-		return ok && opt.Ports.Lo.Number <= port && port <= opt.Ports.Hi.Number, noTarget
+		fields.readPorts(pkt)
+		return fields.hasSourcePort && inRange(fields.sourcePort, opt.Ports), noTarget
 	case ipfw.OptDestinationPort:
-		port, ok := pkt.DestinationPort()
-		return ok && opt.Ports.Lo.Number <= port && port <= opt.Ports.Hi.Number, noTarget
+		fields.readPorts(pkt)
+		return fields.hasDestinationPort && inRange(fields.destinationPort, opt.Ports), noTarget
 	case ipfw.OptProto:
-		return pkt.Protocol() == opt.Proto.Number, noTarget
+		return fields.protocol == opt.Proto.Number, noTarget
 	case ipfw.OptIn:
 		return ctx.Direction == In, noTarget
 	case ipfw.OptOut:
@@ -573,15 +665,21 @@ func (m *VM[V4, V6]) matchOption(opt *ipfw.Opt, ctx *Context, pkt Packet) (bool,
 	case ipfw.OptVia:
 		return m.matchVia(&opt.Via, ctx)
 	case ipfw.OptFrag:
-		return pkt.IsFragment(), noTarget
+		fields.readFragment(pkt)
+		return fields.fragment, noTarget
 	case ipfw.OptICMPTypes:
-		ty, ok := pkt.ICMPType()
-		return ok && opt.Types.Has(ty), noTarget
+		fields.readICMP(pkt)
+		return fields.hasICMPType && opt.Types.Has(fields.icmpType), noTarget
 	case ipfw.OptICMP6Types:
-		ty, ok := pkt.ICMP6Type()
-		return ok && opt.Types.Has(ty), noTarget
+		fields.readICMP(pkt)
+		return fields.hasICMP6Type && opt.Types.Has(fields.icmp6Type), noTarget
 	}
 	return false, noTarget
+}
+
+// inRange reports whether the port is within the range of an option.
+func inRange(port uint16, ports ipfw.PortRange) bool {
+	return ports.Lo.Number <= port && port <= ports.Hi.Number
 }
 
 // matchPolicy is the fixed verdict of an option whose meaning the VM
@@ -674,7 +772,11 @@ func matchProtos(matches []ipfw.ProtoNumberMatch, protocol uint8) bool {
 // are one target: the address is in any of them, or in none when the
 // name is negated. A side left empty by a name standing for nothing is
 // a rule that never matches.
-func (m *VM[V4, V6]) matchTargets(targets []ipfw.TargetMatch[V4, V6], ctx *Context, addr netip.Addr) bool {
+func (m *VM[V4, V6]) matchTargets(
+	targets []ipfw.TargetMatch[V4, V6],
+	ctx *Context,
+	addr netip.Addr,
+) bool {
 	idx := 0
 	for idx < len(targets) {
 		first := targets[idx]
@@ -693,7 +795,11 @@ func (m *VM[V4, V6]) matchTargets(targets []ipfw.TargetMatch[V4, V6], ctx *Conte
 //
 // me and me6 are the context's addresses of the packet's family, a
 // missing table holds nothing.
-func (m *VM[V4, V6]) matchTarget(target ipfw.TargetMatch[V4, V6], ctx *Context, addr netip.Addr) bool {
+func (m *VM[V4, V6]) matchTarget(
+	target ipfw.TargetMatch[V4, V6],
+	ctx *Context,
+	addr netip.Addr,
+) bool {
 	switch target.Kind {
 	case ipfw.TargetAny:
 		return true
