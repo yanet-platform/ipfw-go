@@ -11,7 +11,6 @@ import (
 	"github.com/yanet-platform/xnetip"
 
 	"github.com/yanet-platform/ipfw"
-	"github.com/yanet-platform/ipfw/internal/synthetic"
 	"github.com/yanet-platform/ipfw/vm"
 )
 
@@ -1759,13 +1758,28 @@ func (anyTargets) ResolveTarget(ipfw.Target) ([]net4, []net6, error) {
 	return []net4{parse4("192.0.2.0/28")}, []net6{parse6("2001:db8::/64")}, nil
 }
 
-// syntheticVM builds the synthetic ruleset, whose jumps mostly go nowhere
+// everyMatcher is a ruleset touching every matcher of the VM, so that a
+// check of it reaches all of them whatever the packet is.
+const everyMatcher = "table t add 203.0.113.0/24\ntable i add vlan1234 :SECTION\n" +
+	"add deny udp from 198.51.100.0/24 to table(t) 53\n" +
+	"add count ip from any to any icmptypes 0,8\n" +
+	"add count ip from any to any icmp6types 128,129\n" +
+	"add deny tcp from any 1-1023 to me6 not established\n" +
+	"add deny ip from host.example.com to _NETS_ frag\n" +
+	"add count tcp from any to any tcpflags syn,!ack dst-port 8080,8443\n" +
+	"add count ip from any to any { proto 17 or out } keep-state :flow\n" +
+	"add skipto tablearg ip from any to any via table(i) in\n" +
+	":SECTION\n" +
+	"add deny ip from not me to { table(t) or 2001:db8::/32 } antispoof\n" +
+	"add pass tcp from 192.0.2.0/24 not 25 to any 443 via vlan1??? established\n" +
+	"add deny ip from any to any\n"
+
+// everyMatcherVM builds the ruleset above, whose jump goes to its label
 // and whose names any resolver serves.
-func syntheticVM(t *testing.T) *vm.VM[net4, net6] {
+func everyMatcherVM(t *testing.T) *vm.VM[net4, net6] {
 	t.Helper()
-	machine, err := vm.Build(ipfw.NewParser(synthetic.Ruleset()), vm.Config[net4, net6]{
-		Environment:     ipfw.Environment[net4, net6]{Networks: nets, Protos: fakeProtos{}, Targets: anyTargets{}},
-		UnresolvedJumps: vm.UnresolvedJumpsFallThrough,
+	machine, err := vm.Build(ipfw.NewParser(everyMatcher), vm.Config[net4, net6]{
+		Environment: ipfw.Environment[net4, net6]{Networks: nets, Protos: fakeProtos{}, Targets: anyTargets{}},
 	})
 	require.NoError(t, err)
 	return machine
@@ -1782,6 +1796,7 @@ var syntheticContext = &vm.Context{
 var syntheticPackets = map[string]vm.Packet{
 	"tcp4 syn":  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.5"), netip.MustParseAddr("203.0.113.5")).WithTCP(ipfw.TCPSyn, 40000, 443),
 	"tcp4 ack":  vm.NewIPv4Packet(netip.MustParseAddr("198.51.100.5"), netip.MustParseAddr("192.0.2.1")).WithTCP(ipfw.TCPAck, 22, 40000),
+	"tcp4 pass": vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.5"), netip.MustParseAddr("203.0.113.5")).WithTCP(ipfw.TCPAck, 40000, 443),
 	"udp4":      vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.200")).WithUDP(53, 53),
 	"icmp4":     vm.NewIPv4Packet(netip.MustParseAddr("203.0.113.9"), netip.MustParseAddr("192.0.2.1")).WithICMP(8, 0),
 	"fragment4": vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.5"), netip.MustParseAddr("203.0.113.5")).WithFragmentOffset(100),
@@ -1789,10 +1804,10 @@ var syntheticPackets = map[string]vm.Packet{
 	"icmp6":     vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8::2")).WithICMP6(128, 0),
 }
 
-// verifies that a check of the synthetic ruleset, traced or not, allocates
+// verifies that a check touching every matcher, traced or not, allocates
 // nothing for a packet of any shape.
 func Test_VM_Check_NoAllocs(t *testing.T) {
-	machine := syntheticVM(t)
+	machine := everyMatcherVM(t)
 	for name, packet := range syntheticPackets {
 		t.Run(name, func(t *testing.T) {
 			expected := machine.Check(syntheticContext, packet)
@@ -1816,10 +1831,10 @@ func Test_VM_Check_NoAllocs(t *testing.T) {
 	}
 }
 
-// verifies that one VM serves checks of the synthetic ruleset from several
-// goroutines at once, every one seeing the verdicts of a lone check.
+// verifies that one VM serves checks from several goroutines at once,
+// every one seeing the verdicts of a lone check.
 func Test_VM_Check_Concurrent(t *testing.T) {
-	machine := syntheticVM(t)
+	machine := everyMatcherVM(t)
 	expected := map[string]ipfw.Action{}
 	for name, packet := range syntheticPackets {
 		expected[name] = machine.Check(syntheticContext, packet)
@@ -1885,12 +1900,12 @@ func Benchmark_VM_Check_Jumps(b *testing.B) {
 	benchmarkCheck(b, ruleset.String())
 }
 
-func Benchmark_VM_Check_Synthetic(b *testing.B) {
-	benchmarkCheck(b, synthetic.Ruleset())
+func Benchmark_VM_Check_EveryMatcher(b *testing.B) {
+	benchmarkCheck(b, strings.Repeat(everyMatcher, 100))
 }
 
-func Benchmark_VM_Build_Synthetic(b *testing.B) {
-	ruleset := synthetic.Ruleset()
+func Benchmark_VM_Build_Large(b *testing.B) {
+	ruleset := strings.Repeat(everyMatcher, 100)
 	cfg := vm.Config[net4, net6]{
 		Environment:     ipfw.Environment[net4, net6]{Networks: nets, Protos: fakeProtos{}, Targets: anyTargets{}},
 		UnresolvedJumps: vm.UnresolvedJumpsFallThrough,
