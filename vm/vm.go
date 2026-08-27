@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/netip"
 	"strconv"
+	"strings"
 
 	"github.com/yanet-platform/ipfw"
 )
@@ -104,6 +105,7 @@ func (m *BuildError) Unwrap() error {
 // matches.
 type VM[V4, V6 Network] struct {
 	ops     []op[V4, V6]
+	tables  TableRegistry[V4, V6]
 	verdict ipfw.Action
 }
 
@@ -134,11 +136,14 @@ func Build[V4, V6 Network](
 	resolvers ipfw.Resolvers[V4, V6],
 	cfg Config[V4, V6],
 ) (*VM[V4, V6], error) {
-	machine := &VM[V4, V6]{verdict: cfg.DefaultVerdict}
+	machine := &VM[V4, V6]{tables: cfg.Tables, verdict: cfg.DefaultVerdict}
+	if machine.tables == nil {
+		machine.tables = NewTables[V4, V6]()
+	}
 	if machine.verdict.Kind == 0 {
 		machine.verdict = ipfw.Action{Kind: ipfw.ActionDeny}
 	}
-	sink := newBuilder[V4, V6]()
+	sink := newBuilder(machine.tables, resolvers.Networks)
 	state := ipfw.NewResolver(sink, resolvers)
 	for {
 		rec, parseErr := p.Next(state)
@@ -160,6 +165,10 @@ func Build[V4, V6 Network](
 			}
 		case ipfw.RecordLabel:
 			sink.Label(rec.Label)
+		case ipfw.RecordTable:
+			if err := sink.Table(&rec.Table); err != nil {
+				return nil, &BuildError{Line: rec.Line, Text: rec.Text, Err: err}
+			}
 		default:
 			return nil, &BuildError{Line: rec.Line, Text: rec.Text, Err: ErrUnsupportedRecord}
 		}
@@ -172,11 +181,14 @@ func Build[V4, V6 Network](
 // It collects the tokens of the rule under construction and rejects the
 // ones the VM does not take yet, which the parser then positions at the
 // token. Add turns the collected tokens into a rule, numbering it and
-// linking the jumps, Label links the jumps to a label.
+// linking the jumps, Label links the jumps to a label, Table fills the
+// registry.
 type builder[V4, V6 Network] struct {
 	// Rule is the rule under construction.
-	Rule op[V4, V6]
-	ops  []op[V4, V6]
+	Rule     op[V4, V6]
+	ops      []op[V4, V6]
+	tables   TableRegistry[V4, V6]
+	networks ipfw.NetworkParser[V4, V6]
 	// number is the rule number the next instruction gets, an explicit one
 	// moving it forward.
 	number uint32
@@ -189,8 +201,13 @@ type builder[V4, V6 Network] struct {
 	pendingLabels  map[string][]int
 }
 
-func newBuilder[V4, V6 Network]() *builder[V4, V6] {
+func newBuilder[V4, V6 Network](
+	tables TableRegistry[V4, V6],
+	networks ipfw.NetworkParser[V4, V6],
+) *builder[V4, V6] {
 	return &builder[V4, V6]{
+		tables:         tables,
+		networks:       networks,
 		number:         1,
 		labels:         map[string]int{},
 		pendingNumbers: map[uint32][]int{},
@@ -243,6 +260,33 @@ func (m *builder[V4, V6]) Label(name string) {
 	m.labels[name] = len(m.ops)
 	m.link(m.pendingLabels[name])
 	delete(m.pendingLabels, name)
+}
+
+// Table adds the entry of a table command to the registry, a create
+// command adding nothing, an interface value losing its leading colon.
+//
+// Network text the parser rejects is the error kind of its family.
+func (m *builder[V4, V6]) Table(table *ipfw.Table) error {
+	if table.Kind != ipfw.TableAdd {
+		return nil
+	}
+	switch table.Key.Kind {
+	case ipfw.TableKeyNetwork4:
+		network, err := m.networks.ParseNetwork4(table.Key.Text)
+		if err != nil {
+			return ipfw.ErrExpectedIPv4Network
+		}
+		m.tables.AddNetwork4(table.Name, network)
+	case ipfw.TableKeyNetwork6:
+		network, err := m.networks.ParseNetwork6(table.Key.Text)
+		if err != nil {
+			return ipfw.ErrExpectedIPv6Network
+		}
+		m.tables.AddNetwork6(table.Name, network)
+	case ipfw.TableKeyIfName:
+		m.tables.AddInterface(table.Name, table.Key.Text, strings.TrimPrefix(table.Value, ":"))
+	}
+	return nil
 }
 
 // link points the jumps at the indexes to the next rule.
@@ -332,10 +376,16 @@ func (m *builder[V4, V6]) OnOption(ipfw.Opt) error {
 // checkTarget rejects the target kinds a check cannot match yet.
 func checkTarget[V4, V6 any](target ipfw.TargetMatch[V4, V6]) error {
 	switch target.Kind {
-	case ipfw.TargetAny, ipfw.TargetNetwork4, ipfw.TargetNetwork6:
+	case ipfw.TargetAny, ipfw.TargetTable, ipfw.TargetNetwork4, ipfw.TargetNetwork6:
 		return nil
 	}
 	return ErrUnsupportedTarget
+}
+
+// Tables is the registry the ruleset filled, the one configured or a
+// fresh default.
+func (m *VM[V4, V6]) Tables() TableRegistry[V4, V6] {
+	return m.tables
 }
 
 // Len is the number of rules.
@@ -360,7 +410,7 @@ func (m *VM[V4, V6]) CheckTrace(ctx *Context, pkt Packet, tracer Tracer) (ipfw.A
 	pc := 0
 	for pc < len(m.ops) {
 		rule := &m.ops[pc]
-		matched := rule.matches(pkt)
+		matched := rule.matches(pkt, m.tables)
 		tracer.Trace(&rule.Record, rule.Action, matched)
 		if !matched {
 			pc++
@@ -386,17 +436,17 @@ func (nopTracer) Trace(*ipfw.Record, ipfw.Action, bool) {}
 
 // matches reports whether the packet satisfies the body of the rule: the
 // IP versions, the protocols, the sources and the destinations.
-func (m *op[V4, V6]) matches(pkt Packet) bool {
+func (m *op[V4, V6]) matches(pkt Packet, tables TableRegistry[V4, V6]) bool {
 	if !matchIPProtos(m.IPProtos, pkt.Version()) {
 		return false
 	}
 	if !matchProtos(m.Protos, pkt.Protocol()) {
 		return false
 	}
-	if !matchTargets(m.Sources, pkt.SourceAddr()) {
+	if !matchTargets(m.Sources, pkt.SourceAddr(), tables) {
 		return false
 	}
-	return matchTargets(m.Destinations, pkt.DestinationAddr())
+	return matchTargets(m.Destinations, pkt.DestinationAddr(), tables)
 }
 
 // matchIPProtos reports whether the version is in one of the version
@@ -442,20 +492,31 @@ func matchProtos(matches []ipfw.ProtoNumberMatch, protocol uint8) bool {
 // matching nothing.
 //
 // A side left empty by an unresolvable name is a rule that never matches.
-func matchTargets[V4, V6 Network](targets []ipfw.TargetMatch[V4, V6], addr netip.Addr) bool {
+func matchTargets[V4, V6 Network](
+	targets []ipfw.TargetMatch[V4, V6],
+	addr netip.Addr,
+	tables TableRegistry[V4, V6],
+) bool {
 	for _, target := range targets {
-		if matchTarget(target, addr) != target.Neg {
+		if matchTarget(target, addr, tables) != target.Neg {
 			return true
 		}
 	}
 	return false
 }
 
-// matchTarget reports whether the address is the target's.
-func matchTarget[V4, V6 Network](target ipfw.TargetMatch[V4, V6], addr netip.Addr) bool {
+// matchTarget reports whether the address is the target's, a missing
+// table holding nothing.
+func matchTarget[V4, V6 Network](
+	target ipfw.TargetMatch[V4, V6],
+	addr netip.Addr,
+	tables TableRegistry[V4, V6],
+) bool {
 	switch target.Kind {
 	case ipfw.TargetAny:
 		return true
+	case ipfw.TargetTable:
+		return tables.LookupNetwork(target.Name, addr)
 	case ipfw.TargetNetwork4:
 		return addr.Is4() && target.Net4.ContainsAddr(addr)
 	case ipfw.TargetNetwork6:

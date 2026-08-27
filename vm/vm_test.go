@@ -361,6 +361,100 @@ func Test_VM_Check_UnresolvedJumpsFallThrough(t *testing.T) {
 	}, tracer.seen)
 }
 
+// verifies that a table target matches the addresses of its networks of
+// either family, negated or not, and that a missing table matches nothing.
+func Test_VM_Check_Tables(t *testing.T) {
+	rules := "table t create type addr\ntable t add 192.0.2.128/29\ntable t add 198.51.100.0/25\ntable t add 198.51.100.128/25\ntable t add 2001:db8::/32\n" +
+		"add pass tcp from table(t) to table(t)\nadd pass ip from not table(t) to 203.0.113.1\nadd pass ip from table(none) to any\nadd deny ip from any to any\n"
+	cases := []struct {
+		name    string
+		packet  vm.Packet
+		verdict ipfw.Action
+	}{
+		{
+			name:    "both in the table",
+			packet:  tcp4("198.51.100.1", "192.0.2.128"),
+			verdict: pass,
+		},
+		{
+			name:    "source outside the table",
+			packet:  tcp4("198.51.99.1", "192.0.2.128"),
+			verdict: deny,
+		},
+		{
+			name:    "destination outside the table",
+			packet:  tcp4("198.51.100.1", "192.0.2.127"),
+			verdict: deny,
+		},
+		{
+			name:    "IPv6 entry",
+			packet:  vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8:1::1")).WithTCP(ipfw.TCPSyn, 50000, 22),
+			verdict: pass,
+		},
+		{
+			name:    "IPv6 outside the table",
+			packet:  vm.NewIPv6Packet(netip.MustParseAddr("2001:db9::1"), netip.MustParseAddr("2001:db8:1::1")).WithTCP(ipfw.TCPSyn, 50000, 22),
+			verdict: deny,
+		},
+		{
+			name:    "negated table",
+			packet:  tcp4("203.0.113.9", "203.0.113.1"),
+			verdict: pass,
+		},
+		{
+			name:    "negated table, address inside",
+			packet:  tcp4("192.0.2.130", "203.0.113.1"),
+			verdict: deny,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			machine := build(t, rules, none)
+			require.Equal(t, tc.verdict, machine.Check(&vm.Context{}, tc.packet))
+		})
+	}
+}
+
+// verifies that a registry passed in is the one the ruleset fills and the
+// VM consults, and that an interface value loses its leading colon.
+func Test_VM_Build_Tables(t *testing.T) {
+	tables := vm.NewTables[net4, net6]()
+	tables.AddNetwork4("pre", must4(t, "203.0.113.0/24"))
+	machine := build(t, "table i add vlan1 :LABEL\ntable i add vlan2 plain\ntable i add vlan3\ntable pre add 192.0.2.0/24\nadd pass ip from table(pre) to any\nadd deny ip from any to any\n", vm.Config[net4, net6]{Tables: tables})
+	require.Same(t, tables, machine.Tables())
+	require.Equal(t, pass, machine.Check(&vm.Context{}, tcp4("203.0.113.7", "192.0.2.1")))
+	require.Equal(t, pass, machine.Check(&vm.Context{}, tcp4("192.0.2.7", "192.0.2.1")))
+	require.Equal(t, deny, machine.Check(&vm.Context{}, tcp4("198.51.100.7", "192.0.2.1")))
+
+	value, ok := machine.Tables().LookupInterface("i", "vlan1")
+	require.True(t, ok)
+	require.Equal(t, "LABEL", value)
+	value, ok = machine.Tables().LookupInterface("i", "vlan2")
+	require.True(t, ok)
+	require.Equal(t, "plain", value)
+	value, ok = machine.Tables().LookupInterface("i", "vlan3")
+	require.True(t, ok)
+	require.Empty(t, value)
+
+	fresh := build(t, "table t create\n", none)
+	require.NotNil(t, fresh.Tables())
+	require.False(t, fresh.Tables().LookupNetwork("t", netip.MustParseAddr("192.0.2.1")))
+}
+
+// verifies that a record of a kind the VM does not know, as a command
+// hook may produce, is a build error at its line.
+func Test_VM_Build_UnsupportedRecord(t *testing.T) {
+	hook := func(line string, _ ipfw.State) (ipfw.Record, int, error) {
+		return ipfw.Record{Kind: 100}, len(line), nil
+	}
+	_, err := vm.Build(ipfw.NewParser("add pass ip from any to any\nfrobnicate now\n", ipfw.WithCommandHook(hook)), resolving, none)
+	var buildErr *vm.BuildError
+	require.ErrorAs(t, err, &buildErr)
+	require.Equal(t, 2, buildErr.Line)
+	require.Equal(t, "frobnicate now", buildErr.Text)
+	require.ErrorIs(t, err, vm.ErrUnsupportedRecord)
+}
+
 // verifies that every build error is located at its line and wraps its
 // cause.
 //
@@ -472,12 +566,20 @@ func Test_VM_Build_Errors(t *testing.T) {
 			cause:     vm.ErrUnsupportedOption,
 		},
 		{
-			name:      "unsupported record",
-			rules:     "table t add 192.0.2.0/24\n",
+			name:      "IPv4 table entry that does not parse",
+			rules:     "table t add 192.0.2.0/24\ntable t add 192.0.2.0/33\n",
+			resolvers: resolving,
+			line:      2,
+			text:      "table t add 192.0.2.0/33",
+			cause:     ipfw.ErrExpectedIPv4Network,
+		},
+		{
+			name:      "IPv6 table entry that does not parse",
+			rules:     "table t add 2001:db8::/129\n",
 			resolvers: resolving,
 			line:      1,
-			text:      "table t add 192.0.2.0/24",
-			cause:     vm.ErrUnsupportedRecord,
+			text:      "table t add 2001:db8::/129",
+			cause:     ipfw.ErrExpectedIPv6Network,
 		},
 		{
 			name:      "unresolved protocol without a resolver",
@@ -544,7 +646,7 @@ func Test_VM_Build_NumericProto(t *testing.T) {
 
 // verifies that a check allocates nothing.
 func Test_VM_Check_NoAllocs(t *testing.T) {
-	machine := build(t, "add deny udp from any to any\nadd deny ip from 198.51.100.0/24 to any\nadd pass tcp from 192.0.2.0/24 to { any or 2001:db8::/32 }\nadd deny ip from any to any\n", none)
+	machine := build(t, "table t add 203.0.113.0/24\nadd deny udp from any to any\nadd deny ip from 198.51.100.0/24 to table(t)\nadd skipto :NEXT ip from table(t) to any\nadd pass tcp from 192.0.2.0/24 to { any or 2001:db8::/32 }\n:NEXT\nadd deny ip from any to any\n", none)
 	packet := tcp4("192.0.2.1", "192.0.2.1")
 	ctx := &vm.Context{}
 	verdict := pass
