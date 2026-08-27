@@ -146,14 +146,14 @@ type op[V4, V6 Network] struct {
 // Build reads the whole ruleset from p into a VM, every name resolved
 // within the configured environment on the way in.
 func Build[V4, V6 Network](p *ipfw.Parser, cfg Config[V4, V6]) (*VM[V4, V6], error) {
-	machine := &VM[V4, V6]{tables: cfg.Tables, matcher: cfg.OptionMatcher, verdict: cfg.DefaultVerdict}
-	if machine.tables == nil {
-		machine.tables = NewTables[V4, V6]()
+	m := &VM[V4, V6]{tables: cfg.Tables, matcher: cfg.OptionMatcher, verdict: cfg.DefaultVerdict}
+	if m.tables == nil {
+		m.tables = NewTables[V4, V6]()
 	}
-	if machine.verdict.Kind == 0 {
-		machine.verdict = ipfw.Action{Kind: ipfw.ActionDeny}
+	if m.verdict.Kind == 0 {
+		m.verdict = ipfw.Action{Kind: ipfw.ActionDeny}
 	}
-	sink := newBuilder(machine.tables, cfg.Environment.Networks, cfg.OptionMatcher != nil)
+	sink := newBuilder(m.tables, cfg.Environment.Networks, cfg.OptionMatcher != nil)
 	state := ipfw.NewResolver(sink, cfg.Environment)
 	for {
 		rec, parseErr := p.Next(state)
@@ -165,8 +165,8 @@ func Build[V4, V6 Network](p *ipfw.Parser, cfg Config[V4, V6]) (*VM[V4, V6], err
 			if unresolved, ok := sink.Unresolved(); ok && cfg.UnresolvedJumps == UnresolvedJumpsError {
 				return nil, &BuildError{Line: unresolved.Line, Text: unresolved.Text, Err: ErrUnresolvedJump}
 			}
-			machine.ops, machine.labels = sink.Ops(), sink.Labels()
-			return machine, nil
+			m.ops, m.labels = sink.Ops(), sink.Labels()
+			return m, nil
 		case ipfw.RecordEmpty, ipfw.RecordComment:
 			continue
 		case ipfw.RecordInstruction:
