@@ -548,6 +548,24 @@ func Test_VM_Check_Established(t *testing.T) {
 	require.Equal(t, pass, negated.Check(&vm.Context{}, udp))
 }
 
+// verifies that the proto option matches the protocol number, a name
+// resolved on the way in, negated the other way round.
+func Test_VM_Check_ProtoOption(t *testing.T) {
+	udp := vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")).WithUDP(50000, 22)
+	named := build(t, "add pass ip from any to any proto tcp\nadd deny ip from any to any\n", none)
+	require.Equal(t, pass, named.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.2")))
+	require.Equal(t, deny, named.Check(&vm.Context{}, udp))
+
+	negated := build(t, "add pass ip from any to any not proto 6\nadd deny ip from any to any\n", none)
+	require.Equal(t, deny, negated.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.2")))
+	require.Equal(t, pass, negated.Check(&vm.Context{}, udp))
+
+	numeric, err := vm.Build(ipfw.NewParser("add pass ip from any to any { proto 17 or proto 1 }\nadd deny ip from any to any\n"), networksOnly, none)
+	require.NoError(t, err)
+	require.Equal(t, pass, numeric.Check(&vm.Context{}, udp))
+	require.Equal(t, deny, numeric.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.2")))
+}
+
 // verifies the src-port and dst-port options: the packet's port must be
 // present and in a range, a list is any of its ranges, a negated list none.
 func Test_VM_Check_PortOptions(t *testing.T) {
@@ -1279,11 +1297,19 @@ func Test_VM_Build_Errors(t *testing.T) {
 		},
 		{
 			name:      "unsupported option",
-			rules:     "add pass tcp from any to any established proto tcp\n",
+			rules:     "add pass tcp from any to any established via eth0\n",
 			resolvers: resolving,
 			line:      1,
-			text:      "add pass tcp from any to any established proto tcp",
+			text:      "add pass tcp from any to any established via eth0",
 			cause:     vm.ErrUnsupportedOption,
+		},
+		{
+			name:      "proto option name without a resolver",
+			rules:     "add pass ip from any to any proto tcp\n",
+			resolvers: networksOnly,
+			line:      1,
+			text:      "add pass ip from any to any proto tcp",
+			cause:     ipfw.ErrUnresolvedProto,
 		},
 		{
 			name:      "IPv4 table entry that does not parse",

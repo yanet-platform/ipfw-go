@@ -376,7 +376,7 @@ func (m *builder[V4, V6]) OnDestinationPort(match ipfw.PortNumberMatch) error {
 func (m *builder[V4, V6]) OnOption(opt ipfw.Opt) error {
 	switch opt.Kind {
 	case ipfw.OptEstablished, ipfw.OptIn, ipfw.OptOut, ipfw.OptFrag, ipfw.OptICMPTypes, ipfw.OptICMP6Types,
-		ipfw.OptTCPFlags, ipfw.OptSourcePort, ipfw.OptDestinationPort:
+		ipfw.OptTCPFlags, ipfw.OptSourcePort, ipfw.OptDestinationPort, ipfw.OptProto:
 	default:
 		return ErrUnsupportedOption
 	}
@@ -490,9 +490,10 @@ func (m *VM[V4, V6]) matchOptions(options []ipfw.Opt, ctx *Context, pkt Packet) 
 //
 // established is a TCP packet with ACK or RST set, tcpflags one whose
 // examined flags are exactly the ones to be set, src-port and dst-port a
-// packet whose port is in the range, in and out the direction of the
-// check, frag a non-first fragment, icmptypes and icmp6types an ICMP
-// packet of the family with a type in the set.
+// packet whose port is in the range, proto one of the protocol number, in
+// and out the direction of the check, frag a non-first fragment,
+// icmptypes and icmp6types an ICMP packet of the family with a type in
+// the set.
 func (m *VM[V4, V6]) matchOption(opt *ipfw.Opt, ctx *Context, pkt Packet) bool {
 	switch opt.Kind {
 	case ipfw.OptEstablished:
@@ -507,6 +508,8 @@ func (m *VM[V4, V6]) matchOption(opt *ipfw.Opt, ctx *Context, pkt Packet) bool {
 	case ipfw.OptDestinationPort:
 		port, ok := pkt.DestinationPort()
 		return ok && opt.Ports.Lo.Number <= port && port <= opt.Ports.Hi.Number
+	case ipfw.OptProto:
+		return pkt.Protocol() == opt.Proto.Number
 	case ipfw.OptIn:
 		return ctx.Direction == In
 	case ipfw.OptOut:
