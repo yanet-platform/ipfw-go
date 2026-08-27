@@ -140,7 +140,12 @@ which `testing.AllocsPerRun` guards. Building a VM allocates. On a
 developer box: the simplest rule parses in about 0.4 µs, a rule with ten
 networks in 1.4 µs, one with ten options in 3 µs; a check costs about 45 ns
 per rule that does not match and 75 ns when the first rule matches, a
-thousand jumps 66 µs; a 10k-line ruleset builds in 36 ms.
+thousand jumps 66 µs; a 10k-line ruleset builds in 36 ms. Over the Rust
+crate's production corpus (27 MB, 115k rules) the parser runs at 184 MB/s
+without allocating, the VM builds in 0.4 s and a packet that matches
+nothing is checked against every rule in 8 ms. Keep the packet as a
+`vm.Packet` value across checks: converting a raw byte slice to the
+interface on every call is the one allocation a check can incur.
 
 ```sh
 make test        # go test -race ./...
@@ -149,3 +154,7 @@ make bench       # compile and smoke-run every benchmark
 make bench-run   # measure, feed to benchstat
 make fuzz        # every fuzz target briefly
 ```
+
+The corpus tests and benchmarks (`Test_Corpus_*`, `Benchmark_Corpus_*`) read
+`../ipfw/.assets` and the system protocol and service databases, and skip
+when those are absent.
