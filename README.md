@@ -1,6 +1,6 @@
-# ipfw
+# ipfw-go
 
-A Go port of the Rust [`ipfw`](../ipfw) crate: a streaming, zero-copy parser for the FreeBSD/macOS [`ipfw(8)`](https://man.freebsd.org/cgi/man.cgi?ipfw(8)) ruleset format and a virtual machine that evaluates a packet against the ruleset. Runtime code uses the standard library only.
+A streaming parser for the FreeBSD/macOS [`ipfw(8)`](https://man.freebsd.org/cgi/man.cgi?ipfw(8)) ruleset format and a virtual machine that evaluates a packet against the ruleset. The runtime uses the standard library only.
 
 ```sh
 go get github.com/yanet-platform/ipfw-go
@@ -8,33 +8,71 @@ go get github.com/yanet-platform/ipfw-go
 
 Licensed under the Apache License 2.0, see [LICENSE](LICENSE).
 
+## What it gives you
+
+- **Nothing allocates on the hot paths.** Parsing a line and checking a packet allocate zero bytes, and `testing.AllocsPerRun` guards both. The input is one string and every token is a sub-slice of it, so a 27 MB ruleset parses at 184 MB/s without touching the heap.
+- **No dependencies.** The runtime is the standard library. Tests reach for testify, rapid and xnetip, your build does not.
+- **Your network types, not ours.** The typed layer is generic over the IPv4 and IPv6 types you already use, plugged in with a literal. Nothing forces a wrapper on you.
+- **Strict parsing with errors that point.** No token is dropped or guessed. A line that does not fit the grammar is a `*ParseError` with a line, a column and the text, rendered by `Diag` with a caret under the offending token, coloured when a terminal is watching.
+- **Names are yours to resolve.** Protocols, services, hostnames and macros go through your resolvers, so `/etc/services`, a DNS cache or a macro expander plug in where you need them, and an unresolvable name fails the line instead of matching quietly.
+- **The grammar is extensible.** A command or an option the format does not know goes to a hook that reuses the exported sub-parsers, and the VM asks your matcher what it means.
+- **A virtual machine, not only a parser.** Build a ruleset once and check packets against it: protocols, addresses, ports, tables, interfaces, ICMP types, TCP flags, jumps and labels, a configurable default verdict, and a tracer that reports every rule a check evaluated.
+- **Tested where it counts.** Property tests, fuzzing with a checked-in corpus, allocation guards, race tests, and regression runs over production rulesets of 115k rules.
+
+## How it fits together
+
+```
+        ipfw.Parser ─────────────► ipfw.State ────────────► ipfw.Resolver ──────► ipfw.VMState
+        one line at a time         raw tokens of the        names into values     numbers and
+        │                          rule body                within an             networks
+        └─► ipfw.Record            (ReduceState collects,   Environment           (vm builds
+            what the line is       DiscardState drops)                            from these)
+```
+
+The parser knows the grammar and nothing else. It never parses an address, never resolves a name, and every token it hands over is a sub-slice of the input, so a line costs no allocation at all. Turning text into values is the next layer's business, and evaluating packets the layer after that.
+
 ## Parsing
 
-The parser reads one line at a time, returns a `Record` for it and pushes the rule body — protocols, targets, ports, options — as string sub-slices of the input into a `State`. `ReduceState` collects them, `DiscardState` drops them.
+`Next` reads one line, returns its `Record` and pushes the rule body — protocols, targets, ports, options — into a `State`.
 
 ```go
-parser := ipfw.NewParser("add 100 deny log tcp from 192.0.2.0/24 to any 22 // bots\nadd pass ip from any to any\n")
+parser := ipfw.NewParser("add 100 deny log tcp from 192.0.2.0/24 to any 22 // bots\n")
 var state ipfw.ReduceState
 for {
-	rec, err := parser.Next(&state) // err is a *ipfw.ParseError with line, column and text
+	rec, err := parser.Next(&state)
 	if err != nil {
-		// rustc-style rendering; WithDiagStyle(DiagStyleFor(os.Stderr)) colours it when a terminal is watching
-		fmt.Println(ipfw.NewDiag(err))
+		fmt.Fprint(os.Stderr, ipfw.NewDiag(err, ipfw.WithDiagPath("fw.conf")))
 		return
 	}
 	if rec.Kind == ipfw.RecordEOF {
 		break
 	}
-	fmt.Println(rec.Line, rec.Instruction.Action, state.Sources, state.DestinationPorts, state.Options)
+	fmt.Println(rec.Line, rec.Instruction.Action, state.Sources, state.DestinationPorts)
 	state.Reset()
 }
 ```
 
-Every token keeps its text: a network is `Target{Kind: TargetNetwork4, Text: "192.0.2.0/24"}`, a service is `Port{Name: "ssh"}`. Nothing is resolved or validated beyond the grammar, so the parser needs no network library. See `ExampleParser_Next`.
+Every token keeps its text: a network is `Target{Kind: TargetNetwork4, Text: "192.0.2.0/24"}`, a service is `Port{Name: "ssh"}`. See `ExampleParser_Next`.
+
+## Errors
+
+A line the grammar does not accept is a `*ParseError` carrying the line, the column and the text, which `Diag` renders:
+
+```
+error: unknown option
+  --> fw.conf:2:42
+   |
+ 2 | add pass tcp from 192.0.2.0/24 to any 22 frobnicate
+   |                                          ^^^^^^^^^^
+```
+
+`WithDiagStyle(ipfw.DiagStyleFor(os.Stderr))` colours it when a terminal is watching and leaves it plain when the output is a file. `WithDiagWidth` cuts a long line around the caret.
 
 ## Names into values
 
-A `Resolver` is a `State` that resolves every name within an `Environment` and hands typed tokens to a `VMState`: networks in the caller's own types, protocols and services as numbers, hostnames and macros as the networks they stand for. `ReduceVMState` collects them; a nil resolver makes the names it would resolve a positioned error. Plugging [xnetip](https://github.com/yanet-platform/xnetip) in is one literal:
+A `Resolver` is the `State` that resolves every name within an `Environment` — networks into the caller's own types, protocols and services into numbers, hostnames and macros into the networks they stand for — and hands the typed tokens to a `VMState`, which `ReduceVMState` collects. A name no resolver turns into a value fails the line where the name stands.
+
+Plugging [xnetip](https://github.com/yanet-platform/xnetip) in is one literal:
 
 ```go
 env := ipfw.Environment[xnetip.Network4, xnetip.Network6]{
@@ -54,7 +92,7 @@ See `ExampleNewResolver`.
 
 ## The virtual machine
 
-`vm.Build` reads the whole ruleset into a `VM`; `Check` runs a packet through it. What the packet bytes do not carry — the direction, the interface, the host's own addresses for `me`/`me6` — travels in a `Context` next to the packet.
+`vm.Build` reads a whole ruleset into a `VM` and `Check` runs a packet through it. What the packet bytes do not carry — the direction, the interface, the host's own addresses for `me` and `me6` — travels in a `Context` next to the packet.
 
 ```go
 machine, err := vm.Build(ipfw.NewParser(src), vm.Config[xnetip.Network4, xnetip.Network6]{
@@ -67,40 +105,53 @@ verdict := machine.Check(ctx, packet)                                // ipfw.Act
 action, matched := machine.CheckTrace(ctx, packet, tracer)           // every rule evaluated
 ```
 
-`Packet` is an interface over the fields the matchers read; `RawIPv4Packet` and `RawIPv6Packet` implement it over raw bytes and double as builders in tests. See `ExampleBuild` and `ExampleVM_CheckTrace` in package `vm`.
+`Packet` is an interface over the fields the matchers read. `RawIPv4Packet` and `RawIPv6Packet` implement it over raw bytes and double as builders in tests. See `ExampleBuild` and `ExampleVM_CheckTrace`.
 
 ## Extension points
 
-| What | Where |
-|------|-------|
-| network types and parsers | `ipfw.NetworkParser` or `ipfw.NetworkParserFuncs` |
-| protocol and service names | `ipfw.ProtoResolver`, `ipfw.ServiceResolver` |
-| hostnames and macros (`_NAME_`) | `ipfw.TargetResolver`: one name → any number of networks of both families |
-| custom commands | `ipfw.WithCommandHook`: the hook parses the line, may call the exported sub-parsers |
-| custom options | `ipfw.WithOptionHook` on the parser and `vm.Config.OptionMatcher` at check time |
-| tables | `vm.TableRegistry`, `vm.DefaultTableRegistry` as the default, may be pre-filled or changed after the build |
-| unresolved jumps | `vm.Config.UnresolvedJumps`: an error at build or a fall-through |
-| tracing | `vm.Tracer` per rule evaluated |
-| your own consumer | implement `ipfw.State` (raw tokens) or `ipfw.VMState` (typed) |
+Everything the format leaves to the site — what a name means, what a keyword the grammar does not know is — is yours to supply.
 
-## Supported syntax
+**Names**
 
-- `add [N] ACTION [log [logamount N]] [tag N] BODY [// comment]` with the actions `allow|accept|pass|permit`, `deny|drop`, `count`, `skipto :LABEL|N|tablearg`, `check-state [:flow]`.
-- Protocols by name or number, `ip|all|ip4|ipv4|ip6|ipv6`, `not`, `{ a or b }`.
-- Targets `any`, `me`, `me6`, networks of both families, hostnames (plain and `` `quoted' ``), `table(NAME)`, macros as custom tokens, `not`, `{ a or b }`.
-- Ports and ranges by number or service name, comma lists, `not`, `ftp\-data` escapes.
-- Options `in`, `out`, `established`, `frag`, `diverted`, `antispoof`, `keep-state [:flow]`, `icmptypes`, `icmp6types`, `tcpflags`, `src-port`, `dst-port`, `proto`, `via NAME|MASK|table(NAME[,VALUE])`, `not`, `{ a or b }` groups, custom options through the hook.
-- `table NAME create [type T]`, `table NAME add KEY [VALUE]` with network and interface keys, `:LABEL` lines, `#` comments.
+| | |
+|---|---|
+| `NetworkParser` | network text into your own types, `NetworkParserFuncs` to plug a library in one literal |
+| `ProtoResolver` | protocol names into numbers |
+| `ServiceResolver` | service names into ports |
+| `TargetResolver` | a hostname or a macro into any number of networks of both families |
 
-## Deviations
+**Grammar**
 
-From the Rust crate: no panics — every misuse is a positioned `*ParseError` or a `vm.BuildError`; names are resolved by the consumer's resolvers (an unresolvable one is an error, a name standing for no network never matches); `not a,b` on a port list and `not host` on a multi-address name mean "none of them"; a non-first IPv4 fragment carries no transport header; the VM never loops (jumps go forward only); the default verdict is configurable; the Rust `extra` feature (macros, `inet`, `ALLOW_FROM_*` commands) is not built in but representable through the hooks and resolvers.
+| | |
+|---|---|
+| `WithCommandHook` | a line the grammar does not know, the hook parsing it out of the exported sub-parsers |
+| `WithOptionHook` | an option the grammar does not know, the hook consuming its arguments |
+| `State`, `VMState` | your own consumer of the tokens, raw or typed |
 
-From FreeBSD: `skipto N` needs a rule numbered exactly `N`; the VM is stateless, so `keep-state` and `check-state` keep and check nothing (a matching `keep-state` rule simply matches, `check-state` never does); `diverted` never matches, `antispoof` matches outgoing packets only; actions beyond the five above are rejected.
+**Evaluation**
+
+| | |
+|---|---|
+| `vm.Config.OptionMatcher` | what a custom option means to a packet |
+| `vm.TableRegistry` | where tables live, `vm.DefaultTableRegistry` being the one a build fills |
+| `vm.Config.UnresolvedJumps` | a jump nothing satisfies: an error at build, or a fall-through |
+| `vm.Tracer` | every rule a check evaluates |
 
 ## Performance
 
-The parse path (per line) and the match path (per packet) allocate nothing, which `testing.AllocsPerRun` guards. Building a VM allocates. On a developer box: the simplest rule parses in about 0.4 µs, a rule with ten networks in 1.3 µs, one with ten options in 2.6 µs; a check costs about 30 ns per rule that does not match and 90 ns when the first rule matches, a thousand jumps 41 µs; a 10k-line ruleset builds in 34 ms. Over a production ruleset of 27 MB and 115k rules the parser runs at 184 MB/s without allocating, the VM builds in 0.3 s and a packet that matches nothing is checked against every rule in 2.2 ms. Keep the packet as a `vm.Packet` value across checks: converting a raw byte slice to the interface on every call is the one allocation a check can incur.
+The parse path, per line, and the match path, per packet, allocate nothing, which `testing.AllocsPerRun` guards. Building a VM allocates.
+
+| | |
+|---|---|
+| the simplest rule | 0.4 µs |
+| a rule with ten networks | 1.3 µs |
+| a rule with ten options | 2.6 µs |
+| a rule that does not match a packet | 30 ns |
+| a check whose first rule matches | 90 ns |
+| a thousand jumps | 41 µs |
+| a ruleset of 10k lines, built | 34 ms |
+
+Over a production ruleset of 27 MB and 115k rules the parser runs at 184 MB/s without allocating, the VM builds in 0.3 s, and a packet that matches nothing is checked against every rule in 2.2 ms. Keep the packet as a `vm.Packet` value across checks: turning a raw byte slice into the interface on every call is the one allocation a check can incur.
 
 ```sh
 make test        # go test -race ./...
