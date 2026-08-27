@@ -77,8 +77,10 @@ Plugging [xnetip](https://github.com/yanet-platform/xnetip) in is one literal:
 ```go
 env := ipfw.Environment[xnetip.Network4, xnetip.Network6]{
 	Networks: ipfw.NetworkParserFuncs[xnetip.Network4, xnetip.Network6]{
-		Parse4: xnetip.ParseNetwork4, Parse6: xnetip.ParseNetwork6,
-		FromAddr4: xnetip.Network4FromAddr, FromAddr6: xnetip.Network6FromAddr,
+		Parse4:    xnetip.ParseNetwork4,
+		Parse6:    xnetip.ParseNetwork6,
+		FromAddr4: xnetip.Network4FromAddr,
+		FromAddr6: xnetip.Network6FromAddr,
 	},
 	Protos:   protocols, // ipfw.ProtoResolver, e.g. /etc/protocols
 	Services: services,  // ipfw.ServiceResolver, e.g. /etc/services
@@ -99,7 +101,11 @@ machine, err := vm.Build(ipfw.NewParser(src), vm.Config[xnetip.Network4, xnetip.
 	Environment:    env,
 	DefaultVerdict: ipfw.Action{Kind: ipfw.ActionDeny}, // the zero value means deny
 })
-ctx := &vm.Context{Direction: vm.In, IfName: "vlan42", LocalAddrs: localAddrs}
+ctx := &vm.Context{
+	Direction:  vm.In,
+	IfName:     "vlan42",
+	LocalAddrs: localAddrs,
+}
 packet := vm.NewIPv4Packet(src, dst).WithTCP(ipfw.TCPSyn, 40000, 22) // or your own vm.Packet
 verdict := machine.Check(ctx, packet)                                // ipfw.Action: pass or deny
 action, matched := machine.CheckTrace(ctx, packet, tracer)           // every rule evaluated
