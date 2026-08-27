@@ -69,10 +69,10 @@ func Test_Diagnostic_WithDiagStyle_Cut(t *testing.T) {
 		Column: 41,
 		Text:   "add pass ip from 192.0.2.0/24 to any not frobnicate 1024-65535 established",
 	}
-	styled := ipfw.NewDiagnostic(err, ipfw.WithWidth(48), ipfw.WithDiagStyle(ipfw.DiagStyle())).String()
+	styled := ipfw.NewDiagnostic(err, ipfw.WithDiagWidth(48), ipfw.WithDiagStyle(ipfw.DiagStyle())).String()
 	require.Contains(t, styled, "\x1b[2m... \x1b[0m")
 	require.Contains(t, styled, "\x1b[2m ...\x1b[0m")
-	require.Equal(t, ipfw.NewDiagnostic(err, ipfw.WithWidth(48)).String(), plain(styled))
+	require.Equal(t, ipfw.NewDiagnostic(err, ipfw.WithDiagWidth(48)).String(), plain(styled))
 }
 
 // verifies that the palette of DiagStyle wraps every role in ANSI
@@ -201,7 +201,7 @@ func Test_Diagnostic_WideGutter(t *testing.T) {
 // A fitting line is left alone, a long one is cut on the right, the left
 // or both sides around the caret. Width 40 leaves 35 columns next to a
 // one-digit gutter.
-func Test_Diagnostic_WithWidth(t *testing.T) {
+func Test_Diagnostic_WithDiagWidth(t *testing.T) {
 	cases := []struct {
 		name     string
 		column   int
@@ -265,7 +265,7 @@ func Test_Diagnostic_WithWidth(t *testing.T) {
 				Column: tc.column,
 				Text:   tc.text,
 			}
-			require.Equal(t, tc.expected, ipfw.NewDiagnostic(err, ipfw.WithWidth(40)).String())
+			require.Equal(t, tc.expected, ipfw.NewDiagnostic(err, ipfw.WithDiagWidth(40)).String())
 		})
 	}
 }

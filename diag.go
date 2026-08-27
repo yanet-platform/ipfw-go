@@ -30,12 +30,12 @@ func WithDiagPath(path string) DiagnosticOption {
 	}
 }
 
-// WithWidth limits the width of the rendering, zero meaning unlimited.
+// WithDiagWidth limits the width of the rendering, zero meaning unlimited.
 //
 // A source line that does not fit next to the gutter is cut around the
 // caret, the cut sides marked with `...`. A width too small to hold the
 // gutter and both markers behaves as the smallest usable one.
-func WithWidth(width int) DiagnosticOption {
+func WithDiagWidth(width int) DiagnosticOption {
 	return func(opts *diagnosticOptions) {
 		opts.Width = width
 	}
