@@ -51,9 +51,10 @@ func tokensOf(state *ipfw.RuleState[net4, net6]) ruleTokens {
 	}
 }
 
-// newRuleState is a typed state over xnetip with the given configuration.
-func newRuleState(cfg ipfw.RuleStateConfig[net4, net6]) *ipfw.RuleState[net4, net6] {
-	return ipfw.NewRuleState[net4, net6](nets, cfg)
+// newRuleState is a typed state over xnetip with the given custom target
+// handler.
+func newRuleState(custom ipfw.CustomTargetFunc[net4, net6]) *ipfw.RuleState[net4, net6] {
+	return ipfw.NewRuleState[net4, net6](nets, custom)
 }
 
 // network4 is a parsed IPv4 network target.
@@ -150,7 +151,7 @@ func Test_RuleState_Networks(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			state := newRuleState(ipfw.RuleStateConfig[net4, net6]{})
+			state := newRuleState(nil)
 			rec, err := ipfw.NewParser(tc.input).Next(state)
 			require.Nil(t, err)
 			require.Equal(t, ipfw.RecordInstruction, rec.Kind)
@@ -200,7 +201,7 @@ func Test_RuleState_Errors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			state := newRuleState(ipfw.RuleStateConfig[net4, net6]{})
+			state := newRuleState(nil)
 			_, err := ipfw.NewParser(tc.input).Next(state)
 			require.NotNil(t, err)
 			require.Equal(t, tc.expected, *err)
@@ -210,7 +211,7 @@ func Test_RuleState_Errors(t *testing.T) {
 
 // verifies that Reset empties the slices and keeps their capacity.
 func Test_RuleState_Reset(t *testing.T) {
-	state := newRuleState(ipfw.RuleStateConfig[net4, net6]{})
+	state := newRuleState(nil)
 	_, err := ipfw.NewParser("add allow tcp from { 192.0.2.0/24 or ::1 } 22 to any 80 established\n").Next(state)
 	require.Nil(t, err)
 	capacity := cap(state.Sources)
@@ -232,7 +233,7 @@ func Test_RuleState_Reset(t *testing.T) {
 func Test_RuleState_NoAllocs(t *testing.T) {
 	src := "add allow tcp from { 192.0.2.0/24 or 2001:db8::/32 } to 198.51.100.0/24 22\n"
 	parser := ipfw.NewParser(src)
-	state := newRuleState(ipfw.RuleStateConfig[net4, net6]{})
+	state := newRuleState(nil)
 	_, _ = parser.Next(state)
 	ok := true
 	allocs := testing.AllocsPerRun(100, func() {
@@ -274,9 +275,7 @@ func customTargets(target ipfw.Target) (ipfw.TargetMatch[net4, net6], error) {
 //
 // The negation is the handler's to copy.
 func Test_RuleState_CustomTarget(t *testing.T) {
-	cfg := ipfw.RuleStateConfig[net4, net6]{CustomTarget: customTargets}
-
-	state := newRuleState(cfg)
+	state := newRuleState(customTargets)
 	_, err := ipfw.NewParser("add allow ip from not _X_ to inet\n").Next(state)
 	require.Nil(t, err)
 	require.Equal(t, ruleTokens{
@@ -287,7 +286,7 @@ func Test_RuleState_CustomTarget(t *testing.T) {
 		},
 	}, tokensOf(state))
 
-	state = newRuleState(cfg)
+	state = newRuleState(customTargets)
 	_, err = ipfw.NewParser("add allow ip from local to any\n").Next(state)
 	require.Nil(t, err)
 	require.Equal(t, ruleTokens{
@@ -296,7 +295,7 @@ func Test_RuleState_CustomTarget(t *testing.T) {
 		destinations: []ipfw.TargetMatch[net4, net6]{anyTarget},
 	}, tokensOf(state))
 
-	state = newRuleState(cfg)
+	state = newRuleState(customTargets)
 	_, err = ipfw.NewParser("add allow ip from bogus to any\n").Next(state)
 	require.NotNil(t, err)
 	require.Equal(t, ipfw.ParseError{
@@ -312,7 +311,7 @@ func Test_RuleState_CustomTarget(t *testing.T) {
 func Test_RuleState_Custom_NoAllocs(t *testing.T) {
 	src := "add allow ip from { _X_ or inet } to local\n"
 	parser := ipfw.NewParser(src)
-	state := newRuleState(ipfw.RuleStateConfig[net4, net6]{CustomTarget: customTargets})
+	state := newRuleState(customTargets)
 	_, _ = parser.Next(state)
 	ok := true
 	allocs := testing.AllocsPerRun(100, func() {

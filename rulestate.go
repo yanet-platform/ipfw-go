@@ -89,12 +89,6 @@ type TargetMatch[V4, V6 any] struct {
 // An error rejects the target, an ErrorKind keeping its kind.
 type CustomTargetFunc[V4, V6 any] func(t Target) (TargetMatch[V4, V6], error)
 
-// RuleStateConfig is what a RuleState does beyond parsing networks.
-type RuleStateConfig[V4, V6 any] struct {
-	// CustomTarget takes targets of unknown shape, nil rejecting them.
-	CustomTarget CustomTargetFunc[V4, V6]
-}
-
 // RuleState is the State that turns the raw tokens of a rule into typed
 // values, networks parsed with the consumer's types.
 //
@@ -116,14 +110,14 @@ type RuleState[V4, V6 any] struct {
 	// Options holds the rule options.
 	Options []Opt
 
-	nets NetworkParser[V4, V6]
-	cfg  RuleStateConfig[V4, V6]
+	nets   NetworkParser[V4, V6]
+	custom CustomTargetFunc[V4, V6]
 }
 
-// NewRuleState returns a state parsing networks with nets and handling
-// the rest as cfg says.
-func NewRuleState[V4, V6 any](nets NetworkParser[V4, V6], cfg RuleStateConfig[V4, V6]) *RuleState[V4, V6] {
-	return &RuleState[V4, V6]{nets: nets, cfg: cfg}
+// NewRuleState returns a state parsing networks with nets, custom taking
+// the targets of unknown shape and nil rejecting them.
+func NewRuleState[V4, V6 any](nets NetworkParser[V4, V6], custom CustomTargetFunc[V4, V6]) *RuleState[V4, V6] {
+	return &RuleState[V4, V6]{nets: nets, custom: custom}
 }
 
 // Reset empties every slice and keeps its capacity for the next line.
@@ -209,10 +203,10 @@ func (m *RuleState[V4, V6]) typedTarget(target Target) (TargetMatch[V4, V6], err
 	case TargetHostname, TargetTable:
 		match.Name = target.Text
 	case TargetCustom:
-		if m.cfg.CustomTarget == nil {
+		if m.custom == nil {
 			return TargetMatch[V4, V6]{}, ErrExpectedTarget
 		}
-		return m.cfg.CustomTarget(target)
+		return m.custom(target)
 	}
 	return match, nil
 }

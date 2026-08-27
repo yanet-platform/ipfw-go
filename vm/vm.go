@@ -141,7 +141,7 @@ func Build[V4, V6 Network](
 	if machine.verdict.Kind == 0 {
 		machine.verdict = ipfw.Action{Kind: ipfw.ActionDeny}
 	}
-	state := ipfw.NewRuleState(nets, ipfw.RuleStateConfig[V4, V6]{CustomTarget: cfg.CustomTarget})
+	state := ipfw.NewRuleState(nets, cfg.CustomTarget)
 	for {
 		state.Reset()
 		rec, parseErr := p.Next(state)
