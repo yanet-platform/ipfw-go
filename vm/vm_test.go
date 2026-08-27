@@ -548,6 +548,21 @@ func Test_VM_Check_Established(t *testing.T) {
 	require.Equal(t, pass, negated.Check(&vm.Context{}, udp))
 }
 
+// verifies that frag matches a non-first IPv4 fragment only, which, having
+// no transport header, fails a rule with ports first.
+func Test_VM_Check_Frag(t *testing.T) {
+	machine := build(t, "add allow ip from any to any frag\nadd deny ip from any to any\n", none)
+	fragment := vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")).WithFragmentOffset(100)
+	require.Equal(t, pass, machine.Check(&vm.Context{}, fragment))
+	require.Equal(t, deny, machine.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.2")))
+	require.Equal(t, deny, machine.Check(&vm.Context{}, vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8::2"))))
+
+	withPorts := build(t, "add allow ip from any to any 22 frag\nadd deny ip from any to any\n", none)
+	require.Equal(t, deny, withPorts.Check(&vm.Context{}, fragment))
+	require.Equal(t, deny, withPorts.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.2").(vm.RawIPv4Packet).WithFragmentOffset(100)))
+	require.Equal(t, deny, withPorts.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.2")))
+}
+
 // verifies that in and out match the direction of the check, that either
 // in a group always matches and that not in is out.
 func Test_VM_Check_Direction(t *testing.T) {
@@ -1009,10 +1024,10 @@ func Test_VM_Build_Errors(t *testing.T) {
 		},
 		{
 			name:      "unsupported option",
-			rules:     "add pass tcp from any to any established frag\n",
+			rules:     "add pass tcp from any to any established icmptypes 8\n",
 			resolvers: resolving,
 			line:      1,
-			text:      "add pass tcp from any to any established frag",
+			text:      "add pass tcp from any to any established icmptypes 8",
 			cause:     vm.ErrUnsupportedOption,
 		},
 		{

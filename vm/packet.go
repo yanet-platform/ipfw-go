@@ -160,17 +160,17 @@ func (m RawIPv4Packet) DestinationAddr() netip.Addr {
 
 // SourcePort implements Packet.
 func (m RawIPv4Packet) SourcePort() (uint16, bool) {
-	return portAt(m, m.Protocol(), ipv4HeaderLen)
+	return portAt(m, m.transport(), ipv4HeaderLen)
 }
 
 // DestinationPort implements Packet.
 func (m RawIPv4Packet) DestinationPort() (uint16, bool) {
-	return portAt(m, m.Protocol(), ipv4HeaderLen+2)
+	return portAt(m, m.transport(), ipv4HeaderLen+2)
 }
 
 // TCPFlags implements Packet.
 func (m RawIPv4Packet) TCPFlags() (ipfw.TCPFlag, bool) {
-	return tcpFlagsAt(m, m.Protocol(), ipv4HeaderLen+13)
+	return tcpFlagsAt(m, m.transport(), ipv4HeaderLen+13)
 }
 
 // IsFragment implements Packet.
@@ -180,12 +180,21 @@ func (m RawIPv4Packet) IsFragment() bool {
 
 // ICMPType implements Packet.
 func (m RawIPv4Packet) ICMPType() (uint8, bool) {
-	return typeAt(m, m.Protocol(), protoICMP, ipv4HeaderLen)
+	return typeAt(m, m.transport(), protoICMP, ipv4HeaderLen)
 }
 
 // ICMP6Type implements Packet.
 func (m RawIPv4Packet) ICMP6Type() (uint8, bool) {
-	return typeAt(m, m.Protocol(), protoICMPv6, ipv4HeaderLen)
+	return typeAt(m, m.transport(), protoICMPv6, ipv4HeaderLen)
+}
+
+// transport is the protocol of the header after the IP header, none for
+// a non-first fragment, which carries payload there.
+func (m RawIPv4Packet) transport() uint8 {
+	if m.IsFragment() {
+		return 0
+	}
+	return m.Protocol()
 }
 
 // RawIPv6Packet is an IPv6 packet as bytes, the header taken to be forty

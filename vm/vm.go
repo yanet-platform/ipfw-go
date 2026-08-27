@@ -375,7 +375,7 @@ func (m *builder[V4, V6]) OnDestinationPort(match ipfw.PortNumberMatch) error {
 // ErrUnsupportedOption.
 func (m *builder[V4, V6]) OnOption(opt ipfw.Opt) error {
 	switch opt.Kind {
-	case ipfw.OptEstablished, ipfw.OptIn, ipfw.OptOut:
+	case ipfw.OptEstablished, ipfw.OptIn, ipfw.OptOut, ipfw.OptFrag:
 	default:
 		return ErrUnsupportedOption
 	}
@@ -488,7 +488,7 @@ func (m *VM[V4, V6]) matchOptions(options []ipfw.Opt, ctx *Context, pkt Packet) 
 // the packet in the context.
 //
 // established is a TCP packet with ACK or RST set, in and out the
-// direction of the check.
+// direction of the check, frag a non-first fragment.
 func (m *VM[V4, V6]) matchOption(opt *ipfw.Opt, ctx *Context, pkt Packet) bool {
 	switch opt.Kind {
 	case ipfw.OptEstablished:
@@ -498,6 +498,8 @@ func (m *VM[V4, V6]) matchOption(opt *ipfw.Opt, ctx *Context, pkt Packet) bool {
 		return ctx.Direction == In
 	case ipfw.OptOut:
 		return ctx.Direction == Out
+	case ipfw.OptFrag:
+		return pkt.IsFragment()
 	}
 	return false
 }
