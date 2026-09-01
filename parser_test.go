@@ -2099,22 +2099,81 @@ func Test_Parser_Next_Network4Unvalidated(t *testing.T) {
 	}, state)
 }
 
-// verifies that a comma list of networks is not supported: the first
-// network is emitted and the line fails at the comma.
-func Test_Parser_Next_Network4CommaList(t *testing.T) {
+// verifies that source and destination address lists keep their common
+// negation and every member in parser state.
+func Test_Parser_Next_AddressLists(t *testing.T) {
 	var state ipfw.ReduceState
-	_, err := ipfw.NewParser("add allow ip from 192.0.2.1,203.0.113.1 to any").Next(&state)
-	require.NotNil(t, err)
-	require.Equal(t, ipfw.ParseError{
-		Kind:   ipfw.ErrExpectedWhitespace,
-		Line:   1,
-		Column: 27,
-		Text:   "add allow ip from 192.0.2.1,203.0.113.1 to any",
-	}, *err)
+	src := "add allow ip from not 192.0.2.1,203.0.113.1 " +
+		"to 2001:db8::1,2001:db8::2\n"
+	rec, err := ipfw.NewParser(src).Next(&state)
+	require.Nil(t, err)
+	require.Equal(t, passAnyToAny(1, strings.TrimSpace(src)), *rec)
 	require.Equal(t, ipfw.ReduceState{
 		IPProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
-		Sources:  []ipfw.Target{{Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"}},
+		Sources: []ipfw.Target{
+			{Neg: true, Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"},
+			{Neg: true, Or: true, Kind: ipfw.TargetNetwork4, Text: "203.0.113.1"},
+		},
+		Destinations: []ipfw.Target{
+			{Kind: ipfw.TargetNetwork6, Text: "2001:db8::1"},
+			{Or: true, Kind: ipfw.TargetNetwork6, Text: "2001:db8::2"},
+		},
 	}, state)
+}
+
+// verifies that malformed address lists fail at the missing or invalid member
+// and keep every token emitted before it.
+func Test_Parser_Next_AddressListErrors(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		err   ipfw.ParseError
+		state ipfw.ReduceState
+	}{
+		{
+			name:  "empty destination member",
+			input: "add allow ip from any to 192.0.2.1,,203.0.113.1",
+			err: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedTarget,
+				Line:   1,
+				Column: 35,
+				Text:   "add allow ip from any to 192.0.2.1,,203.0.113.1",
+			},
+			state: ipfw.ReduceState{
+				IPProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:  []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{
+					{Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"},
+				},
+			},
+		},
+		{
+			name:  "destination list ends after comma",
+			input: "add allow ip from any to 192.0.2.1,",
+			err: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedTarget,
+				Line:   1,
+				Column: 35,
+				Text:   "add allow ip from any to 192.0.2.1,",
+			},
+			state: ipfw.ReduceState{
+				IPProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:  []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{
+					{Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"},
+				},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var state ipfw.ReduceState
+			_, err := ipfw.NewParser(tc.input).Next(&state)
+			require.NotNil(t, err)
+			require.Equal(t, tc.err, *err)
+			require.Equal(t, tc.state, state)
+		})
+	}
 }
 
 // verifies that a braced single target and trailing whitespace parse, the
@@ -2175,7 +2234,8 @@ func Test_Parser_Next_InlineComment(t *testing.T) {
 // verifies that parsing a complete rule into a warmed-up state allocates
 // nothing.
 func Test_Parser_Body_NoAllocs(t *testing.T) {
-	src := "add pass ip from any to any\n"
+	src := "add pass ip from not 192.0.2.1,198.51.100.1 " +
+		"to 2001:db8::1,2001:db8::2\n"
 	parser := ipfw.NewParser(src)
 	var state ipfw.ReduceState
 	_, _ = parser.Next(&state)

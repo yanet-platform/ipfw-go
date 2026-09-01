@@ -83,8 +83,8 @@ func (fakeServices) ResolveService(name string) (uint16, bool) {
 // fakeTargets resolves the names the tests use and hands out the same
 // slices every time.
 //
-// A hostname stands for a host of each family, a `_NAME_` macro for two
-// IPv4 networks, `local` for one, `inet` for nothing, anything else is
+// A hostname stands for a host of each family, a `_NAME_` macro for two IPv4
+// networks, `local` for one, and the empty names for nothing. Anything else is
 // rejected.
 type fakeTargets struct {
 	nets4 []net4
@@ -102,7 +102,7 @@ func (m *fakeTargets) ResolveTarget(target ipfw.Target) ([]net4, []net6, error) 
 		m.nets4 = append(m.nets4, must4("192.0.2.0/24"), must4("198.51.100.0/24"))
 	case text == "local":
 		m.nets4 = append(m.nets4, must4("203.0.113.0/24"))
-	case text == "inet":
+	case text == "inet", text == "empty.example.com":
 	default:
 		return nil, nil, ipfw.ErrExpectedTarget
 	}
@@ -173,6 +173,32 @@ func Test_Resolver_Networks(t *testing.T) {
 					{Neg: true, Kind: ipfw.TargetNetwork4, Net4: must4("192.0.2.0/24")},
 				},
 				Destinations: []ipfw.TargetMatch[net4, net6]{anyTarget},
+			},
+		},
+		{
+			name: "negated address lists",
+			input: "add allow ip from not 192.0.2.1,198.51.100.1 " +
+				"to not 2001:db8::1,2001:db8::2\n",
+			state: ipfw.ReduceVMState[net4, net6]{
+				IPProtos: ipAny,
+				Sources: []ipfw.TargetMatch[net4, net6]{
+					{Neg: true, Kind: ipfw.TargetNetwork4, Net4: must4("192.0.2.1")},
+					{
+						Neg:  true,
+						Or:   true,
+						Kind: ipfw.TargetNetwork4,
+						Net4: must4("198.51.100.1"),
+					},
+				},
+				Destinations: []ipfw.TargetMatch[net4, net6]{
+					{Neg: true, Kind: ipfw.TargetNetwork6, Net6: must6("2001:db8::1")},
+					{
+						Neg:  true,
+						Or:   true,
+						Kind: ipfw.TargetNetwork6,
+						Net6: must6("2001:db8::2"),
+					},
+				},
 			},
 		},
 		{
@@ -298,6 +324,42 @@ func Test_Resolver_Targets(t *testing.T) {
 			destinations: []ipfw.TargetMatch[net4, net6]{anyTarget},
 		},
 		{
+			name: "empty first address list member starts a separate target",
+			input: "add allow ip from { 203.0.113.1 or " +
+				"not empty.example.com,host.example.com } to any\n",
+			sources: []ipfw.TargetMatch[net4, net6]{
+				{Kind: ipfw.TargetNetwork4, Net4: must4("203.0.113.1")},
+				{Neg: true, Kind: ipfw.TargetNetwork4, Net4: must4("192.0.2.1/32")},
+				{
+					Neg:  true,
+					Or:   true,
+					Kind: ipfw.TargetNetwork6,
+					Net6: must6("2001:db8::1/128"),
+				},
+			},
+			destinations: []ipfw.TargetMatch[net4, net6]{anyTarget},
+		},
+		{
+			name:  "custom address list",
+			input: "add allow ip from not local,_X_ to any\n",
+			sources: []ipfw.TargetMatch[net4, net6]{
+				{Neg: true, Kind: ipfw.TargetNetwork4, Net4: must4("203.0.113.0/24")},
+				{
+					Neg:  true,
+					Or:   true,
+					Kind: ipfw.TargetNetwork4,
+					Net4: must4("192.0.2.0/24"),
+				},
+				{
+					Neg:  true,
+					Or:   true,
+					Kind: ipfw.TargetNetwork4,
+					Net4: must4("198.51.100.0/24"),
+				},
+			},
+			destinations: []ipfw.TargetMatch[net4, net6]{anyTarget},
+		},
+		{
 			name:         "name standing for nothing leaves the side empty",
 			input:        "add allow ip from inet to any\n",
 			sources:      nil,
@@ -415,7 +477,8 @@ func Test_ReduceVMState_Reset(t *testing.T) {
 // verifies that a line exercising every resolver parses into a warmed-up
 // typed state without allocating.
 func Test_Resolver_NoAllocs(t *testing.T) {
-	src := "add allow tcp from { _X_ or host.example.com } ssh to 198.51.100.0/24 domain-70 proto udp dst-port ssh\n"
+	src := "add allow tcp from { _X_ or host.example.com,192.0.2.1 } ssh " +
+		"to 198.51.100.0/24,203.0.113.0/24 domain-70 proto udp dst-port ssh\n"
 	parser := ipfw.NewParser(src)
 	var sink ipfw.ReduceVMState[net4, net6]
 	state := ipfw.NewResolver(&sink, everything)

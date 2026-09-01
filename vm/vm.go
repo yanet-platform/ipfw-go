@@ -927,10 +927,9 @@ func matchProtos(matches []ipfw.ProtoNumberMatch, protocol uint8) bool {
 // matchTargets reports whether the address is one of the targets, none
 // matching nothing.
 //
-// The networks a name stands for, the ones marked Or after the first,
-// are one target: the address is in any of them, or in none when the
-// name is negated. A side left empty by a name standing for nothing is
-// a rule that never matches.
+// Consecutive targets marked Or are one match pattern: the address is in any
+// of them, or in none when the pattern is negated. A side left empty by a name
+// standing for nothing is a rule that never matches.
 func (m *VM[V4, V6]) matchTargets(
 	targets []ipfw.TargetMatch[V4, V6],
 	ctx *Context,

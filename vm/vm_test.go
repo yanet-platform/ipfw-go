@@ -57,8 +57,8 @@ func (fakeServices) ResolveService(name string) (uint16, bool) {
 	return 0, false
 }
 
-// fakeTargets stands one hostname for a network of each family, `_NETS_`
-// for two IPv4 networks and `nothing.example.com` for nothing.
+// fakeTargets stands one hostname for a network of each family, `_NETS_` for
+// two IPv4 networks and the empty hostnames for nothing.
 type fakeTargets struct{}
 
 // ResolveTarget implements ipfw.TargetResolver.
@@ -68,7 +68,7 @@ func (fakeTargets) ResolveTarget(target ipfw.Target) ([]net4, []net6, error) {
 		return []net4{parse4("192.0.2.1/32")}, []net6{parse6("2001:db8::1/128")}, nil
 	case "_NETS_":
 		return []net4{parse4("192.0.2.0/24"), parse4("198.51.100.0/24")}, nil, nil
-	case "nothing.example.com":
+	case "nothing.example.com", "empty.example.com":
 		return nil, nil, nil
 	}
 	return nil, nil, ipfw.ErrExpectedTarget
@@ -1117,10 +1117,81 @@ func Test_VM_Check_ResolvedTargets(t *testing.T) {
 	}
 }
 
+// verifies that a comma-separated address list is one match pattern, so a
+// leading not negates membership in the complete list.
+func Test_VM_Check_AddressLists(t *testing.T) {
+	cases := []struct {
+		name    string
+		rules   string
+		packet  vm.Packet
+		verdict ipfw.Action
+	}{
+		{
+			name: "second source address",
+			rules: "add pass ip from 192.0.2.1,198.51.100.1 to any\n" +
+				"add deny ip from any to any\n",
+			packet:  tcp4("198.51.100.1", "203.0.113.1"),
+			verdict: pass,
+		},
+		{
+			name: "negated list member",
+			rules: "add pass ip from not 192.0.2.1,198.51.100.1 to any\n" +
+				"add deny ip from any to any\n",
+			packet:  tcp4("198.51.100.1", "203.0.113.1"),
+			verdict: deny,
+		},
+		{
+			name: "outside negated list",
+			rules: "add pass ip from any to not 192.0.2.1,198.51.100.1\n" +
+				"add deny ip from any to any\n",
+			packet:  tcp4("203.0.113.1", "203.0.113.2"),
+			verdict: pass,
+		},
+		{
+			name: "negated IPv6 destination list member",
+			rules: "add pass ip6 from any to not 2001:db8::1,2001:db8::2\n" +
+				"add deny ip from any to any\n",
+			packet: vm.NewIPv6Packet(
+				netip.MustParseAddr("2001:db8::3"),
+				netip.MustParseAddr("2001:db8::2"),
+			),
+			verdict: deny,
+		},
+		{
+			name: "or block keeps independent negations",
+			rules: "add pass ip from { not 192.0.2.1 or not 198.51.100.1 } to any\n" +
+				"add deny ip from any to any\n",
+			packet:  tcp4("198.51.100.1", "203.0.113.1"),
+			verdict: pass,
+		},
+		{
+			name: "empty first list member stays separate",
+			rules: "add pass ip from { 203.0.113.0/24 or " +
+				"not empty.example.com,192.0.2.1 } to any\n" +
+				"add deny ip from any to any\n",
+			packet:  tcp4("198.51.100.1", "203.0.113.1"),
+			verdict: pass,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			machine, err := vm.Build(
+				ipfw.NewParser(tc.rules),
+				vm.Config[net4, net6]{Environment: resolvingTargets},
+			)
+			require.NoError(t, err)
+			require.Equal(t, tc.verdict, machine.Check(&vm.Context{}, tc.packet))
+		})
+	}
+}
+
 // verifies that a check over resolved names allocates nothing.
 func Test_VM_Check_Resolved_NoAllocs(t *testing.T) {
+	rules := "add deny ip from not host.example.com,192.0.2.2 to _NETS_\n" +
+		"add pass ip from host.example.com to { _NETS_ or not host.example.com }\n" +
+		"add deny ip from any to any\n"
 	machine, err := vm.Build(
-		ipfw.NewParser("add deny ip from not host.example.com to _NETS_\nadd pass ip from host.example.com to { _NETS_ or not host.example.com }\nadd deny ip from any to any\n"),
+		ipfw.NewParser(rules),
 		vm.Config[net4, net6]{Environment: resolvingTargets},
 	)
 	require.NoError(t, err)
