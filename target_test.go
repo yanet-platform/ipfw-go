@@ -154,11 +154,14 @@ func Test_ParseTargets_Table(t *testing.T) {
 			},
 		},
 		{
-			name:  "IPv4 address stops at a comma",
-			input: "192.0.2.1,203.0.113.1 to any",
-			n:     9,
+			name:  "negated IPv4 address list",
+			input: "not 192.0.2.1, \t203.0.113.1 to any",
+			n:     27,
 			state: ipfw.ReduceState{
-				Sources: []ipfw.Target{{Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"}},
+				Sources: []ipfw.Target{
+					{Neg: true, Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"},
+					{Neg: true, Or: true, Kind: ipfw.TargetNetwork4, Text: "203.0.113.1"},
+				},
 			},
 		},
 		{
@@ -239,6 +242,17 @@ func Test_ParseTargets_Table(t *testing.T) {
 			},
 		},
 		{
+			name:  "IPv6 address list",
+			input: "2001:db8::1,2001:db8::2 to any",
+			n:     23,
+			state: ipfw.ReduceState{
+				Sources: []ipfw.Target{
+					{Kind: ipfw.TargetNetwork6, Text: "2001:db8::1"},
+					{Or: true, Kind: ipfw.TargetNetwork6, Text: "2001:db8::2"},
+				},
+			},
+		},
+		{
 			name:  "IPv6 address with a suffix is custom",
 			input: "::1zz to any",
 			n:     5,
@@ -297,6 +311,17 @@ func Test_ParseTargets_Table(t *testing.T) {
 			},
 		},
 		{
+			name:  "hostname address list",
+			input: "not host.example.com,192.0.2.1 to any",
+			n:     30,
+			state: ipfw.ReduceState{
+				Sources: []ipfw.Target{
+					{Neg: true, Kind: ipfw.TargetHostname, Text: "host.example.com"},
+					{Neg: true, Or: true, Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"},
+				},
+			},
+		},
+		{
 			name:  "quoted hostname",
 			input: "`node-1.example.net' to any",
 			n:     20,
@@ -328,6 +353,17 @@ func Test_ParseTargets_Table(t *testing.T) {
 			n:     9,
 			state: ipfw.ReduceState{
 				Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "localhost"}},
+			},
+		},
+		{
+			name:  "custom address list",
+			input: "localhost,_NETS_ to any",
+			n:     16,
+			state: ipfw.ReduceState{
+				Sources: []ipfw.Target{
+					{Kind: ipfw.TargetCustom, Text: "localhost"},
+					{Or: true, Kind: ipfw.TargetCustom, Text: "_NETS_"},
+				},
 			},
 		},
 		{
@@ -455,6 +491,16 @@ func Test_ParseTargets_Table(t *testing.T) {
 			}},
 		},
 		{
+			name:  "address list inside a group",
+			input: "{ not 192.0.2.1,203.0.113.1 or 198.51.100.1 } x",
+			n:     45,
+			state: ipfw.ReduceState{Sources: []ipfw.Target{
+				{Neg: true, Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"},
+				{Neg: true, Or: true, Kind: ipfw.TargetNetwork4, Text: "203.0.113.1"},
+				{Kind: ipfw.TargetNetwork4, Text: "198.51.100.1"},
+			}},
+		},
+		{
 			name:  "not glued to a keyword is custom",
 			input: "notany x",
 			n:     6,
@@ -475,6 +521,33 @@ func Test_ParseTargets_Table(t *testing.T) {
 			n:     5,
 			err:   ipfw.ErrExpectedOr,
 			state: ipfw.ReduceState{Sources: []ipfw.Target{{Kind: ipfw.TargetAny}}},
+		},
+		{
+			name:  "trailing address list comma keeps the first element",
+			input: "192.0.2.1,",
+			n:     10,
+			err:   ipfw.ErrExpectedTarget,
+			state: ipfw.ReduceState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"}},
+			},
+		},
+		{
+			name:  "empty address list member keeps the first element",
+			input: "192.0.2.1,,203.0.113.1",
+			n:     10,
+			err:   ipfw.ErrExpectedTarget,
+			state: ipfw.ReduceState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"}},
+			},
+		},
+		{
+			name:  "non-address list member keeps the first element",
+			input: "192.0.2.1,any",
+			n:     10,
+			err:   ipfw.ErrExpectedTarget,
+			state: ipfw.ReduceState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"}},
+			},
 		},
 	}
 	for _, tc := range cases {
@@ -506,17 +579,18 @@ func Test_ParseTargets_StateError(t *testing.T) {
 	require.Equal(t, ipfw.ErrUnknownOption, err)
 }
 
-// verifies that a braced group of every shape, negations included,
-// allocates nothing.
+// verifies that a braced group of every shape, an address list and negations
+// included, allocates nothing.
 func Test_ParseTargets_Group_NoAllocs(t *testing.T) {
-	input := "{ 192.0.2.0/24 or not 2001:db8::/32 or `host.example.com' or table(t) or _M_ } to any"
+	input := "{ 192.0.2.0/24,198.51.100.0/24 or not 2001:db8::/32 or " +
+		"`host.example.com' or table(t) or _M_ } to any"
 	var state ipfw.ReduceState
 	_, _ = ipfw.ParseSourceTargets(input, &state)
 	ok := true
 	allocs := testing.AllocsPerRun(100, func() {
 		state.Reset()
 		n, err := ipfw.ParseSourceTargets(input, &state)
-		if err != nil || n != 78 {
+		if err != nil || n != 94 {
 			ok = false
 		}
 	})

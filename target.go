@@ -22,10 +22,13 @@ const (
 	TargetCustom
 )
 
-// Target is a source or destination of the rule body, negated by `not`.
+// Target is one member of a source or destination match.
 type Target struct {
-	// Neg is the `not` prefix.
+	// Neg is the `not` prefix shared by an address list.
 	Neg bool
+	// Or joins this target to the previous address-list member under its
+	// negation.
+	Or bool
 	// Kind is the shape the token was classified as.
 	Kind TargetKind
 	// Text is the network text, the hostname, the table name or the raw
@@ -48,8 +51,8 @@ func ParseDestinationTargets(s string, state State) (int, error) {
 	return consumed(s, rest, err)
 }
 
-// parseTargets parses one target or a `{ a or b … }` group of them into the
-// source or the destination side of the state.
+// parseTargets parses one target, an address list or a `{ a or b … }` group
+// into the source or the destination side of the state.
 func parseTargets(s string, state State, side bodySide) (string, fail) {
 	g, rest := openGroup(s)
 	for {
@@ -68,11 +71,11 @@ func parseTargets(s string, state State, side bodySide) (string, fail) {
 	}
 }
 
-// parseTargetElement parses one optionally negated target, a failure
-// pointing at the token after the negation.
+// parseTargetElement parses one optionally negated target or address list, a
+// failure pointing at the member after the negation or comma.
 func parseTargetElement(s string, state State, side bodySide) (string, fail) {
 	rest, neg := notWS1(s)
-	token, afterToken := scanTargetToken(rest)
+	token, afterTarget := scanTargetToken(rest)
 	target, kind := classifyTarget(token)
 	if kind != 0 {
 		return s, fail{Kind: kind, At: rest}
@@ -81,7 +84,39 @@ func parseTargetElement(s string, state State, side bodySide) (string, fail) {
 	if err := failFrom(emitTarget(state, side, target), rest); err.Failed() {
 		return s, err
 	}
-	return afterToken, fail{}
+	if !isAddressListTarget(target) {
+		return afterTarget, fail{}
+	}
+	for {
+		if afterComma, ok := prefix(afterTarget, ","); ok {
+			rest = ws0(afterComma)
+		} else {
+			return afterTarget, fail{}
+		}
+		token, afterTarget = scanTargetToken(rest)
+		target, kind = classifyTarget(token)
+		if kind != 0 || !isAddressListTarget(target) {
+			return s, fail{Kind: ErrExpectedTarget, At: rest}
+		}
+		target.Neg, target.Or = neg, true
+		if err := failFrom(emitTarget(state, side, target), rest); err.Failed() {
+			return s, err
+		}
+	}
+}
+
+// isAddressListTarget reports whether target can be one addr-list member.
+// A malformed table expression stopped at its comma remains a single custom
+// token rather than becoming a list.
+func isAddressListTarget(target Target) bool {
+	switch target.Kind {
+	case TargetHostname, TargetNetwork4, TargetNetwork6:
+		return true
+	case TargetCustom:
+		return !strings.HasPrefix(target.Text, "table(")
+	default:
+		return false
+	}
 }
 
 // emitTarget hands the target to the callback of its side.
