@@ -1,6 +1,9 @@
-# Local planning and tooling.
+# Local planning and tooling. Claude Code keeps its state under .claude,
+# only the skills are tracked.
 /.roadmap
 /.githooks
+/.claude/*
+!/.claude/skills
 
 # Test and profiling artifacts.
 *.test

@@ -8,7 +8,7 @@ Guidance for AI coding agents working on `ipfw`. Facts about the code, build and
 
 ## Layout
 
-Root: `lex.go`, `errors.go`/`diag.go`, `parser.go`, one file per token family (`action`, `proto`, `target`, `port`, `opt`, `ifmask`, `table`), `hooks.go`, `state.go`, `vmstate.go` (typed layer). `vm/`: `vm.go`, `tables.go`, `packet.go`. `internal/synthetic/`: the test ruleset generator.
+Root: `lex.go`, `errors.go`/`diag.go`, `parser.go`, one file per token family (`action`, `proto`, `target`, `port`, `opt`, `ifmask`, `table`), `hooks.go`, `state.go`, `vmstate.go` (typed layer). `vm/`: `vm.go`, `tables.go`, `packet.go`. `internal/synthetic/`: the test ruleset generator. `.agents/`: the comment convention and the skills, symlinked from `.claude/skills/`.
 
 Priorities: **functionality first, performance second** — but the parse path (per line) and the match path (per packet) are allocation-free by design.
 
@@ -26,7 +26,7 @@ make test | make lint | make bench | make fuzz  # wrappers; make lint is the pre
 make hooks                                      # once per clone: git config core.hooksPath .githooks
 ```
 
-`make lint` = gofumpt check, `go vet`, `golangci-lint` (`errcheck`, `govet`, `modernize`, `staticcheck`, `testifylint`, `unused`, see `.golangci.yml`), `gopls check -severity=hint` (the editor's hints, e.g. `infertypeargs`), `gocommentlint` (a local tool inspecting the **staged** diff, so `git add -A` before `make lint` — the pre-commit hook sees the staged files anyway). `make lint` skips gopls and gocommentlint when they are not installed. All binaries are installed in `$GOPATH/bin`. The module cache has every dependency: use `GOPROXY=off go get …` / `GOPROXY=off go mod tidy`.
+`make lint` = gofumpt check, `go vet`, `golangci-lint` (`errcheck`, `govet`, `modernize`, `staticcheck`, `testifylint`, `unused`, see `.golangci.yml`), `gopls check -severity=hint` (the editor's hints, e.g. `infertypeargs`). `make lint` skips gopls when it is not installed. All binaries are installed in `$GOPATH/bin`. The module cache has every dependency: use `GOPROXY=off go get …` / `GOPROXY=off go mod tidy`.
 
 ## Hard constraints
 
@@ -38,11 +38,7 @@ make hooks                                      # once per clone: git config cor
 
 ## Comments and docs — without fanaticism
 
-- Every exported symbol has a doc comment that opens with its name and says what the symbol is for and what its contract is. Options, actions and targets paraphrase `ipfw(8)`. That is the whole requirement — no essays.
-- Shape (enforced by `gocommentlint` on staged diffs): a brief of 1–2 lines, then, only when needed, one blank line and a short detailed block (preconditions, failure modes, the correctness argument).
-- Comment the *why* and the invariant, not the code. Delete comments that restate the line below, describe the obvious, or paraphrase the function body. A type's doc never repeats what its field docs say. Unexported helpers get a comment only when they carry a non-obvious contract. Constants in a documented block need their own line only when the name does not say it all. No references to Rust files or line numbers in shipped code. Sentences start with a capital letter.
-- No semicolons in comment prose: use separate sentences, commas or dashes.
-- Examples go in `Example*` test functions, not in doc comments.
+The policy is `.agents/conventions/comments.md`: a brief of 1–2 lines, then, only when needed, one blank line and a short detailed block, the why and the invariant rather than the code, no semicolons in prose. The `better-comment` skill audits or rewrites the comments of a change against it.
 
 ## Code style
 

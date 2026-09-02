@@ -182,7 +182,7 @@ Over a production ruleset of 27 MB and 115k rules the parser runs at 184 MB/s wi
 
 ```sh
 make test        # go test -race ./...
-make lint        # gofumpt, go vet, golangci-lint, gopls hints, gocommentlint
+make lint        # gofumpt, go vet, golangci-lint, gopls hints
 make bench       # compile and smoke-run every benchmark
 make bench-run   # measure, feed to benchstat
 make fuzz        # every fuzz target briefly
