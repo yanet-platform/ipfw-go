@@ -2231,24 +2231,40 @@ func Test_Parser_Next_InlineComment(t *testing.T) {
 	})
 }
 
-// verifies that parsing a complete rule into a warmed-up state allocates
-// nothing.
+// verifies that parsing the simplest rule and one with address lists into a
+// warmed-up state allocates nothing.
 func Test_Parser_Body_NoAllocs(t *testing.T) {
-	src := "add pass ip from not 192.0.2.1,198.51.100.1 " +
-		"to 2001:db8::1,2001:db8::2\n"
-	parser := ipfw.NewParser(src)
-	var state ipfw.ReduceState
-	_, _ = parser.Next(&state)
-	ok := true
-	allocs := testing.AllocsPerRun(100, func() {
-		parser.Reset(src)
-		state.Reset()
-		if _, err := parser.Next(&state); err != nil {
-			ok = false
-		}
-	})
-	require.True(t, ok)
-	require.Zero(t, allocs)
+	cases := []struct {
+		name string
+		src  string
+	}{
+		{
+			name: "any to any",
+			src:  "add pass ip from any to any\n",
+		},
+		{
+			name: "address lists",
+			src: "add pass ip from not 192.0.2.1,198.51.100.1 " +
+				"to 2001:db8::1,2001:db8::2\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			parser := ipfw.NewParser(tc.src)
+			var state ipfw.ReduceState
+			_, _ = parser.Next(&state)
+			ok := true
+			allocs := testing.AllocsPerRun(100, func() {
+				parser.Reset(tc.src)
+				state.Reset()
+				if _, err := parser.Next(&state); err != nil {
+					ok = false
+				}
+			})
+			require.True(t, ok)
+			require.Zero(t, allocs)
+		})
+	}
 }
 
 // verifies that a comment keeps its leading space and loses its trailing
