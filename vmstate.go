@@ -77,7 +77,8 @@ type TargetResolver[V4, V6 any] interface {
 type TargetMatch[V4, V6 any] struct {
 	// Neg is the `not` prefix shared by the target's networks.
 	Neg bool
-	// Or joins a further network of the same target under its negation.
+	// Or joins the match to the one before it under a shared negation: a
+	// further network of one name or a further member of an address list.
 	Or bool
 	// Kind is the target kind, never a hostname or a custom one.
 	Kind TargetKind
@@ -153,9 +154,10 @@ type Environment[V4, V6 any] struct {
 type Resolver[V4, V6 any] struct {
 	sink        VMState[V4, V6]
 	environment Environment[V4, V6]
-	// Records whether the current source chain has emitted a target.
-	sourceTargetEmitted bool
-	// Records whether the current destination chain has emitted a target.
+	// Whether the pattern being resolved on each side has produced a match
+	// yet, so a member after a name standing for nothing opens the pattern
+	// instead of joining one that was never emitted.
+	sourceTargetEmitted      bool
 	destinationTargetEmitted bool
 }
 
@@ -180,11 +182,9 @@ func (m *Resolver[V4, V6]) OnProto(match ProtoMatch) error {
 
 // OnSourceTarget implements State.
 func (m *Resolver[V4, V6]) OnSourceTarget(target Target) error {
-	// Without Or, this target starts a new chain, so reset the emitted flag.
 	if !target.Or {
 		m.sourceTargetEmitted = false
 	}
-	// Join is true when this target continues a chain that has emitted a target.
 	join := target.Or && m.sourceTargetEmitted
 	emitted, err := m.resolveTarget(target, sourceSide, join)
 	m.sourceTargetEmitted = m.sourceTargetEmitted || emitted
@@ -193,11 +193,9 @@ func (m *Resolver[V4, V6]) OnSourceTarget(target Target) error {
 
 // OnDestinationTarget implements State.
 func (m *Resolver[V4, V6]) OnDestinationTarget(target Target) error {
-	// Without Or, this target starts a new chain, so reset the emitted flag.
 	if !target.Or {
 		m.destinationTargetEmitted = false
 	}
-	// Join is true when this target continues a chain that has emitted a target.
 	join := target.Or && m.destinationTargetEmitted
 	emitted, err := m.resolveTarget(target, destinationSide, join)
 	m.destinationTargetEmitted = m.destinationTargetEmitted || emitted
@@ -288,12 +286,13 @@ func (m *Resolver[V4, V6]) resolvePort(port Port) (uint16, error) {
 }
 
 // resolveTarget hands the typed matches of a raw target to the sink's
-// callback of the side.
+// callback of the side and reports whether it emitted any.
 //
 // A keyword, a table or a network is one match, a name one per network it
-// stands for. Address-list continuations and further networks of one name are
-// marked Or. Rejected network text is the error kind of its family, a name
-// with no resolver is ErrUnresolvedTarget.
+// stands for and none for a name standing for nothing. Every match after the
+// first is marked Or, every one when the target joins the pattern before it.
+// Rejected network text is the error kind of its family, a name with no
+// resolver is ErrUnresolvedTarget.
 func (m *Resolver[V4, V6]) resolveTarget(
 	target Target,
 	side bodySide,
@@ -323,7 +322,6 @@ func (m *Resolver[V4, V6]) resolveTarget(
 		if err != nil {
 			return false, err
 		}
-		// The first resolved network uses the given Or value. The rest join it.
 		emitted := false
 		for _, network := range nets4 {
 			match = TargetMatch[V4, V6]{
