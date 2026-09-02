@@ -160,7 +160,7 @@ func Test_ParseTargets_Table(t *testing.T) {
 			state: ipfw.ReduceState{
 				Sources: []ipfw.Target{
 					{Neg: true, Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"},
-					{Neg: true, Or: true, Kind: ipfw.TargetNetwork4, Text: "203.0.113.1"},
+					{Neg: true, Kind: ipfw.TargetNetwork4, Text: "203.0.113.1"},
 				},
 			},
 		},
@@ -248,7 +248,7 @@ func Test_ParseTargets_Table(t *testing.T) {
 			state: ipfw.ReduceState{
 				Sources: []ipfw.Target{
 					{Kind: ipfw.TargetNetwork6, Text: "2001:db8::1"},
-					{Or: true, Kind: ipfw.TargetNetwork6, Text: "2001:db8::2"},
+					{Kind: ipfw.TargetNetwork6, Text: "2001:db8::2"},
 				},
 			},
 		},
@@ -317,7 +317,7 @@ func Test_ParseTargets_Table(t *testing.T) {
 			state: ipfw.ReduceState{
 				Sources: []ipfw.Target{
 					{Neg: true, Kind: ipfw.TargetHostname, Text: "host.example.com"},
-					{Neg: true, Or: true, Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"},
+					{Neg: true, Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"},
 				},
 			},
 		},
@@ -362,7 +362,7 @@ func Test_ParseTargets_Table(t *testing.T) {
 			state: ipfw.ReduceState{
 				Sources: []ipfw.Target{
 					{Kind: ipfw.TargetCustom, Text: "localhost"},
-					{Or: true, Kind: ipfw.TargetCustom, Text: "_NETS_"},
+					{Kind: ipfw.TargetCustom, Text: "_NETS_"},
 				},
 			},
 		},
@@ -477,8 +477,8 @@ func Test_ParseTargets_Table(t *testing.T) {
 			n:     39,
 			state: ipfw.ReduceState{Sources: []ipfw.Target{
 				{Kind: ipfw.TargetHostname, Text: "host.example.com"},
-				{Kind: ipfw.TargetCustom, Text: "_X_"},
-				{Kind: ipfw.TargetTable, Text: "t"},
+				{Pattern: 1, Kind: ipfw.TargetCustom, Text: "_X_"},
+				{Pattern: 2, Kind: ipfw.TargetTable, Text: "t"},
 			}},
 		},
 		{
@@ -487,7 +487,7 @@ func Test_ParseTargets_Table(t *testing.T) {
 			n:     17,
 			state: ipfw.ReduceState{Sources: []ipfw.Target{
 				{Kind: ipfw.TargetMe},
-				{Neg: true, Kind: ipfw.TargetMe6},
+				{Neg: true, Pattern: 1, Kind: ipfw.TargetMe6},
 			}},
 		},
 		{
@@ -496,8 +496,8 @@ func Test_ParseTargets_Table(t *testing.T) {
 			n:     45,
 			state: ipfw.ReduceState{Sources: []ipfw.Target{
 				{Neg: true, Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"},
-				{Neg: true, Or: true, Kind: ipfw.TargetNetwork4, Text: "203.0.113.1"},
-				{Kind: ipfw.TargetNetwork4, Text: "198.51.100.1"},
+				{Neg: true, Kind: ipfw.TargetNetwork4, Text: "203.0.113.1"},
+				{Pattern: 1, Kind: ipfw.TargetNetwork4, Text: "198.51.100.1"},
 			}},
 		},
 		{
