@@ -788,7 +788,7 @@ func Test_Parser_Next_TargetGroups(t *testing.T) {
 				},
 				Sources: []ipfw.Target{
 					{Kind: ipfw.TargetNetwork4, Text: "192.0.2.0/24"},
-					{Kind: ipfw.TargetNetwork6, Text: "::1"},
+					{Pattern: 1, Kind: ipfw.TargetNetwork6, Text: "::1"},
 				},
 				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
 			},
@@ -803,7 +803,7 @@ func Test_Parser_Next_TargetGroups(t *testing.T) {
 				},
 				Destinations: []ipfw.Target{
 					{Kind: ipfw.TargetMe},
-					{Neg: true, Kind: ipfw.TargetMe6},
+					{Neg: true, Pattern: 1, Kind: ipfw.TargetMe6},
 				},
 			},
 		},
@@ -1583,7 +1583,7 @@ func Test_Parser_Next_Options(t *testing.T) {
 				Sources: []ipfw.Target{{Kind: ipfw.TargetNetwork6, Text: "2001:db8::/64"}},
 				Destinations: []ipfw.Target{
 					{Kind: ipfw.TargetNetwork6, Text: "ff02::/112"},
-					{Kind: ipfw.TargetNetwork6, Text: "ff05::/112"},
+					{Pattern: 1, Kind: ipfw.TargetNetwork6, Text: "ff05::/112"},
 				},
 				Options: []ipfw.Opt{dstPort(11995)},
 			},
@@ -2112,11 +2112,11 @@ func Test_Parser_Next_AddressLists(t *testing.T) {
 		IPProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
 		Sources: []ipfw.Target{
 			{Neg: true, Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"},
-			{Neg: true, Or: true, Kind: ipfw.TargetNetwork4, Text: "203.0.113.1"},
+			{Neg: true, Kind: ipfw.TargetNetwork4, Text: "203.0.113.1"},
 		},
 		Destinations: []ipfw.Target{
 			{Kind: ipfw.TargetNetwork6, Text: "2001:db8::1"},
-			{Or: true, Kind: ipfw.TargetNetwork6, Text: "2001:db8::2"},
+			{Kind: ipfw.TargetNetwork6, Text: "2001:db8::2"},
 		},
 	}, state)
 }

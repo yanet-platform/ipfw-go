@@ -75,11 +75,12 @@ type TargetResolver[V4, V6 any] interface {
 
 // TargetMatch is one typed member of a source or destination match.
 type TargetMatch[V4, V6 any] struct {
-	// Neg is the `not` prefix shared by the target's networks.
+	// Neg is the `not` prefix, shared by the matches of a pattern.
 	Neg bool
-	// Or joins the match to the one before it under a shared negation: a
-	// further network of one name or a further member of an address list.
-	Or bool
+	// Pattern is the match pattern of the target the match came from, every
+	// network a name stands for sharing it. The matches of one pattern are
+	// alternatives under one negation.
+	Pattern uint16
 	// Kind is the target kind, never a hostname or a custom one.
 	Kind TargetKind
 	// Name is the table name of a TargetTable.
@@ -154,11 +155,6 @@ type Environment[V4, V6 any] struct {
 type Resolver[V4, V6 any] struct {
 	sink        VMState[V4, V6]
 	environment Environment[V4, V6]
-	// Whether the pattern being resolved on each side has produced a match
-	// yet, so a member after a name standing for nothing opens the pattern
-	// instead of joining one that was never emitted.
-	sourceTargetEmitted      bool
-	destinationTargetEmitted bool
 }
 
 // NewResolver returns a State resolving into sink within the environment.
@@ -182,24 +178,12 @@ func (m *Resolver[V4, V6]) OnProto(match ProtoMatch) error {
 
 // OnSourceTarget implements State.
 func (m *Resolver[V4, V6]) OnSourceTarget(target Target) error {
-	if !target.Or {
-		m.sourceTargetEmitted = false
-	}
-	join := target.Or && m.sourceTargetEmitted
-	emitted, err := m.resolveTarget(target, sourceSide, join)
-	m.sourceTargetEmitted = m.sourceTargetEmitted || emitted
-	return err
+	return m.resolveTarget(target, sourceSide)
 }
 
 // OnDestinationTarget implements State.
 func (m *Resolver[V4, V6]) OnDestinationTarget(target Target) error {
-	if !target.Or {
-		m.destinationTargetEmitted = false
-	}
-	join := target.Or && m.destinationTargetEmitted
-	emitted, err := m.resolveTarget(target, destinationSide, join)
-	m.destinationTargetEmitted = m.destinationTargetEmitted || emitted
-	return err
+	return m.resolveTarget(target, destinationSide)
 }
 
 // OnSourcePort implements State.
@@ -286,73 +270,66 @@ func (m *Resolver[V4, V6]) resolvePort(port Port) (uint16, error) {
 }
 
 // resolveTarget hands the typed matches of a raw target to the sink's
-// callback of the side and reports whether it emitted any.
+// callback of the side.
 //
 // A keyword, a table or a network is one match, a name one per network it
-// stands for and none for a name standing for nothing. Every match after the
-// first is marked Or, every one when the target joins the pattern before it.
-// Rejected network text is the error kind of its family, a name with no
-// resolver is ErrUnresolvedTarget.
-func (m *Resolver[V4, V6]) resolveTarget(
-	target Target,
-	side bodySide,
-	or bool,
-) (bool, error) {
-	match := TargetMatch[V4, V6]{Neg: target.Neg, Or: or, Kind: target.Kind}
+// stands for and none for a name standing for nothing, all of them under
+// the target's pattern and negation. Rejected network text is the error
+// kind of its family, a name with no resolver is ErrUnresolvedTarget.
+func (m *Resolver[V4, V6]) resolveTarget(target Target, side bodySide) error {
+	match := TargetMatch[V4, V6]{
+		Neg:     target.Neg,
+		Pattern: target.Pattern,
+		Kind:    target.Kind,
+	}
 	switch target.Kind {
 	case TargetNetwork4:
 		network, err := m.environment.Networks.ParseNetwork4(target.Text)
 		if err != nil {
-			return false, ErrExpectedIPv4Network
+			return ErrExpectedIPv4Network
 		}
 		match.Net4 = network
 	case TargetNetwork6:
 		network, err := m.environment.Networks.ParseNetwork6(target.Text)
 		if err != nil {
-			return false, ErrExpectedIPv6Network
+			return ErrExpectedIPv6Network
 		}
 		match.Net6 = network
 	case TargetTable:
 		match.Name = target.Text
 	case TargetHostname, TargetCustom:
 		if m.environment.Targets == nil {
-			return false, ErrUnresolvedTarget
+			return ErrUnresolvedTarget
 		}
 		nets4, nets6, err := m.environment.Targets.ResolveTarget(target)
 		if err != nil {
-			return false, err
+			return err
 		}
-		emitted := false
 		for _, network := range nets4 {
 			match = TargetMatch[V4, V6]{
-				Neg:  target.Neg,
-				Or:   or || emitted,
-				Kind: TargetNetwork4,
-				Net4: network,
+				Neg:     target.Neg,
+				Pattern: target.Pattern,
+				Kind:    TargetNetwork4,
+				Net4:    network,
 			}
 			if err := m.emitTarget(side, match); err != nil {
-				return emitted, err
+				return err
 			}
-			emitted = true
 		}
 		for _, network := range nets6 {
 			match = TargetMatch[V4, V6]{
-				Neg:  target.Neg,
-				Or:   or || emitted,
-				Kind: TargetNetwork6,
-				Net6: network,
+				Neg:     target.Neg,
+				Pattern: target.Pattern,
+				Kind:    TargetNetwork6,
+				Net6:    network,
 			}
 			if err := m.emitTarget(side, match); err != nil {
-				return emitted, err
+				return err
 			}
-			emitted = true
 		}
-		return emitted, nil
+		return nil
 	}
-	if err := m.emitTarget(side, match); err != nil {
-		return false, err
-	}
-	return true, nil
+	return m.emitTarget(side, match)
 }
 
 // emitTarget hands the match to the sink's callback of the side.

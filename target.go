@@ -22,13 +22,14 @@ const (
 	TargetCustom
 )
 
-// Target is one member of a source or destination match.
+// Target is one member of a source or destination of the rule body.
 type Target struct {
-	// Neg is the `not` prefix shared by an address list.
+	// Neg is the `not` prefix, shared by the members of an address list.
 	Neg bool
-	// Or joins this target to the previous address-list member under its
-	// negation.
-	Or bool
+	// Pattern is the index, from zero, of the match pattern the target
+	// belongs to: the alternatives of a `{ a or b }` group count up, the
+	// members of an address list share one.
+	Pattern uint16
 	// Kind is the shape the token was classified as.
 	Kind TargetKind
 	// Text is the network text, the hostname, the table name or the raw
@@ -52,11 +53,12 @@ func ParseDestinationTargets(s string, state State) (int, error) {
 }
 
 // parseTargets parses one target, an address list or a `{ a or b … }` group
-// into the source or the destination side of the state.
+// into the source or the destination side of the state, the alternatives of
+// the group numbered from zero.
 func parseTargets(s string, state State, side bodySide) (string, fail) {
 	g, rest := openGroup(s)
-	for {
-		afterElement, err := parseTargetElement(rest, state, side)
+	for pattern := uint16(0); ; pattern++ {
+		afterElement, err := parseTargetElement(rest, state, side, pattern)
 		if err.Failed() {
 			return s, err
 		}
@@ -71,16 +73,21 @@ func parseTargets(s string, state State, side bodySide) (string, fail) {
 	}
 }
 
-// parseTargetElement parses one optionally negated target or address list, a
-// failure pointing at the member after the negation or comma.
-func parseTargetElement(s string, state State, side bodySide) (string, fail) {
+// parseTargetElement parses one optionally negated target or address list as
+// the pattern, a failure pointing at the member after the negation or comma.
+func parseTargetElement(
+	s string,
+	state State,
+	side bodySide,
+	pattern uint16,
+) (string, fail) {
 	rest, neg := notWS1(s)
 	token, afterTarget := scanTargetToken(rest)
 	target, kind := classifyTarget(token)
 	if kind != 0 {
 		return s, fail{Kind: kind, At: rest}
 	}
-	target.Neg = neg
+	target.Neg, target.Pattern = neg, pattern
 	if err := failFrom(emitTarget(state, side, target), rest); err.Failed() {
 		return s, err
 	}
@@ -88,17 +95,17 @@ func parseTargetElement(s string, state State, side bodySide) (string, fail) {
 		return afterTarget, fail{}
 	}
 	for {
-		if afterComma, ok := prefix(afterTarget, ","); ok {
-			rest = ws0(afterComma)
-		} else {
+		afterComma, ok := prefix(afterTarget, ",")
+		if !ok {
 			return afterTarget, fail{}
 		}
+		rest = ws0(afterComma)
 		token, afterTarget = scanTargetToken(rest)
 		target, kind = classifyTarget(token)
 		if kind != 0 || !isAddressListTarget(target) {
 			return s, fail{Kind: ErrExpectedTarget, At: rest}
 		}
-		target.Neg, target.Or = neg, true
+		target.Neg, target.Pattern = neg, pattern
 		if err := failFrom(emitTarget(state, side, target), rest); err.Failed() {
 			return s, err
 		}

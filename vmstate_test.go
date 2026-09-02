@@ -159,7 +159,7 @@ func Test_Resolver_Networks(t *testing.T) {
 				IPProtos: ipAny,
 				Sources: []ipfw.TargetMatch[net4, net6]{
 					{Kind: ipfw.TargetNetwork4, Net4: must4("192.0.2.0/24")},
-					{Kind: ipfw.TargetNetwork6, Net6: must6("::1")},
+					{Pattern: 1, Kind: ipfw.TargetNetwork6, Net6: must6("::1")},
 				},
 				Destinations: []ipfw.TargetMatch[net4, net6]{anyTarget},
 			},
@@ -185,7 +185,6 @@ func Test_Resolver_Networks(t *testing.T) {
 					{Neg: true, Kind: ipfw.TargetNetwork4, Net4: must4("192.0.2.1")},
 					{
 						Neg:  true,
-						Or:   true,
 						Kind: ipfw.TargetNetwork4,
 						Net4: must4("198.51.100.1"),
 					},
@@ -194,7 +193,6 @@ func Test_Resolver_Networks(t *testing.T) {
 					{Neg: true, Kind: ipfw.TargetNetwork6, Net6: must6("2001:db8::1")},
 					{
 						Neg:  true,
-						Or:   true,
 						Kind: ipfw.TargetNetwork6,
 						Net6: must6("2001:db8::2"),
 					},
@@ -208,8 +206,8 @@ func Test_Resolver_Networks(t *testing.T) {
 				IPProtos: ipAny,
 				Sources: []ipfw.TargetMatch[net4, net6]{
 					{Kind: ipfw.TargetMe},
-					{Kind: ipfw.TargetMe6},
-					{Kind: ipfw.TargetTable, Name: "t"},
+					{Pattern: 1, Kind: ipfw.TargetMe6},
+					{Pattern: 2, Kind: ipfw.TargetTable, Name: "t"},
 				},
 				Destinations: []ipfw.TargetMatch[net4, net6]{anyTarget},
 			},
@@ -306,11 +304,11 @@ func Test_Resolver_Targets(t *testing.T) {
 			input: "add allow ip from not host.example.com to _X_\n",
 			sources: []ipfw.TargetMatch[net4, net6]{
 				{Neg: true, Kind: ipfw.TargetNetwork4, Net4: must4("192.0.2.1/32")},
-				{Neg: true, Or: true, Kind: ipfw.TargetNetwork6, Net6: must6("2001:db8::1/128")},
+				{Neg: true, Kind: ipfw.TargetNetwork6, Net6: must6("2001:db8::1/128")},
 			},
 			destinations: []ipfw.TargetMatch[net4, net6]{
 				{Kind: ipfw.TargetNetwork4, Net4: must4("192.0.2.0/24")},
-				{Or: true, Kind: ipfw.TargetNetwork4, Net4: must4("198.51.100.0/24")},
+				{Kind: ipfw.TargetNetwork4, Net4: must4("198.51.100.0/24")},
 			},
 		},
 		{
@@ -318,23 +316,28 @@ func Test_Resolver_Targets(t *testing.T) {
 			input: "add allow ip from { 192.0.2.5 or local or ::1 } to any\n",
 			sources: []ipfw.TargetMatch[net4, net6]{
 				{Kind: ipfw.TargetNetwork4, Net4: must4("192.0.2.5")},
-				{Kind: ipfw.TargetNetwork4, Net4: must4("203.0.113.0/24")},
-				{Kind: ipfw.TargetNetwork6, Net6: must6("::1")},
+				{Pattern: 1, Kind: ipfw.TargetNetwork4, Net4: must4("203.0.113.0/24")},
+				{Pattern: 2, Kind: ipfw.TargetNetwork6, Net6: must6("::1")},
 			},
 			destinations: []ipfw.TargetMatch[net4, net6]{anyTarget},
 		},
 		{
-			name: "empty first address list member starts a separate target",
+			name: "empty first address list member keeps its pattern",
 			input: "add allow ip from { 203.0.113.1 or " +
 				"not empty.example.com,host.example.com } to any\n",
 			sources: []ipfw.TargetMatch[net4, net6]{
 				{Kind: ipfw.TargetNetwork4, Net4: must4("203.0.113.1")},
-				{Neg: true, Kind: ipfw.TargetNetwork4, Net4: must4("192.0.2.1/32")},
 				{
-					Neg:  true,
-					Or:   true,
-					Kind: ipfw.TargetNetwork6,
-					Net6: must6("2001:db8::1/128"),
+					Neg:     true,
+					Pattern: 1,
+					Kind:    ipfw.TargetNetwork4,
+					Net4:    must4("192.0.2.1/32"),
+				},
+				{
+					Neg:     true,
+					Pattern: 1,
+					Kind:    ipfw.TargetNetwork6,
+					Net6:    must6("2001:db8::1/128"),
 				},
 			},
 			destinations: []ipfw.TargetMatch[net4, net6]{anyTarget},
@@ -346,13 +349,11 @@ func Test_Resolver_Targets(t *testing.T) {
 				{Neg: true, Kind: ipfw.TargetNetwork4, Net4: must4("203.0.113.0/24")},
 				{
 					Neg:  true,
-					Or:   true,
 					Kind: ipfw.TargetNetwork4,
 					Net4: must4("192.0.2.0/24"),
 				},
 				{
 					Neg:  true,
-					Or:   true,
 					Kind: ipfw.TargetNetwork4,
 					Net4: must4("198.51.100.0/24"),
 				},
