@@ -105,9 +105,10 @@ func parseTargetElement(s string, state State, side bodySide) (string, fail) {
 	}
 }
 
-// isAddressListTarget reports whether target can be one addr-list member.
-// A malformed table expression stopped at its comma remains a single custom
-// token rather than becoming a list.
+// isAddressListTarget reports whether the target can be an address-list member.
+//
+// A `table(` token cut at its comma stays one custom token, so a table with a
+// value fails at the comma instead of turning into a list.
 func isAddressListTarget(target Target) bool {
 	switch target.Kind {
 	case TargetHostname, TargetNetwork4, TargetNetwork6:
