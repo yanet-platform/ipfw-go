@@ -108,7 +108,7 @@ func Test_Parser_Next_TableAdd(t *testing.T) {
 			table: ipfw.Table{
 				Name:  "_JUMP_EARLY_OUT_",
 				Kind:  ipfw.TableAdd,
-				Key:   ipfw.TableKey{Kind: ipfw.TableKeyIfName, Text: "vlan42"},
+				Key:   ipfw.TableKey{Kind: ipfw.TableKeyName, Text: "vlan42"},
 				Value: ":JUMPED",
 			},
 		},
@@ -118,7 +118,45 @@ func Test_Parser_Next_TableAdd(t *testing.T) {
 			table: ipfw.Table{
 				Name: "t",
 				Kind: ipfw.TableAdd,
-				Key:  ipfw.TableKey{Kind: ipfw.TableKeyIfName, Text: "eth0"},
+				Key:  ipfw.TableKey{Kind: ipfw.TableKeyName, Text: "eth0"},
+			},
+		},
+		{
+			name:  "hostname",
+			input: "table t add host.example.com\n",
+			table: ipfw.Table{
+				Name: "t",
+				Kind: ipfw.TableAdd,
+				Key:  ipfw.TableKey{Kind: ipfw.TableKeyHostname, Text: "host.example.com"},
+			},
+		},
+		{
+			name:  "hostname with a prefix length is a whole name",
+			input: "table t add host.example.com/24 100\n",
+			table: ipfw.Table{
+				Name:  "t",
+				Kind:  ipfw.TableAdd,
+				Key:   ipfw.TableKey{Kind: ipfw.TableKeyName, Text: "host.example.com/24"},
+				Value: "100",
+			},
+		},
+		{
+			name:  "scoped IPv6 address is a whole name",
+			input: "table t add fe80::1%vlan0/64\n",
+			table: ipfw.Table{
+				Name: "t",
+				Kind: ipfw.TableAdd,
+				Key:  ipfw.TableKey{Kind: ipfw.TableKeyName, Text: "fe80::1%vlan0/64"},
+			},
+		},
+		{
+			name:  "macro",
+			input: "table t add _NETS_ :LABEL\n",
+			table: ipfw.Table{
+				Name:  "t",
+				Kind:  ipfw.TableAdd,
+				Key:   ipfw.TableKey{Kind: ipfw.TableKeyName, Text: "_NETS_"},
+				Value: ":LABEL",
 			},
 		},
 		{
@@ -127,7 +165,7 @@ func Test_Parser_Next_TableAdd(t *testing.T) {
 			table: ipfw.Table{
 				Name: "t",
 				Kind: ipfw.TableAdd,
-				Key:  ipfw.TableKey{Kind: ipfw.TableKeyIfName, Text: "eth0"},
+				Key:  ipfw.TableKey{Kind: ipfw.TableKeyName, Text: "eth0"},
 			},
 		},
 		{
@@ -152,8 +190,8 @@ func Test_Parser_Next_TableAdd(t *testing.T) {
 	}
 }
 
-// verifies that a missing or malformed key of a table add is a positioned
-// error and that a key cut by a slash leaves trailing content.
+// verifies that a missing key of a table add and a second value are
+// positioned errors.
 func Test_Parser_Next_TableAddErrors(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -171,23 +209,13 @@ func Test_Parser_Next_TableAddErrors(t *testing.T) {
 			},
 		},
 		{
-			name:  "key starting with a brace",
-			input: "table t add {x\n",
+			name:  "whitespace but no key",
+			input: "table t add \n",
 			expected: ipfw.ParseError{
 				Kind:   ipfw.ErrExpectedTableKey,
 				Line:   1,
-				Column: 12,
-				Text:   "table t add {x",
-			},
-		},
-		{
-			name:  "interface name cut by a slash",
-			input: "table t add eth0/1\n",
-			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedNewlineOrEOF,
-				Line:   1,
-				Column: 16,
-				Text:   "table t add eth0/1",
+				Column: 11,
+				Text:   "table t add",
 			},
 		},
 		{

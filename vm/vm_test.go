@@ -107,6 +107,12 @@ var networksOnly = ipfw.Environment[net4, net6]{Networks: nets}
 // none is the configuration with nothing set.
 var none = vm.Config[net4, net6]{}
 
+// ruleset drops the newline after the opening backtick of an indented rule
+// literal, so that the lines of a trace count from the first rule.
+func ruleset(text string) string {
+	return strings.TrimPrefix(text, "\n")
+}
+
 // build builds a VM from src with the fake resolvers, failing the test on
 // any error.
 func build(t *testing.T, src string, cfg vm.Config[net4, net6]) *vm.VM[net4, net6] {
@@ -1329,7 +1335,16 @@ func Test_VM_Check_Tables(t *testing.T) {
 func Test_VM_Build_Tables(t *testing.T) {
 	tables := vm.NewDefaultTableRegistry[net4, net6]()
 	tables.AddNetwork4("pre", must4(t, "203.0.113.0/24"))
-	machine := build(t, "table i add vlan1 :LABEL\ntable i add vlan2 plain\ntable i add vlan3\ntable pre add 192.0.2.0/24\nadd pass ip from table(pre) to any\nadd deny ip from any to any\n", vm.Config[net4, net6]{Tables: tables})
+	src := ruleset(`
+		table i create type iface
+		table i add vlan1 :LABEL
+		table i add vlan2 plain
+		table i add vlan3
+		table pre add 192.0.2.0/24
+		add pass ip from table(pre) to any
+		add deny ip from any to any
+	`)
+	machine := build(t, src, vm.Config[net4, net6]{Tables: tables})
 	require.Same(t, tables, machine.Tables())
 	require.Equal(t, pass, machine.Check(&vm.Context{}, tcp4("203.0.113.7", "192.0.2.1")))
 	require.Equal(t, pass, machine.Check(&vm.Context{}, tcp4("192.0.2.7", "192.0.2.1")))
@@ -1348,6 +1363,115 @@ func Test_VM_Build_Tables(t *testing.T) {
 	fresh := build(t, "table t create\n", none)
 	require.NotNil(t, fresh.Tables())
 	require.False(t, fresh.Tables().LookupNetwork("t", netip.MustParseAddr("192.0.2.1")))
+}
+
+// verifies that the type a create gives a table tells what its keys are, a
+// table never created being an address table as in ipfw(8).
+//
+// An address table takes networks, and hostnames and macros through the
+// target resolver, an interface table every key as an interface name. A
+// name standing for nothing adds nothing, the resolver's error fails the
+// build at the line, and so do a missing resolver and a type the VM cannot
+// hold.
+func Test_VM_Build_TableTypes(t *testing.T) {
+	v6 := func(src, dst string) vm.Packet {
+		packet := vm.NewIPv6Packet(netip.MustParseAddr(src), netip.MustParseAddr(dst))
+		return packet.WithTCP(ipfw.TCPSyn, 50000, 22)
+	}
+	src := ruleset(`
+		table h create type addr
+		table h add host.example.com
+		table h add _NETS_ 7
+		table h add nothing.example.com
+		table a create
+		table a add 2001:db8::/32
+		add pass ip from table(h) to any
+		add pass ip from any to table(a)
+		add deny ip from any to any
+	`)
+	addr, err := vm.Build(
+		ipfw.NewParser(src),
+		vm.Config[net4, net6]{Environment: resolvingTargets},
+	)
+	require.NoError(t, err)
+	require.Equal(t, pass, addr.Check(&vm.Context{}, tcp4("192.0.2.1", "203.0.113.1")))
+	require.Equal(t, pass, addr.Check(&vm.Context{}, tcp4("198.51.100.7", "203.0.113.1")))
+	require.Equal(t, deny, addr.Check(&vm.Context{}, tcp4("203.0.113.9", "203.0.113.1")))
+	require.Equal(t, pass, addr.Check(&vm.Context{}, v6("2001:db8::1", "2001:db9::1")))
+	require.Equal(t, pass, addr.Check(&vm.Context{}, v6("2001:db9::1", "2001:db8::5")))
+	require.Equal(t, deny, addr.Check(&vm.Context{}, v6("2001:db9::1", "2001:db9::5")))
+
+	src = ruleset(`
+		table i create type iface
+		table i add 10 :L
+		table i add host.example.com
+	`)
+	iface, err := vm.Build(
+		ipfw.NewParser(src),
+		vm.Config[net4, net6]{Environment: resolving},
+	)
+	require.NoError(t, err)
+	value, ok := iface.Tables().LookupInterface("i", "10")
+	require.True(t, ok)
+	require.Equal(t, "L", value)
+	_, ok = iface.Tables().LookupInterface("i", "host.example.com")
+	require.True(t, ok)
+
+	failing := []struct {
+		name string
+		src  string
+		env  ipfw.Environment[net4, net6]
+		err  error
+	}{
+		{
+			name: "name the resolver rejects",
+			src:  "table h add unknown.example.com\n",
+			env:  resolvingTargets,
+			err:  ipfw.ErrExpectedTarget,
+		},
+		{
+			name: "table never created takes no interface name",
+			src:  "table u add vlan1\n",
+			env:  resolvingTargets,
+			err:  ipfw.ErrExpectedTarget,
+		},
+		{
+			name: "no resolver",
+			src:  "table h add host.example.com\n",
+			env:  resolving,
+			err:  ipfw.ErrUnresolvedTarget,
+		},
+		{
+			name: "number table",
+			src:  "table n create type number\n",
+			env:  resolving,
+			err:  vm.ErrUnsupportedTableType,
+		},
+		{
+			name: "flow table",
+			src:  "table f create type flow\n",
+			env:  resolving,
+			err:  vm.ErrUnsupportedTableType,
+		},
+		{
+			name: "mac table",
+			src:  "table m create type mac\n",
+			env:  resolving,
+			err:  vm.ErrUnsupportedTableType,
+		},
+	}
+	for _, tc := range failing {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := vm.Build(
+				ipfw.NewParser(tc.src),
+				vm.Config[net4, net6]{Environment: tc.env},
+			)
+			require.ErrorIs(t, err, tc.err)
+			var buildErr *vm.BuildError
+			require.ErrorAs(t, err, &buildErr)
+			require.Equal(t, 1, buildErr.Line)
+		})
+	}
 }
 
 // verifies that a record or an action of a kind the VM does not know, as
@@ -1549,12 +1673,35 @@ func Test_VM_Check_PolicyOptions(t *testing.T) {
 // next rule, and an entry added after the build counts.
 func Test_VM_Check_TableArg(t *testing.T) {
 	packet := tcp4("192.0.2.1", "192.0.2.2")
-	tablearg := build(t, "table t create type iface\n\nadd skipto tablearg ip from any to any via table(t) in\ntable t add vlan1234 :INBOUND\nadd deny ip from any to any\n\n:INBOUND\nadd pass ip from any to any\n", none)
+	src := ruleset(`
+		table t create type iface
+
+		add skipto tablearg ip from any to any via table(t) in
+		table t add vlan1234 :INBOUND
+		add deny ip from any to any
+
+		:INBOUND
+		add pass ip from any to any
+	`)
+	tablearg := build(t, src, none)
 	require.Equal(t, pass, tablearg.Check(&vm.Context{IfName: "vlan1234"}, packet))
 	require.Equal(t, deny, tablearg.Check(&vm.Context{IfName: "eth0"}, packet))
 	require.Equal(t, deny, tablearg.Check(&vm.Context{IfName: "vlan1234", Direction: vm.Out}, packet))
 
-	two := build(t, "table j add vlan1 :ONE\ntable j add vlan2 :TWO\ntable j add vlan3 :NOWHERE\nadd skipto tablearg ip from any to any via table(j)\nadd deny ip from any to any\n:ONE\nadd pass ip from any to any\n:TWO\nadd count ip from any to any\nadd deny ip from any to any\n", none)
+	src = ruleset(`
+		table j create type iface
+		table j add vlan1 :ONE
+		table j add vlan2 :TWO
+		table j add vlan3 :NOWHERE
+		add skipto tablearg ip from any to any via table(j)
+		add deny ip from any to any
+		:ONE
+		add pass ip from any to any
+		:TWO
+		add count ip from any to any
+		add deny ip from any to any
+	`)
+	two := build(t, src, none)
 	cases := []struct {
 		ifname  string
 		verdict ipfw.Action
@@ -1564,33 +1711,33 @@ func Test_VM_Check_TableArg(t *testing.T) {
 			ifname:  "vlan1",
 			verdict: pass,
 			seen: []traced{
-				{line: 4, action: ipfw.ActionSkipTo, matched: true},
-				{line: 7, action: ipfw.ActionPass, matched: true},
+				{line: 5, action: ipfw.ActionSkipTo, matched: true},
+				{line: 8, action: ipfw.ActionPass, matched: true},
 			},
 		},
 		{
 			ifname:  "vlan2",
 			verdict: deny,
 			seen: []traced{
-				{line: 4, action: ipfw.ActionSkipTo, matched: true},
-				{line: 9, action: ipfw.ActionCount, matched: true},
-				{line: 10, action: ipfw.ActionDeny, matched: true},
+				{line: 5, action: ipfw.ActionSkipTo, matched: true},
+				{line: 10, action: ipfw.ActionCount, matched: true},
+				{line: 11, action: ipfw.ActionDeny, matched: true},
 			},
 		},
 		{
 			ifname:  "vlan3",
 			verdict: deny,
 			seen: []traced{
-				{line: 4, action: ipfw.ActionSkipTo, matched: true},
-				{line: 5, action: ipfw.ActionDeny, matched: true},
+				{line: 5, action: ipfw.ActionSkipTo, matched: true},
+				{line: 6, action: ipfw.ActionDeny, matched: true},
 			},
 		},
 		{
 			ifname:  "vlan4",
 			verdict: deny,
 			seen: []traced{
-				{line: 4, action: ipfw.ActionSkipTo, matched: false},
-				{line: 5, action: ipfw.ActionDeny, matched: true},
+				{line: 5, action: ipfw.ActionSkipTo, matched: false},
+				{line: 6, action: ipfw.ActionDeny, matched: true},
 			},
 		},
 	}
@@ -1607,18 +1754,33 @@ func Test_VM_Check_TableArg(t *testing.T) {
 	two.Tables().AddInterface("j", "vlan4", "ONE")
 	require.Equal(t, pass, two.Check(&vm.Context{IfName: "vlan4"}, packet))
 
-	backward := build(t, "add count ip from any to any\n:BACK\ntable j add vlan1 :BACK\nadd skipto tablearg ip from any to any via table(j)\nadd pass ip from any to any\n", none)
+	src = ruleset(`
+		table j create type iface
+		add count ip from any to any
+		:BACK
+		table j add vlan1 :BACK
+		add skipto tablearg ip from any to any via table(j)
+		add pass ip from any to any
+	`)
+	backward := build(t, src, none)
 	tracer := &recordingTracer{}
 	action, matched := backward.CheckTrace(&vm.Context{IfName: "vlan1"}, packet, tracer)
 	require.True(t, matched)
 	require.Equal(t, pass, action)
 	require.Equal(t, []traced{
-		{line: 1, action: ipfw.ActionCount, matched: true},
-		{line: 4, action: ipfw.ActionSkipTo, matched: true},
-		{line: 5, action: ipfw.ActionPass, matched: true},
+		{line: 2, action: ipfw.ActionCount, matched: true},
+		{line: 5, action: ipfw.ActionSkipTo, matched: true},
+		{line: 6, action: ipfw.ActionPass, matched: true},
 	}, tracer.seen)
 
-	plain := build(t, "table t add eth0 whatever\nadd pass ip from any to any via table(t)\nadd pass ip from any to any not via table(t) in\nadd deny ip from any to any\n", none)
+	src = ruleset(`
+		table t create type iface
+		table t add eth0 whatever
+		add pass ip from any to any via table(t)
+		add pass ip from any to any not via table(t) in
+		add deny ip from any to any
+	`)
+	plain := build(t, src, none)
 	require.Equal(t, pass, plain.Check(&vm.Context{IfName: "eth0"}, packet))
 	require.Equal(t, pass, plain.Check(&vm.Context{IfName: "eth1"}, packet))
 	require.Equal(t, deny, plain.Check(&vm.Context{IfName: "eth1", Direction: vm.Out}, packet))
@@ -1627,7 +1789,15 @@ func Test_VM_Check_TableArg(t *testing.T) {
 
 // verifies that a check through a table jump allocates nothing.
 func Test_VM_TableArg_NoAllocs(t *testing.T) {
-	machine := build(t, "table j add vlan1 :ONE\nadd skipto tablearg ip from any to any via table(j)\nadd deny ip from any to any\n:ONE\nadd pass ip from any to any\n", none)
+	src := ruleset(`
+		table j create type iface
+		table j add vlan1 :ONE
+		add skipto tablearg ip from any to any via table(j)
+		add deny ip from any to any
+		:ONE
+		add pass ip from any to any
+	`)
+	machine := build(t, src, none)
 	packet := tcp4("192.0.2.1", "192.0.2.2")
 	ctx := &vm.Context{IfName: "vlan1"}
 	verdict := pass

@@ -88,7 +88,7 @@ func Test_ErrorKind_Error(t *testing.T) {
 		{
 			name:    "expected table key",
 			kind:    ipfw.ErrExpectedTableKey,
-			message: "expected table key (network or interface name)",
+			message: "expected table key",
 		},
 		{
 			name:    "expected skipto",

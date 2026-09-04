@@ -23,7 +23,8 @@ const (
 	TableTypeMAC
 )
 
-// TableKeyKind classifies the key of a table entry by its shape.
+// TableKeyKind classifies the key of a table entry by its shape, the type of
+// the table telling what a name stands for.
 type TableKeyKind uint8
 
 // The table key kinds.
@@ -31,10 +32,15 @@ const (
 	_ TableKeyKind = iota
 	TableKeyNetwork4
 	TableKeyNetwork6
-	TableKeyIfName
+	// TableKeyHostname is a name of hostname shape, letters and digits
+	// around a dot, which an interface table takes as an interface name.
+	TableKeyHostname
+	// TableKeyName is any other key, an interface name, a macro or a
+	// hostname with a prefix length among them.
+	TableKeyName
 )
 
-// TableKey is the key of a table entry, unvalidated text.
+// TableKey is the key of a table entry, unvalidated text never cut short.
 type TableKey struct {
 	// Kind is the shape the key was classified as.
 	Kind TableKeyKind

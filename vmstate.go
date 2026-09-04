@@ -69,7 +69,10 @@ type TargetResolver[V4, V6 any] interface {
 	// for, none meaning a target that matches nothing.
 	//
 	// An error rejects the target, an ErrorKind keeping its kind. The
-	// slices belong to the resolver and are read before its next call.
+	// slices belong to the resolver and are read before its next call. A
+	// custom target's text is the token as written, a hostname with a
+	// prefix length or a macro among them, whether from a rule or from the
+	// key of an address table.
 	ResolveTarget(target Target) ([]V4, []V6, error)
 }
 

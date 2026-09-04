@@ -132,6 +132,8 @@ verdict := machine.Check(ctx, packet)                                // ipfw.Act
 action, matched := machine.CheckTrace(ctx, packet, tracer)           // every rule evaluated
 ```
 
+A `table NAME create type` line says what the keys of the table are: an address table takes networks and, through the target resolver, hostnames and macros, an interface table takes interface names. A table never created is an address table, as in `ipfw(8)`.
+
 `Packet` is an interface over the fields the matchers read. `RawIPv4Packet` and `RawIPv6Packet` implement it over raw bytes and double as builders in tests. See `ExampleBuild` and `ExampleVM_CheckTrace`.
 
 ## Extension points
