@@ -2462,6 +2462,7 @@ func (anyTargets) ResolveTarget(ipfw.Target) ([]net4, []net6, error) {
 // check of it reaches all of them whatever the packet is.
 var everyMatcher = ruleset(`
 	table t add 203.0.113.0/24
+	table i create type iface
 	table i add vlan1234 :SECTION
 	add deny udp from 198.51.100.0/24 to table(t) 53
 	add count ip from any to any icmptypes 0,8
