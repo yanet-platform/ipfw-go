@@ -143,81 +143,120 @@ func Test_VM_Check_Compat(t *testing.T) {
 		verdict ipfw.Action
 	}{
 		{
-			name:    "IPv4 by protocol, tcp",
-			rules:   "add pass tcp from any to any\nadd deny ip from any to any\n",
+			name: "IPv4 by protocol, tcp",
+			rules: ruleset(`
+				add pass tcp from any to any
+				add deny ip from any to any
+			`),
 			packet:  tcp4("192.0.2.1", "192.0.2.1"),
 			verdict: pass,
 		},
 		{
-			name:    "IPv4 by protocol, other",
-			rules:   "add pass tcp from any to any\nadd deny ip from any to any\n",
+			name: "IPv4 by protocol, other",
+			rules: ruleset(`
+				add pass tcp from any to any
+				add deny ip from any to any
+			`),
 			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")),
 			verdict: deny,
 		},
 		{
-			name:  "IPv6 by protocol, tcp",
-			rules: "add pass tcp from any to any\nadd deny ip from any to any\n",
+			name: "IPv6 by protocol, tcp",
+			rules: ruleset(`
+				add pass tcp from any to any
+				add deny ip from any to any
+			`),
 			packet: vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8::1")).
 				WithTCP(ipfw.TCPSyn, 50000, 22),
 			verdict: pass,
 		},
 		{
-			name:    "IPv6 by protocol, other",
-			rules:   "add pass tcp from any to any\nadd deny ip from any to any\n",
+			name: "IPv6 by protocol, other",
+			rules: ruleset(`
+				add pass tcp from any to any
+				add deny ip from any to any
+			`),
 			packet:  vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8::1")),
 			verdict: deny,
 		},
 		{
-			name:    "by source address, match",
-			rules:   "add pass tcp from 192.0.2.1 to any\nadd deny ip from any to any\n",
+			name: "by source address, match",
+			rules: ruleset(`
+				add pass tcp from 192.0.2.1 to any
+				add deny ip from any to any
+			`),
 			packet:  tcp4("192.0.2.1", "192.0.2.1"),
 			verdict: pass,
 		},
 		{
-			name:    "by source address, mismatch",
-			rules:   "add pass tcp from 192.0.2.1 to any\nadd deny ip from any to any\n",
+			name: "by source address, mismatch",
+			rules: ruleset(`
+				add pass tcp from 192.0.2.1 to any
+				add deny ip from any to any
+			`),
 			packet:  tcp4("198.51.100.1", "192.0.2.1"),
 			verdict: deny,
 		},
 		{
-			name:    "by destination address, match",
-			rules:   "add pass tcp from any to 192.0.2.1\nadd deny ip from any to any\n",
+			name: "by destination address, match",
+			rules: ruleset(`
+				add pass tcp from any to 192.0.2.1
+				add deny ip from any to any
+			`),
 			packet:  tcp4("192.0.2.1", "192.0.2.1"),
 			verdict: pass,
 		},
 		{
-			name:    "by destination address, mismatch",
-			rules:   "add pass tcp from any to 192.0.2.1\nadd deny ip from any to any\n",
+			name: "by destination address, mismatch",
+			rules: ruleset(`
+				add pass tcp from any to 192.0.2.1
+				add deny ip from any to any
+			`),
 			packet:  tcp4("192.0.2.1", "198.51.100.1"),
 			verdict: deny,
 		},
 		{
-			name:    "by both addresses, match",
-			rules:   "add pass tcp from 192.0.2.1 to 192.0.2.1\nadd deny ip from any to any\n",
+			name: "by both addresses, match",
+			rules: ruleset(`
+				add pass tcp from 192.0.2.1 to 192.0.2.1
+				add deny ip from any to any
+			`),
 			packet:  tcp4("192.0.2.1", "192.0.2.1"),
 			verdict: pass,
 		},
 		{
-			name:    "by both addresses, mismatch",
-			rules:   "add pass tcp from 192.0.2.1 to 192.0.2.1\nadd deny ip from any to any\n",
+			name: "by both addresses, mismatch",
+			rules: ruleset(`
+				add pass tcp from 192.0.2.1 to 192.0.2.1
+				add deny ip from any to any
+			`),
 			packet:  tcp4("198.51.100.1", "192.0.2.1"),
 			verdict: deny,
 		},
 		{
-			name:    "network and negation",
-			rules:   "add deny ip from not 192.0.2.0/24 to any\nadd pass ip from 192.0.2.0/24 to { 2001:db8::/32 or 198.51.100.0/24 }\n",
+			name: "network and negation",
+			rules: ruleset(`
+				add deny ip from not 192.0.2.0/24 to any
+				add pass ip from 192.0.2.0/24 to { 2001:db8::/32 or 198.51.100.0/24 }
+			`),
 			packet:  tcp4("192.0.2.77", "198.51.100.9"),
 			verdict: pass,
 		},
 		{
-			name:    "IPv4 network never matches an IPv6 packet",
-			rules:   "add pass ip from 0.0.0.0/0 to any\nadd deny ip from any to any\n",
+			name: "IPv4 network never matches an IPv6 packet",
+			rules: ruleset(`
+				add pass ip from 0.0.0.0/0 to any
+				add deny ip from any to any
+			`),
 			packet:  vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8::2")),
 			verdict: deny,
 		},
 		{
-			name:    "ip6 keyword against an IPv4 packet",
-			rules:   "add pass ip6 from any to any\nadd deny ip4 from any to any\n",
+			name: "ip6 keyword against an IPv4 packet",
+			rules: ruleset(`
+				add pass ip6 from any to any
+				add deny ip4 from any to any
+			`),
 			packet:  tcp4("192.0.2.1", "192.0.2.1"),
 			verdict: deny,
 		},
@@ -271,7 +310,14 @@ func (m *recordingTracer) Trace(rec *ipfw.Record, action ipfw.Action, matched bo
 // verifies that the tracer sees every rule up to the terminating one with
 // its match flag, and every rule when none terminates.
 func Test_VM_CheckTrace_ReportsEveryOp(t *testing.T) {
-	machine := build(t, "add deny udp from any to any\n# c\nadd deny ip from 198.51.100.0/24 to any\nadd pass tcp from any to any\nadd deny ip from any to any\n", none)
+	src := ruleset(`
+		add deny udp from any to any
+		# c
+		add deny ip from 198.51.100.0/24 to any
+		add pass tcp from any to any
+		add deny ip from any to any
+	`)
+	machine := build(t, src, none)
 	require.Equal(t, 4, machine.Len())
 
 	tracer := &recordingTracer{}
@@ -294,7 +340,12 @@ func Test_VM_CheckTrace_ReportsEveryOp(t *testing.T) {
 // verifies that a matching count rule is traced as matched and the search
 // goes on with the next rule.
 func Test_VM_Check_Count(t *testing.T) {
-	machine := build(t, "add count ip from any to any\nadd count tcp from 198.51.100.0/24 to any\nadd pass ip from any to any\n", none)
+	src := ruleset(`
+		add count ip from any to any
+		add count tcp from 198.51.100.0/24 to any
+		add pass ip from any to any
+	`)
+	machine := build(t, src, none)
 	tracer := &recordingTracer{}
 	action, matched := machine.CheckTrace(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.1"), tracer)
 	require.True(t, matched)
@@ -312,7 +363,12 @@ func Test_VM_Check_Count(t *testing.T) {
 // verifies that a check-state rule, with or without a flow, never matches
 // and is traced as such.
 func Test_VM_Check_CheckState(t *testing.T) {
-	machine := build(t, "add check-state\nadd check-state :flow\nadd deny ip from any to any\n", none)
+	src := ruleset(`
+		add check-state
+		add check-state :flow
+		add deny ip from any to any
+	`)
+	machine := build(t, src, none)
 	tracer := &recordingTracer{}
 	action, matched := machine.CheckTrace(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.1"), tracer)
 	require.True(t, matched)
@@ -327,7 +383,12 @@ func Test_VM_Check_CheckState(t *testing.T) {
 // verifies that a matching skipto continues at the rule with that number
 // and a mismatching one falls through.
 func Test_VM_Check_SkipToNumber(t *testing.T) {
-	machine := build(t, "add skipto 1500 ip from any to 192.0.2.4\nadd deny ip from any to any\nadd 1500 allow tcp from any to any\n", none)
+	src := ruleset(`
+		add skipto 1500 ip from any to 192.0.2.4
+		add deny ip from any to any
+		add 1500 allow tcp from any to any
+	`)
+	machine := build(t, src, none)
 	require.Equal(t, pass, machine.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.4")))
 	require.Equal(t, deny, machine.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.5")))
 
@@ -344,7 +405,14 @@ func Test_VM_Check_SkipToNumber(t *testing.T) {
 // verifies that explicit rule numbers place the jump targets: a skipto
 // lands on the rule numbered exactly so, the rules between are skipped.
 func Test_VM_Check_RuleNumbers(t *testing.T) {
-	machine := build(t, "add skipto 50 ip from any to 192.0.2.0/24\nadd deny ip from any to any\nadd 50 count ip from any to any\nadd 1500 count ip from any to any\nadd pass ip from any to any\n", none)
+	src := ruleset(`
+		add skipto 50 ip from any to 192.0.2.0/24
+		add deny ip from any to any
+		add 50 count ip from any to any
+		add 1500 count ip from any to any
+		add pass ip from any to any
+	`)
+	machine := build(t, src, none)
 	require.Equal(t, 5, machine.Len())
 
 	tracer := &recordingTracer{}
@@ -371,7 +439,14 @@ func Test_VM_Check_RuleNumbers(t *testing.T) {
 // verifies that a matching skipto to a label continues at the rule after
 // the label, a mismatching one at the next rule.
 func Test_VM_Check_SkipToLabel(t *testing.T) {
-	machine := build(t, "add skipto :SECTION tcp from 192.0.2.4 to any\nadd deny ip from any to any\n:SECTION\nadd pass tcp from any to 203.0.113.1\nadd deny ip from any to any\n", none)
+	src := ruleset(`
+		add skipto :SECTION tcp from 192.0.2.4 to any
+		add deny ip from any to any
+		:SECTION
+		add pass tcp from any to 203.0.113.1
+		add deny ip from any to any
+	`)
+	machine := build(t, src, none)
 	require.Equal(t, 4, machine.Len())
 	require.Equal(t, pass, machine.Check(&vm.Context{}, tcp4("192.0.2.4", "203.0.113.1")))
 	require.Equal(t, deny, machine.Check(&vm.Context{}, tcp4("192.0.2.1", "203.0.113.1")))
@@ -390,14 +465,26 @@ func Test_VM_Check_SkipToLabel(t *testing.T) {
 // verifies that a label with no rule after it ends the search, and that
 // a jump lands on the first occurrence of a repeated label after it.
 func Test_VM_Check_Labels(t *testing.T) {
-	ending := build(t, "add skipto :END ip from any to any\nadd deny ip from any to any\n:END\n", vm.Config[net4, net6]{DefaultVerdict: pass})
+	src := ruleset(`
+		add skipto :END ip from any to any
+		add deny ip from any to any
+		:END
+	`)
+	ending := build(t, src, vm.Config[net4, net6]{DefaultVerdict: pass})
 	tracer := &recordingTracer{}
 	_, matched := ending.CheckTrace(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.2"), tracer)
 	require.False(t, matched)
 	require.Equal(t, []traced{{line: 1, action: ipfw.ActionSkipTo, matched: true}}, tracer.seen)
 	require.Equal(t, pass, ending.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.2")))
 
-	repeated := build(t, "add skipto :A ip from any to any\n:A\nadd count ip from any to any\n:A\nadd pass ip from any to any\n", none)
+	src = ruleset(`
+		add skipto :A ip from any to any
+		:A
+		add count ip from any to any
+		:A
+		add pass ip from any to any
+	`)
+	repeated := build(t, src, none)
 	tracer = &recordingTracer{}
 	action, matched := repeated.CheckTrace(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.2"), tracer)
 	require.True(t, matched)
@@ -413,7 +500,12 @@ func Test_VM_Check_Labels(t *testing.T) {
 // label or to a number, matches and goes on with the next rule.
 func Test_VM_Check_UnresolvedJumpsFallThrough(t *testing.T) {
 	cfg := vm.Config[net4, net6]{UnresolvedJumps: vm.UnresolvedJumpsFallThrough}
-	machine := build(t, "add skipto :NOWHERE ip from any to any\nadd skipto 7 ip from any to any\nadd pass ip from any to any\n", cfg)
+	src := ruleset(`
+		add skipto :NOWHERE ip from any to any
+		add skipto 7 ip from any to any
+		add pass ip from any to any
+	`)
+	machine := build(t, src, cfg)
 	tracer := &recordingTracer{}
 	action, matched := machine.CheckTrace(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.2"), tracer)
 	require.True(t, matched)
@@ -435,80 +527,119 @@ func Test_VM_Check_Ports(t *testing.T) {
 		verdict ipfw.Action
 	}{
 		{
-			name:    "source port, match",
-			rules:   "add pass tcp from any 22 to any\nadd deny ip from any to any\n",
+			name: "source port, match",
+			rules: ruleset(`
+				add pass tcp from any 22 to any
+				add deny ip from any to any
+			`),
 			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")).WithTCP(ipfw.TCPSyn, 22, 50000),
 			verdict: pass,
 		},
 		{
-			name:    "source port, mismatch",
-			rules:   "add pass tcp from any 22 to any\nadd deny ip from any to any\n",
+			name: "source port, mismatch",
+			rules: ruleset(`
+				add pass tcp from any 22 to any
+				add deny ip from any to any
+			`),
 			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")).WithTCP(ipfw.TCPSyn, 26, 50000),
 			verdict: deny,
 		},
 		{
-			name:    "destination port over TCP",
-			rules:   "add pass ip from any to any 22\nadd deny ip from any to any\n",
+			name: "destination port over TCP",
+			rules: ruleset(`
+				add pass ip from any to any 22
+				add deny ip from any to any
+			`),
 			packet:  tcp4("192.0.2.1", "192.0.2.1"),
 			verdict: pass,
 		},
 		{
-			name:    "destination port over UDP",
-			rules:   "add pass ip from any to any 22\nadd deny ip from any to any\n",
+			name: "destination port over UDP",
+			rules: ruleset(`
+				add pass ip from any to any 22
+				add deny ip from any to any
+			`),
 			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")).WithUDP(50000, 22),
 			verdict: pass,
 		},
 		{
-			name:    "destination port against ICMP, which has none",
-			rules:   "add pass ip from any to any 22\nadd deny ip from any to any\n",
+			name: "destination port against ICMP, which has none",
+			rules: ruleset(`
+				add pass ip from any to any 22
+				add deny ip from any to any
+			`),
 			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")).WithICMP(8, 1),
 			verdict: deny,
 		},
 		{
-			name:    "both sides, match",
-			rules:   "add pass tcp from 192.0.2.0/24 25 to 198.51.100.0/24 25\nadd deny ip from any to any\n",
+			name: "both sides, match",
+			rules: ruleset(`
+				add pass tcp from 192.0.2.0/24 25 to 198.51.100.0/24 25
+				add deny ip from any to any
+			`),
 			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("198.51.100.1")).WithTCP(ipfw.TCPSyn, 25, 25),
 			verdict: pass,
 		},
 		{
-			name:    "both sides, destination port mismatch",
-			rules:   "add pass tcp from 192.0.2.0/24 25 to 198.51.100.0/24 25\nadd deny ip from any to any\n",
+			name: "both sides, destination port mismatch",
+			rules: ruleset(`
+				add pass tcp from 192.0.2.0/24 25 to 198.51.100.0/24 25
+				add deny ip from any to any
+			`),
 			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("198.51.100.1")).WithTCP(ipfw.TCPSyn, 25, 26),
 			verdict: deny,
 		},
 		{
-			name:    "range and list, inside the range",
-			rules:   "add pass tcp from any 1000-2000,22 to any 80,443\nadd deny ip from any to any\n",
+			name: "range and list, inside the range",
+			rules: ruleset(`
+				add pass tcp from any 1000-2000,22 to any 80,443
+				add deny ip from any to any
+			`),
 			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")).WithTCP(ipfw.TCPSyn, 1500, 443),
 			verdict: pass,
 		},
 		{
-			name:    "range and list, the single port",
-			rules:   "add pass tcp from any 1000-2000,22 to any 80,443\nadd deny ip from any to any\n",
+			name: "range and list, the single port",
+			rules: ruleset(`
+				add pass tcp from any 1000-2000,22 to any 80,443
+				add deny ip from any to any
+			`),
 			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")).WithTCP(ipfw.TCPSyn, 22, 80),
 			verdict: pass,
 		},
 		{
-			name:    "range and list, just outside the range",
-			rules:   "add pass tcp from any 1000-2000,22 to any 80,443\nadd deny ip from any to any\n",
+			name: "range and list, just outside the range",
+			rules: ruleset(`
+				add pass tcp from any 1000-2000,22 to any 80,443
+				add deny ip from any to any
+			`),
 			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")).WithTCP(ipfw.TCPSyn, 2001, 80),
 			verdict: deny,
 		},
 		{
-			name:    "negated list, port outside",
-			rules:   "add pass tcp from any not 22,25 to any\nadd deny ip from any to any\n",
+			name: "negated list, port outside",
+			rules: ruleset(`
+				add pass tcp from any not 22,25 to any
+				add deny ip from any to any
+			`),
 			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")).WithTCP(ipfw.TCPSyn, 23, 50000),
 			verdict: pass,
 		},
 		{
-			name:    "negated list, port inside",
-			rules:   "add pass tcp from any not 22,25 to any\nadd deny ip from any to any\n",
+			name: "negated list, port inside",
+			rules: ruleset(`
+				add pass tcp from any not 22,25 to any
+				add deny ip from any to any
+			`),
 			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")).WithTCP(ipfw.TCPSyn, 25, 50000),
 			verdict: deny,
 		},
 		{
-			name:    "IPv6 packet",
-			rules:   "add pass tcp from any to any 22\nadd deny ip from any to any\n",
+			name: "IPv6 packet",
+			rules: ruleset(`
+				add pass tcp from any to any 22
+				add deny ip from any to any
+			`),
 			packet:  vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8::2")).WithTCP(ipfw.TCPSyn, 50000, 22),
 			verdict: pass,
 		},
@@ -523,8 +654,12 @@ func Test_VM_Check_Ports(t *testing.T) {
 
 // verifies that service names are resolved into ports on the way in.
 func Test_VM_Build_ServiceNames(t *testing.T) {
+	src := ruleset(`
+		add pass tcp from any ssh-smtp to any smtp
+		add deny ip from any to any
+	`)
 	machine, err := vm.Build(
-		ipfw.NewParser("add pass tcp from any ssh-smtp to any smtp\nadd deny ip from any to any\n"),
+		ipfw.NewParser(src),
 		vm.Config[net4, net6]{Environment: resolvingServices},
 	)
 	require.NoError(t, err)
@@ -542,7 +677,11 @@ func tcp4Flags(flags ipfw.TCPFlag) vm.Packet {
 // verifies that established matches a TCP packet with ACK or RST set and
 // nothing else, negated the other way round.
 func Test_VM_Check_Established(t *testing.T) {
-	machine := build(t, "add allow tcp from any to any established\nadd deny ip from any to any\n", none)
+	src := ruleset(`
+		add allow tcp from any to any established
+		add deny ip from any to any
+	`)
+	machine := build(t, src, none)
 	require.Equal(t, deny, machine.Check(&vm.Context{}, tcp4Flags(ipfw.TCPSyn)))
 	require.Equal(t, pass, machine.Check(&vm.Context{}, tcp4Flags(ipfw.TCPAck)))
 	require.Equal(t, pass, machine.Check(&vm.Context{}, tcp4Flags(ipfw.TCPRst)))
@@ -550,7 +689,11 @@ func Test_VM_Check_Established(t *testing.T) {
 	udp := vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")).WithUDP(50000, 22)
 	require.Equal(t, deny, machine.Check(&vm.Context{}, udp))
 
-	negated := build(t, "add allow ip from any to any not established\nadd deny ip from any to any\n", none)
+	src = ruleset(`
+		add allow ip from any to any not established
+		add deny ip from any to any
+	`)
+	negated := build(t, src, none)
 	require.Equal(t, pass, negated.Check(&vm.Context{}, tcp4Flags(ipfw.TCPSyn)))
 	require.Equal(t, deny, negated.Check(&vm.Context{}, tcp4Flags(ipfw.TCPAck)))
 	require.Equal(t, pass, negated.Check(&vm.Context{}, udp))
@@ -567,74 +710,110 @@ func Test_VM_Check_Via(t *testing.T) {
 		verdict ipfw.Action
 	}{
 		{
-			name:    "exact, same name",
-			rules:   "add pass ip from any to any via eth0\nadd deny ip from any to any\n",
+			name: "exact, same name",
+			rules: ruleset(`
+				add pass ip from any to any via eth0
+				add deny ip from any to any
+			`),
 			ifname:  "eth0",
 			verdict: pass,
 		},
 		{
-			name:    "exact, other name",
-			rules:   "add pass ip from any to any via eth0\nadd deny ip from any to any\n",
+			name: "exact, other name",
+			rules: ruleset(`
+				add pass ip from any to any via eth0
+				add deny ip from any to any
+			`),
 			ifname:  "eth1",
 			verdict: deny,
 		},
 		{
-			name:    "exact, no name",
-			rules:   "add pass ip from any to any via eth0\nadd deny ip from any to any\n",
+			name: "exact, no name",
+			rules: ruleset(`
+				add pass ip from any to any via eth0
+				add deny ip from any to any
+			`),
 			ifname:  "",
 			verdict: deny,
 		},
 		{
-			name:    "mask, match",
-			rules:   "add pass ip from any to any via vlan1???\nadd deny ip from any to any\n",
+			name: "mask, match",
+			rules: ruleset(`
+				add pass ip from any to any via vlan1???
+				add deny ip from any to any
+			`),
 			ifname:  "vlan1234",
 			verdict: pass,
 		},
 		{
-			name:    "mask, too short",
-			rules:   "add pass ip from any to any via vlan1???\nadd deny ip from any to any\n",
+			name: "mask, too short",
+			rules: ruleset(`
+				add pass ip from any to any via vlan1???
+				add deny ip from any to any
+			`),
 			ifname:  "vlan123",
 			verdict: deny,
 		},
 		{
-			name:    "mask, other prefix",
-			rules:   "add pass ip from any to any via vlan1???\nadd deny ip from any to any\n",
+			name: "mask, other prefix",
+			rules: ruleset(`
+				add pass ip from any to any via vlan1???
+				add deny ip from any to any
+			`),
 			ifname:  "vlan2234",
 			verdict: deny,
 		},
 		{
-			name:    "star mask takes the empty name",
-			rules:   "add pass ip from any to any via *\nadd deny ip from any to any\n",
+			name: "star mask takes the empty name",
+			rules: ruleset(`
+				add pass ip from any to any via *
+				add deny ip from any to any
+			`),
 			ifname:  "",
 			verdict: pass,
 		},
 		{
-			name:    "group, first",
-			rules:   "add pass ip from any to any { via eth0 or via eth1 }\nadd deny ip from any to any\n",
+			name: "group, first",
+			rules: ruleset(`
+				add pass ip from any to any { via eth0 or via eth1 }
+				add deny ip from any to any
+			`),
 			ifname:  "eth0",
 			verdict: pass,
 		},
 		{
-			name:    "group, second",
-			rules:   "add pass ip from any to any { via eth0 or via eth1 }\nadd deny ip from any to any\n",
+			name: "group, second",
+			rules: ruleset(`
+				add pass ip from any to any { via eth0 or via eth1 }
+				add deny ip from any to any
+			`),
 			ifname:  "eth1",
 			verdict: pass,
 		},
 		{
-			name:    "group, neither",
-			rules:   "add pass ip from any to any { via eth0 or via eth1 }\nadd deny ip from any to any\n",
+			name: "group, neither",
+			rules: ruleset(`
+				add pass ip from any to any { via eth0 or via eth1 }
+				add deny ip from any to any
+			`),
 			ifname:  "eth2",
 			verdict: deny,
 		},
 		{
-			name:    "negated, same name",
-			rules:   "add pass ip from any to any not via eth0\nadd deny ip from any to any\n",
+			name: "negated, same name",
+			rules: ruleset(`
+				add pass ip from any to any not via eth0
+				add deny ip from any to any
+			`),
 			ifname:  "eth0",
 			verdict: deny,
 		},
 		{
-			name:    "negated, other name",
-			rules:   "add pass ip from any to any not via eth0\nadd deny ip from any to any\n",
+			name: "negated, other name",
+			rules: ruleset(`
+				add pass ip from any to any not via eth0
+				add deny ip from any to any
+			`),
 			ifname:  "eth1",
 			verdict: pass,
 		},
@@ -646,7 +825,11 @@ func Test_VM_Check_Via(t *testing.T) {
 		})
 	}
 
-	loopback := build(t, "add allow ip from me to me { via lo0 or via lo1 }\nadd deny ip from any to any\n", none)
+	src := ruleset(`
+		add allow ip from me to me { via lo0 or via lo1 }
+		add deny ip from any to any
+	`)
+	loopback := build(t, src, none)
 	local := []netip.Addr{netip.MustParseAddr("192.0.2.1")}
 	between := tcp4("192.0.2.1", "192.0.2.1")
 	require.Equal(t, deny, loopback.Check(&vm.Context{LocalAddrs: local}, between))
@@ -659,15 +842,27 @@ func Test_VM_Check_Via(t *testing.T) {
 // resolved on the way in, negated the other way round.
 func Test_VM_Check_ProtoOption(t *testing.T) {
 	udp := vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")).WithUDP(50000, 22)
-	named := build(t, "add pass ip from any to any proto tcp\nadd deny ip from any to any\n", none)
+	src := ruleset(`
+		add pass ip from any to any proto tcp
+		add deny ip from any to any
+	`)
+	named := build(t, src, none)
 	require.Equal(t, pass, named.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.2")))
 	require.Equal(t, deny, named.Check(&vm.Context{}, udp))
 
-	negated := build(t, "add pass ip from any to any not proto 6\nadd deny ip from any to any\n", none)
+	src = ruleset(`
+		add pass ip from any to any not proto 6
+		add deny ip from any to any
+	`)
+	negated := build(t, src, none)
 	require.Equal(t, deny, negated.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.2")))
 	require.Equal(t, pass, negated.Check(&vm.Context{}, udp))
 
-	numeric, err := vm.Build(ipfw.NewParser("add pass ip from any to any { proto 17 or proto 1 }\nadd deny ip from any to any\n"), vm.Config[net4, net6]{Environment: networksOnly})
+	src = ruleset(`
+		add pass ip from any to any { proto 17 or proto 1 }
+		add deny ip from any to any
+	`)
+	numeric, err := vm.Build(ipfw.NewParser(src), vm.Config[net4, net6]{Environment: networksOnly})
 	require.NoError(t, err)
 	require.Equal(t, pass, numeric.Check(&vm.Context{}, udp))
 	require.Equal(t, deny, numeric.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.2")))
@@ -686,86 +881,131 @@ func Test_VM_Check_PortOptions(t *testing.T) {
 		verdict ipfw.Action
 	}{
 		{
-			name:    "src-port, match",
-			rules:   "add pass tcp from any to any src-port 25\nadd deny ip from any to any\n",
+			name: "src-port, match",
+			rules: ruleset(`
+				add pass tcp from any to any src-port 25
+				add deny ip from any to any
+			`),
 			packet:  tcp(25, 50000),
 			verdict: pass,
 		},
 		{
-			name:    "src-port, mismatch",
-			rules:   "add pass tcp from any to any src-port 25\nadd deny ip from any to any\n",
+			name: "src-port, mismatch",
+			rules: ruleset(`
+				add pass tcp from any to any src-port 25
+				add deny ip from any to any
+			`),
 			packet:  tcp(26, 50000),
 			verdict: deny,
 		},
 		{
-			name:    "two dst-port rules, first",
-			rules:   "add pass tcp from any to any dst-port 22\nadd pass tcp from any to any dst-port 25\nadd deny ip from any to any\n",
+			name: "two dst-port rules, first",
+			rules: ruleset(`
+				add pass tcp from any to any dst-port 22
+				add pass tcp from any to any dst-port 25
+				add deny ip from any to any
+			`),
 			packet:  tcp(50000, 22),
 			verdict: pass,
 		},
 		{
-			name:    "two dst-port rules, second",
-			rules:   "add pass tcp from any to any dst-port 22\nadd pass tcp from any to any dst-port 25\nadd deny ip from any to any\n",
+			name: "two dst-port rules, second",
+			rules: ruleset(`
+				add pass tcp from any to any dst-port 22
+				add pass tcp from any to any dst-port 25
+				add deny ip from any to any
+			`),
 			packet:  tcp(50000, 25),
 			verdict: pass,
 		},
 		{
-			name:    "two dst-port rules, neither",
-			rules:   "add pass tcp from any to any dst-port 22\nadd pass tcp from any to any dst-port 25\nadd deny ip from any to any\n",
+			name: "two dst-port rules, neither",
+			rules: ruleset(`
+				add pass tcp from any to any dst-port 22
+				add pass tcp from any to any dst-port 25
+				add deny ip from any to any
+			`),
 			packet:  tcp(50000, 26),
 			verdict: deny,
 		},
 		{
-			name:    "dst-port over UDP",
-			rules:   "add pass ip from any to any dst-port 22\nadd deny ip from any to any\n",
+			name: "dst-port over UDP",
+			rules: ruleset(`
+				add pass ip from any to any dst-port 22
+				add deny ip from any to any
+			`),
 			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")).WithUDP(50000, 22),
 			verdict: pass,
 		},
 		{
-			name:    "dst-port against ICMP",
-			rules:   "add pass ip from any to any dst-port 22\nadd deny ip from any to any\n",
+			name: "dst-port against ICMP",
+			rules: ruleset(`
+				add pass ip from any to any dst-port 22
+				add deny ip from any to any
+			`),
 			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")).WithICMP(8, 1),
 			verdict: deny,
 		},
 		{
-			name:    "dst-port list, first",
-			rules:   "add pass tcp from any to any dst-port 22,80\nadd deny ip from any to any\n",
+			name: "dst-port list, first",
+			rules: ruleset(`
+				add pass tcp from any to any dst-port 22,80
+				add deny ip from any to any
+			`),
 			packet:  tcp(50000, 22),
 			verdict: pass,
 		},
 		{
-			name:    "dst-port list, second",
-			rules:   "add pass tcp from any to any dst-port 22,80\nadd deny ip from any to any\n",
+			name: "dst-port list, second",
+			rules: ruleset(`
+				add pass tcp from any to any dst-port 22,80
+				add deny ip from any to any
+			`),
 			packet:  tcp(50000, 80),
 			verdict: pass,
 		},
 		{
-			name:    "dst-port list, neither",
-			rules:   "add pass tcp from any to any dst-port 22,80\nadd deny ip from any to any\n",
+			name: "dst-port list, neither",
+			rules: ruleset(`
+				add pass tcp from any to any dst-port 22,80
+				add deny ip from any to any
+			`),
 			packet:  tcp(50000, 443),
 			verdict: deny,
 		},
 		{
-			name:    "negated dst-port list, inside",
-			rules:   "add pass tcp from any to any not dst-port 22,80\nadd deny ip from any to any\n",
+			name: "negated dst-port list, inside",
+			rules: ruleset(`
+				add pass tcp from any to any not dst-port 22,80
+				add deny ip from any to any
+			`),
 			packet:  tcp(50000, 22),
 			verdict: deny,
 		},
 		{
-			name:    "negated dst-port list, outside",
-			rules:   "add pass tcp from any to any not dst-port 22,80\nadd deny ip from any to any\n",
+			name: "negated dst-port list, outside",
+			rules: ruleset(`
+				add pass tcp from any to any not dst-port 22,80
+				add deny ip from any to any
+			`),
 			packet:  tcp(50000, 443),
 			verdict: pass,
 		},
 		{
-			name:    "range with another option",
-			rules:   "add pass tcp from any to any established src-port 1024-65535\nadd deny ip from any to any\n",
+			name: "range with another option",
+			rules: ruleset(`
+				add pass tcp from any to any established src-port 1024-65535
+				add deny ip from any to any
+			`),
 			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")).WithTCP(ipfw.TCPAck, 1024, 22),
 			verdict: pass,
 		},
 		{
-			name:    "range with another option, below",
-			rules:   "add pass tcp from any to any established src-port 1024-65535\nadd deny ip from any to any\n",
+			name: "range with another option, below",
+			rules: ruleset(`
+				add pass tcp from any to any established src-port 1024-65535
+				add deny ip from any to any
+			`),
 			packet:  vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")).WithTCP(ipfw.TCPAck, 1023, 22),
 			verdict: deny,
 		},
@@ -777,7 +1017,11 @@ func Test_VM_Check_PortOptions(t *testing.T) {
 		})
 	}
 
-	named, err := vm.Build(ipfw.NewParser("add pass tcp from any to any dst-port ssh,smtp\nadd deny ip from any to any\n"), vm.Config[net4, net6]{Environment: resolvingServices})
+	src := ruleset(`
+		add pass tcp from any to any dst-port ssh,smtp
+		add deny ip from any to any
+	`)
+	named, err := vm.Build(ipfw.NewParser(src), vm.Config[net4, net6]{Environment: resolvingServices})
 	require.NoError(t, err)
 	require.Equal(t, pass, named.Check(&vm.Context{}, tcp(50000, 25)))
 	require.Equal(t, deny, named.Check(&vm.Context{}, tcp(50000, 26)))
@@ -794,50 +1038,74 @@ func Test_VM_Check_TCPFlags(t *testing.T) {
 		verdict ipfw.Action
 	}{
 		{
-			name:    "tcp rule, syn and not ack, SYN",
-			rules:   "add allow tcp from any to any tcpflags syn,!ack\nadd deny ip from any to any\n",
+			name: "tcp rule, syn and not ack, SYN",
+			rules: ruleset(`
+				add allow tcp from any to any tcpflags syn,!ack
+				add deny ip from any to any
+			`),
 			packet:  tcp4Flags(ipfw.TCPSyn),
 			verdict: pass,
 		},
 		{
-			name:    "tcp rule, syn and not ack, ACK",
-			rules:   "add allow tcp from any to any tcpflags syn,!ack\nadd deny ip from any to any\n",
+			name: "tcp rule, syn and not ack, ACK",
+			rules: ruleset(`
+				add allow tcp from any to any tcpflags syn,!ack
+				add deny ip from any to any
+			`),
 			packet:  tcp4Flags(ipfw.TCPAck),
 			verdict: deny,
 		},
 		{
-			name:    "ip rule, syn and not ack, SYN",
-			rules:   "add allow ip from any to any tcpflags syn,!ack\nadd deny ip from any to any\n",
+			name: "ip rule, syn and not ack, SYN",
+			rules: ruleset(`
+				add allow ip from any to any tcpflags syn,!ack
+				add deny ip from any to any
+			`),
 			packet:  tcp4Flags(ipfw.TCPSyn),
 			verdict: pass,
 		},
 		{
-			name:    "ip rule, syn and not ack, SYN with ACK",
-			rules:   "add allow ip from any to any tcpflags syn,!ack\nadd deny ip from any to any\n",
+			name: "ip rule, syn and not ack, SYN with ACK",
+			rules: ruleset(`
+				add allow ip from any to any tcpflags syn,!ack
+				add deny ip from any to any
+			`),
 			packet:  tcp4Flags(ipfw.TCPSyn | ipfw.TCPAck),
 			verdict: deny,
 		},
 		{
-			name:    "ip rule, syn and not ack, SYN with PSH outside the mask",
-			rules:   "add allow ip from any to any tcpflags syn,!ack\nadd deny ip from any to any\n",
+			name: "ip rule, syn and not ack, SYN with PSH outside the mask",
+			rules: ruleset(`
+				add allow ip from any to any tcpflags syn,!ack
+				add deny ip from any to any
+			`),
 			packet:  tcp4Flags(ipfw.TCPSyn | ipfw.TCPPsh),
 			verdict: pass,
 		},
 		{
-			name:    "ip rule, syn and not ack, UDP",
-			rules:   "add allow ip from any to any tcpflags syn,!ack\nadd deny ip from any to any\n",
+			name: "ip rule, syn and not ack, UDP",
+			rules: ruleset(`
+				add allow ip from any to any tcpflags syn,!ack
+				add deny ip from any to any
+			`),
 			packet:  udp,
 			verdict: deny,
 		},
 		{
-			name:    "not tcpflags, UDP",
-			rules:   "add allow ip from any to any not tcpflags rst\nadd deny ip from any to any\n",
+			name: "not tcpflags, UDP",
+			rules: ruleset(`
+				add allow ip from any to any not tcpflags rst
+				add deny ip from any to any
+			`),
 			packet:  udp,
 			verdict: pass,
 		},
 		{
-			name:    "not tcpflags, RST",
-			rules:   "add allow ip from any to any not tcpflags rst\nadd deny ip from any to any\n",
+			name: "not tcpflags, RST",
+			rules: ruleset(`
+				add allow ip from any to any not tcpflags rst
+				add deny ip from any to any
+			`),
 			packet:  tcp4Flags(ipfw.TCPRst),
 			verdict: deny,
 		},
@@ -866,56 +1134,83 @@ func Test_VM_Check_ICMPTypes(t *testing.T) {
 		verdict ipfw.Action
 	}{
 		{
-			name:    "icmptypes, type in the set",
-			rules:   "add allow icmp from any to { 192.0.2.0/24 } icmptypes 0,8,3,11,12\nadd deny ip from any to any\n",
+			name: "icmptypes, type in the set",
+			rules: ruleset(`
+				add allow icmp from any to { 192.0.2.0/24 } icmptypes 0,8,3,11,12
+				add deny ip from any to any
+			`),
 			packet:  icmp(8),
 			verdict: pass,
 		},
 		{
-			name:    "icmptypes, type outside the set",
-			rules:   "add allow icmp from any to { 192.0.2.0/24 } icmptypes 0,8,3,11,12\nadd deny ip from any to any\n",
+			name: "icmptypes, type outside the set",
+			rules: ruleset(`
+				add allow icmp from any to { 192.0.2.0/24 } icmptypes 0,8,3,11,12
+				add deny ip from any to any
+			`),
 			packet:  icmp(1),
 			verdict: deny,
 		},
 		{
-			name:    "icmptypes against TCP",
-			rules:   "add allow ip from any to any icmptypes 8\nadd deny ip from any to any\n",
+			name: "icmptypes against TCP",
+			rules: ruleset(`
+				add allow ip from any to any icmptypes 8
+				add deny ip from any to any
+			`),
 			packet:  tcp4("192.0.2.1", "192.0.2.2"),
 			verdict: deny,
 		},
 		{
-			name:    "icmptypes against ICMPv6",
-			rules:   "add allow ip from any to any icmptypes 8\nadd deny ip from any to any\n",
+			name: "icmptypes against ICMPv6",
+			rules: ruleset(`
+				add allow ip from any to any icmptypes 8
+				add deny ip from any to any
+			`),
 			packet:  icmp6(8),
 			verdict: deny,
 		},
 		{
-			name:    "not icmptypes, type in the set",
-			rules:   "add allow ip from any to any not icmptypes 8\nadd deny ip from any to any\n",
+			name: "not icmptypes, type in the set",
+			rules: ruleset(`
+				add allow ip from any to any not icmptypes 8
+				add deny ip from any to any
+			`),
 			packet:  icmp(8),
 			verdict: deny,
 		},
 		{
-			name:    "not icmptypes, type outside the set",
-			rules:   "add allow ip from any to any not icmptypes 8\nadd deny ip from any to any\n",
+			name: "not icmptypes, type outside the set",
+			rules: ruleset(`
+				add allow ip from any to any not icmptypes 8
+				add deny ip from any to any
+			`),
 			packet:  icmp(0),
 			verdict: pass,
 		},
 		{
-			name:    "icmp6types, type in the set",
-			rules:   "add allow ip from any to { 2001:db8::/32 } icmp6types 1,2,3,4,128,129,133,134,135,136\nadd deny ip from any to any\n",
+			name: "icmp6types, type in the set",
+			rules: ruleset(`
+				add allow ip from any to { 2001:db8::/32 } icmp6types 1,2,3,4,128,129,133,134,135,136
+				add deny ip from any to any
+			`),
 			packet:  icmp6(135),
 			verdict: pass,
 		},
 		{
-			name:    "icmp6types, type outside the set",
-			rules:   "add allow ip from any to { 2001:db8::/32 } icmp6types 1,2,3,4,128,129,133,134,135,136\nadd deny ip from any to any\n",
+			name: "icmp6types, type outside the set",
+			rules: ruleset(`
+				add allow ip from any to { 2001:db8::/32 } icmp6types 1,2,3,4,128,129,133,134,135,136
+				add deny ip from any to any
+			`),
 			packet:  icmp6(130),
 			verdict: deny,
 		},
 		{
-			name:    "icmp6types against ICMP",
-			rules:   "add allow ip from any to any icmp6types 128\nadd deny ip from any to any\n",
+			name: "icmp6types against ICMP",
+			rules: ruleset(`
+				add allow ip from any to any icmp6types 128
+				add deny ip from any to any
+			`),
 			packet:  icmp(128),
 			verdict: deny,
 		},
@@ -931,13 +1226,21 @@ func Test_VM_Check_ICMPTypes(t *testing.T) {
 // verifies that frag matches a non-first IPv4 fragment only, which, having
 // no transport header, fails a rule with ports first.
 func Test_VM_Check_Frag(t *testing.T) {
-	machine := build(t, "add allow ip from any to any frag\nadd deny ip from any to any\n", none)
+	src := ruleset(`
+		add allow ip from any to any frag
+		add deny ip from any to any
+	`)
+	machine := build(t, src, none)
 	fragment := vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")).WithFragmentOffset(100)
 	require.Equal(t, pass, machine.Check(&vm.Context{}, fragment))
 	require.Equal(t, deny, machine.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.2")))
 	require.Equal(t, deny, machine.Check(&vm.Context{}, vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8::2"))))
 
-	withPorts := build(t, "add allow ip from any to any 22 frag\nadd deny ip from any to any\n", none)
+	src = ruleset(`
+		add allow ip from any to any 22 frag
+		add deny ip from any to any
+	`)
+	withPorts := build(t, src, none)
 	require.Equal(t, deny, withPorts.Check(&vm.Context{}, fragment))
 	require.Equal(t, deny, withPorts.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.2").(vm.RawIPv4Packet).WithFragmentOffset(100)))
 	require.Equal(t, deny, withPorts.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.2")))
@@ -955,34 +1258,49 @@ func Test_VM_Check_Direction(t *testing.T) {
 		out   ipfw.Action
 	}{
 		{
-			name:  "in",
-			rules: "add allow ip from any to any in\nadd deny ip from any to any\n",
-			in:    pass,
-			out:   deny,
+			name: "in",
+			rules: ruleset(`
+				add allow ip from any to any in
+				add deny ip from any to any
+			`),
+			in:  pass,
+			out: deny,
 		},
 		{
-			name:  "out",
-			rules: "add allow ip from any to any out\nadd deny ip from any to any\n",
-			in:    deny,
-			out:   pass,
+			name: "out",
+			rules: ruleset(`
+				add allow ip from any to any out
+				add deny ip from any to any
+			`),
+			in:  deny,
+			out: pass,
 		},
 		{
-			name:  "in or out",
-			rules: "add allow ip from any to any { in or out }\nadd deny ip from any to any\n",
-			in:    pass,
-			out:   pass,
+			name: "in or out",
+			rules: ruleset(`
+				add allow ip from any to any { in or out }
+				add deny ip from any to any
+			`),
+			in:  pass,
+			out: pass,
 		},
 		{
-			name:  "not in",
-			rules: "add allow ip from any to any not in\nadd deny ip from any to any\n",
-			in:    deny,
-			out:   pass,
+			name: "not in",
+			rules: ruleset(`
+				add allow ip from any to any not in
+				add deny ip from any to any
+			`),
+			in:  deny,
+			out: pass,
 		},
 		{
-			name:  "in and out never both",
-			rules: "add allow ip from any to any in out\nadd deny ip from any to any\n",
-			in:    deny,
-			out:   deny,
+			name: "in and out never both",
+			rules: ruleset(`
+				add allow ip from any to any in out
+				add deny ip from any to any
+			`),
+			in:  deny,
+			out: deny,
 		},
 	}
 	for _, tc := range cases {
@@ -997,7 +1315,13 @@ func Test_VM_Check_Direction(t *testing.T) {
 // verifies the fold over the options: AND between terms, OR inside a
 // group, and a rule with no options decided by its body alone.
 func Test_VM_Check_OptionFold(t *testing.T) {
-	machine := build(t, "add pass tcp from any to any established not established\nadd count tcp from any to any { not established or established }\nadd pass tcp from any to any\nadd deny ip from any to any\n", none)
+	src := ruleset(`
+		add pass tcp from any to any established not established
+		add count tcp from any to any { not established or established }
+		add pass tcp from any to any
+		add deny ip from any to any
+	`)
+	machine := build(t, src, none)
 	for _, flags := range []ipfw.TCPFlag{ipfw.TCPSyn, ipfw.TCPAck} {
 		tracer := &recordingTracer{}
 		action, matched := machine.CheckTrace(&vm.Context{}, tcp4Flags(flags), tracer)
@@ -1013,7 +1337,12 @@ func Test_VM_Check_OptionFold(t *testing.T) {
 
 // verifies that a check over options allocates nothing.
 func Test_VM_Options_NoAllocs(t *testing.T) {
-	machine := build(t, "add deny tcp from any to any { established or not established } not established\nadd pass tcp from any to any established\nadd deny ip from any to any\n", none)
+	src := ruleset(`
+		add deny tcp from any to any { established or not established } not established
+		add pass tcp from any to any established
+		add deny ip from any to any
+	`)
+	machine := build(t, src, none)
 	packet := tcp4Flags(ipfw.TCPAck)
 	ctx := &vm.Context{}
 	verdict := pass
@@ -1036,80 +1365,119 @@ func Test_VM_Check_ResolvedTargets(t *testing.T) {
 		verdict ipfw.Action
 	}{
 		{
-			name:    "hostname, its IPv4 address",
-			rules:   "add pass ip from host.example.com to any\nadd deny ip from any to any\n",
+			name: "hostname, its IPv4 address",
+			rules: ruleset(`
+				add pass ip from host.example.com to any
+				add deny ip from any to any
+			`),
 			packet:  tcp4("192.0.2.1", "203.0.113.1"),
 			verdict: pass,
 		},
 		{
-			name:    "hostname, its IPv6 address",
-			rules:   "add pass ip from host.example.com to any\nadd deny ip from any to any\n",
+			name: "hostname, its IPv6 address",
+			rules: ruleset(`
+				add pass ip from host.example.com to any
+				add deny ip from any to any
+			`),
 			packet:  vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8::2")),
 			verdict: pass,
 		},
 		{
-			name:    "hostname, another address",
-			rules:   "add pass ip from host.example.com to any\nadd deny ip from any to any\n",
+			name: "hostname, another address",
+			rules: ruleset(`
+				add pass ip from host.example.com to any
+				add deny ip from any to any
+			`),
 			packet:  tcp4("192.0.2.2", "203.0.113.1"),
 			verdict: deny,
 		},
 		{
-			name:    "negated hostname, its IPv4 address",
-			rules:   "add pass ip from not host.example.com to any\nadd deny ip from any to any\n",
+			name: "negated hostname, its IPv4 address",
+			rules: ruleset(`
+				add pass ip from not host.example.com to any
+				add deny ip from any to any
+			`),
 			packet:  tcp4("192.0.2.1", "203.0.113.1"),
 			verdict: deny,
 		},
 		{
-			name:    "negated hostname, its IPv6 address",
-			rules:   "add pass ip from not host.example.com to any\nadd deny ip from any to any\n",
+			name: "negated hostname, its IPv6 address",
+			rules: ruleset(`
+				add pass ip from not host.example.com to any
+				add deny ip from any to any
+			`),
 			packet:  vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8::2")),
 			verdict: deny,
 		},
 		{
-			name:    "negated hostname, another address",
-			rules:   "add pass ip from not host.example.com to any\nadd deny ip from any to any\n",
+			name: "negated hostname, another address",
+			rules: ruleset(`
+				add pass ip from not host.example.com to any
+				add deny ip from any to any
+			`),
 			packet:  tcp4("192.0.2.2", "203.0.113.1"),
 			verdict: pass,
 		},
 		{
-			name:    "macro, first network",
-			rules:   "add pass ip from any to _NETS_\nadd deny ip from any to any\n",
+			name: "macro, first network",
+			rules: ruleset(`
+				add pass ip from any to _NETS_
+				add deny ip from any to any
+			`),
 			packet:  tcp4("203.0.113.1", "192.0.2.5"),
 			verdict: pass,
 		},
 		{
-			name:    "macro, second network",
-			rules:   "add pass ip from any to _NETS_\nadd deny ip from any to any\n",
+			name: "macro, second network",
+			rules: ruleset(`
+				add pass ip from any to _NETS_
+				add deny ip from any to any
+			`),
 			packet:  tcp4("203.0.113.1", "198.51.100.5"),
 			verdict: pass,
 		},
 		{
-			name:    "macro, outside",
-			rules:   "add pass ip from any to _NETS_\nadd deny ip from any to any\n",
+			name: "macro, outside",
+			rules: ruleset(`
+				add pass ip from any to _NETS_
+				add deny ip from any to any
+			`),
 			packet:  tcp4("203.0.113.1", "203.0.113.5"),
 			verdict: deny,
 		},
 		{
-			name:    "negated macro, inside",
-			rules:   "add pass ip from any to not _NETS_\nadd deny ip from any to any\n",
+			name: "negated macro, inside",
+			rules: ruleset(`
+				add pass ip from any to not _NETS_
+				add deny ip from any to any
+			`),
 			packet:  tcp4("203.0.113.1", "198.51.100.5"),
 			verdict: deny,
 		},
 		{
-			name:    "negated macro in a group with a network",
-			rules:   "add pass ip from { 203.0.113.0/24 or not _NETS_ } to any\nadd deny ip from any to any\n",
+			name: "negated macro in a group with a network",
+			rules: ruleset(`
+				add pass ip from { 203.0.113.0/24 or not _NETS_ } to any
+				add deny ip from any to any
+			`),
 			packet:  tcp4("198.51.100.5", "203.0.113.1"),
 			verdict: deny,
 		},
 		{
-			name:    "name standing for nothing never matches",
-			rules:   "add pass tcp from { nothing.example.com } to any\nadd deny ip from any to any\n",
+			name: "name standing for nothing never matches",
+			rules: ruleset(`
+				add pass tcp from { nothing.example.com } to any
+				add deny ip from any to any
+			`),
 			packet:  tcp4("192.0.2.1", "203.0.113.1"),
 			verdict: deny,
 		},
 		{
-			name:    "negated name standing for nothing never matches either",
-			rules:   "add pass tcp from not nothing.example.com to any\nadd deny ip from any to any\n",
+			name: "negated name standing for nothing never matches either",
+			rules: ruleset(`
+				add pass tcp from not nothing.example.com to any
+				add deny ip from any to any
+			`),
 			packet:  tcp4("192.0.2.1", "203.0.113.1"),
 			verdict: deny,
 		},
@@ -1216,7 +1584,12 @@ func Test_VM_Check_Resolved_NoAllocs(t *testing.T) {
 // verifies that me and me6 match the addresses the context lists, in the
 // packet's family only, so one VM gives different verdicts per context.
 func Test_VM_Check_Me(t *testing.T) {
-	machine := build(t, "add pass ip from me to me\nadd pass ip from me6 to any\nadd deny ip from any to any\n", none)
+	src := ruleset(`
+		add pass ip from me to me
+		add pass ip from me6 to any
+		add deny ip from any to any
+	`)
+	machine := build(t, src, none)
 	local4 := &vm.Context{LocalAddrs: []netip.Addr{netip.MustParseAddr("192.0.2.1")}}
 	other4 := &vm.Context{LocalAddrs: []netip.Addr{netip.MustParseAddr("198.51.100.1"), netip.MustParseAddr("192.0.2.1")}}
 	local6 := &vm.Context{LocalAddrs: []netip.Addr{netip.MustParseAddr("2001:db8::1")}}
@@ -1279,8 +1652,17 @@ func Test_VM_Check_Me(t *testing.T) {
 // verifies that a table target matches the addresses of its networks of
 // either family, negated or not, and that a missing table matches nothing.
 func Test_VM_Check_Tables(t *testing.T) {
-	rules := "table t create type addr\ntable t add 192.0.2.128/29\ntable t add 198.51.100.0/25\ntable t add 198.51.100.128/25\ntable t add 2001:db8::/32\n" +
-		"add pass tcp from table(t) to table(t)\nadd pass ip from not table(t) to 203.0.113.1\nadd pass ip from table(none) to any\nadd deny ip from any to any\n"
+	rules := ruleset(`
+		table t create type addr
+		table t add 192.0.2.128/29
+		table t add 198.51.100.0/25
+		table t add 198.51.100.128/25
+		table t add 2001:db8::/32
+		add pass tcp from table(t) to table(t)
+		add pass ip from not table(t) to 203.0.113.1
+		add pass ip from table(none) to any
+		add deny ip from any to any
+	`)
 	cases := []struct {
 		name    string
 		packet  vm.Packet
@@ -1492,13 +1874,19 @@ func Test_VM_Build_UnsupportedKinds(t *testing.T) {
 		cause error
 	}{
 		{
-			name:  "record",
-			rules: "add pass ip from any to any\nfrobnicate now\n",
+			name: "record",
+			rules: ruleset(`
+				add pass ip from any to any
+				frobnicate now
+			`),
 			cause: vm.ErrUnsupportedRecord,
 		},
 		{
-			name:  "action",
-			rules: "add pass ip from any to any\nwarp somewhere\n",
+			name: "action",
+			rules: ruleset(`
+				add pass ip from any to any
+				warp somewhere
+			`),
 			cause: vm.ErrUnsupportedAction,
 		},
 	}
@@ -1542,50 +1930,71 @@ func Test_VM_Check_CustomOption(t *testing.T) {
 		verdict ipfw.Action
 	}{
 		{
-			name:    "setup, SYN",
-			rules:   "add pass tcp from any to any setup\nadd deny ip from any to any\n",
+			name: "setup, SYN",
+			rules: ruleset(`
+				add pass tcp from any to any setup
+				add deny ip from any to any
+			`),
 			ctx:     &vm.Context{},
 			packet:  tcp4Flags(ipfw.TCPSyn),
 			verdict: pass,
 		},
 		{
-			name:    "setup, SYN with ACK",
-			rules:   "add pass tcp from any to any setup\nadd deny ip from any to any\n",
+			name: "setup, SYN with ACK",
+			rules: ruleset(`
+				add pass tcp from any to any setup
+				add deny ip from any to any
+			`),
 			ctx:     &vm.Context{},
 			packet:  tcp4Flags(ipfw.TCPSyn | ipfw.TCPAck),
 			verdict: deny,
 		},
 		{
-			name:    "not setup, SYN",
-			rules:   "add pass tcp from any to any not setup\nadd deny ip from any to any\n",
+			name: "not setup, SYN",
+			rules: ruleset(`
+				add pass tcp from any to any not setup
+				add deny ip from any to any
+			`),
 			ctx:     &vm.Context{},
 			packet:  tcp4Flags(ipfw.TCPSyn),
 			verdict: deny,
 		},
 		{
-			name:    "not setup, ACK",
-			rules:   "add pass tcp from any to any not setup\nadd deny ip from any to any\n",
+			name: "not setup, ACK",
+			rules: ruleset(`
+				add pass tcp from any to any not setup
+				add deny ip from any to any
+			`),
 			ctx:     &vm.Context{},
 			packet:  tcp4Flags(ipfw.TCPAck),
 			verdict: pass,
 		},
 		{
-			name:    "setup or in, ACK coming in",
-			rules:   "add pass tcp from any to any { setup or in }\nadd deny ip from any to any\n",
+			name: "setup or in, ACK coming in",
+			rules: ruleset(`
+				add pass tcp from any to any { setup or in }
+				add deny ip from any to any
+			`),
 			ctx:     &vm.Context{Direction: vm.In},
 			packet:  tcp4Flags(ipfw.TCPAck),
 			verdict: pass,
 		},
 		{
-			name:    "setup or in, SYN going out",
-			rules:   "add pass tcp from any to any { setup or in }\nadd deny ip from any to any\n",
+			name: "setup or in, SYN going out",
+			rules: ruleset(`
+				add pass tcp from any to any { setup or in }
+				add deny ip from any to any
+			`),
 			ctx:     &vm.Context{Direction: vm.Out},
 			packet:  tcp4Flags(ipfw.TCPSyn),
 			verdict: pass,
 		},
 		{
-			name:    "setup or in, ACK going out",
-			rules:   "add pass tcp from any to any { setup or in }\nadd deny ip from any to any\n",
+			name: "setup or in, ACK going out",
+			rules: ruleset(`
+				add pass tcp from any to any { setup or in }
+				add deny ip from any to any
+			`),
 			ctx:     &vm.Context{Direction: vm.Out},
 			packet:  tcp4Flags(ipfw.TCPAck),
 			verdict: deny,
@@ -1599,7 +2008,11 @@ func Test_VM_Check_CustomOption(t *testing.T) {
 		})
 	}
 
-	_, err := vm.Build(ipfw.NewParser("add pass ip from any to any\nadd pass tcp from any to any established setup\n", ipfw.WithOptionHook(setupHook)), vm.Config[net4, net6]{Environment: resolving})
+	src := ruleset(`
+		add pass ip from any to any
+		add pass tcp from any to any established setup
+	`)
+	_, err := vm.Build(ipfw.NewParser(src, ipfw.WithOptionHook(setupHook)), vm.Config[net4, net6]{Environment: resolving})
 	var buildErr *vm.BuildError
 	require.ErrorAs(t, err, &buildErr)
 	require.Equal(t, 2, buildErr.Line)
@@ -1612,8 +2025,13 @@ func Test_VM_Check_CustomOption(t *testing.T) {
 
 // verifies that a check through the custom matcher allocates nothing.
 func Test_VM_CustomOption_NoAllocs(t *testing.T) {
+	src := ruleset(`
+		add deny tcp from any to any not setup
+		add pass tcp from any to any { setup or in }
+		add deny ip from any to any
+	`)
 	machine, err := vm.Build(
-		ipfw.NewParser("add deny tcp from any to any not setup\nadd pass tcp from any to any { setup or in }\nadd deny ip from any to any\n", ipfw.WithOptionHook(setupHook)),
+		ipfw.NewParser(src, ipfw.WithOptionHook(setupHook)),
 		vm.Config[net4, net6]{Environment: resolving, OptionMatcher: setupMatcher},
 	)
 	require.NoError(t, err)
@@ -1657,7 +2075,11 @@ func Test_VM_Check_PolicyOptions(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.option, func(t *testing.T) {
-			parser := ipfw.NewParser("add pass ip from any to any "+tc.option+"\nadd deny ip from any to any\n", ipfw.WithOptionHook(note))
+			src := ruleset(`
+
+				add deny ip from any to any
+			`)
+			parser := ipfw.NewParser("add pass ip from any to any "+tc.option+src, ipfw.WithOptionHook(note))
 			machine, err := vm.Build(parser, vm.Config[net4, net6]{Environment: resolving})
 			require.NoError(t, err)
 			require.Equal(t, tc.in, machine.Check(&vm.Context{Direction: vm.In}, packet))
@@ -1825,64 +2247,90 @@ func Test_VM_Build_Errors(t *testing.T) {
 		cause       error
 	}{
 		{
-			name:        "parse error",
-			rules:       "add pass ip from any to any\nadd foobar :any\n",
+			name: "parse error",
+			rules: ruleset(`
+				add pass ip from any to any
+				add foobar :any
+			`),
 			environment: resolving,
 			line:        2,
 			text:        "add foobar :any",
 			cause:       ipfw.ErrExpectedAction,
 		},
 		{
-			name:        "rule number going backwards",
-			rules:       "add 100 pass ip from any to any\nadd 50 deny ip from any to any\n",
+			name: "rule number going backwards",
+			rules: ruleset(`
+				add 100 pass ip from any to any
+				add 50 deny ip from any to any
+			`),
 			environment: resolving,
 			line:        2,
 			text:        "add 50 deny ip from any to any",
 			cause:       vm.ErrRuleNumberOrder,
 		},
 		{
-			name:        "rule number repeated",
-			rules:       "add 100 pass ip from any to any\nadd 100 deny ip from any to any\n",
+			name: "rule number repeated",
+			rules: ruleset(`
+				add 100 pass ip from any to any
+				add 100 deny ip from any to any
+			`),
 			environment: resolving,
 			line:        2,
 			text:        "add 100 deny ip from any to any",
 			cause:       vm.ErrRuleNumberOrder,
 		},
 		{
-			name:        "skipto to a number that never appears",
-			rules:       "add deny udp from any to any\nadd skipto 7 ip from any to any\nadd pass ip from any to any\n",
+			name: "skipto to a number that never appears",
+			rules: ruleset(`
+				add deny udp from any to any
+				add skipto 7 ip from any to any
+				add pass ip from any to any
+			`),
 			environment: resolving,
 			line:        2,
 			text:        "add skipto 7 ip from any to any",
 			cause:       vm.ErrUnresolvedJump,
 		},
 		{
-			name:        "skipto to its own number",
-			rules:       "add 50 skipto 50 ip from any to any\nadd pass ip from any to any\n",
+			name: "skipto to its own number",
+			rules: ruleset(`
+				add 50 skipto 50 ip from any to any
+				add pass ip from any to any
+			`),
 			environment: resolving,
 			line:        1,
 			text:        "add 50 skipto 50 ip from any to any",
 			cause:       vm.ErrUnresolvedJump,
 		},
 		{
-			name:        "skipto backwards",
-			rules:       "add 50 pass udp from any to any\nadd 100 skipto 50 ip from any to any\n",
+			name: "skipto backwards",
+			rules: ruleset(`
+				add 50 pass udp from any to any
+				add 100 skipto 50 ip from any to any
+			`),
 			environment: resolving,
 			line:        2,
 			text:        "add 100 skipto 50 ip from any to any",
 			cause:       vm.ErrUnresolvedJump,
 		},
 		{
-			name:        "skipto to a label that never appears",
-			rules:       "add skipto :NOWHERE ip from any to any\nadd pass ip from any to any\n",
+			name: "skipto to a label that never appears",
+			rules: ruleset(`
+				add skipto :NOWHERE ip from any to any
+				add pass ip from any to any
+			`),
 			environment: resolving,
 			line:        1,
 			text:        "add skipto :NOWHERE ip from any to any",
 			cause:       vm.ErrUnresolvedJump,
 		},
 		{
-			name:        "skipto to a label before it",
-			rules:       "add count ip from any to any\n:BACK\nadd skipto :BACK ip from any to any\n",
+			name: "skipto to a label before it",
+			rules: ruleset(`
+				add count ip from any to any
+				:BACK
+				add skipto :BACK ip from any to any
+			`),
 			environment: resolving,
 			line:        3,
 			text:        "add skipto :BACK ip from any to any",
@@ -1913,8 +2361,11 @@ func Test_VM_Build_Errors(t *testing.T) {
 			cause:       ipfw.ErrUnresolvedProto,
 		},
 		{
-			name:        "IPv4 table entry that does not parse",
-			rules:       "table t add 192.0.2.0/24\ntable t add 192.0.2.0/33\n",
+			name: "IPv4 table entry that does not parse",
+			rules: ruleset(`
+				table t add 192.0.2.0/24
+				table t add 192.0.2.0/33
+			`),
 			environment: resolving,
 			line:        2,
 			text:        "table t add 192.0.2.0/33",
@@ -1969,7 +2420,11 @@ func Test_VM_Build_Errors(t *testing.T) {
 
 // verifies that a parse error keeps its position inside the build error.
 func Test_VM_Build_ParseError(t *testing.T) {
-	_, err := vm.Build(ipfw.NewParser("add pass ip from any to any\n  add foobar :any\n"), vm.Config[net4, net6]{Environment: resolving})
+	src := ruleset(`
+		add pass ip from any to any
+		  add foobar :any
+	`)
+	_, err := vm.Build(ipfw.NewParser(src), vm.Config[net4, net6]{Environment: resolving})
 	var parseErr *ipfw.ParseError
 	require.ErrorAs(t, err, &parseErr)
 	require.Equal(t, ipfw.ParseError{
@@ -1982,8 +2437,12 @@ func Test_VM_Build_ParseError(t *testing.T) {
 
 // verifies that a numeric protocol needs no resolver.
 func Test_VM_Build_NumericProto(t *testing.T) {
+	src := ruleset(`
+		add pass 6 from any to any
+		add deny ip from any to any
+	`)
 	machine, err := vm.Build(
-		ipfw.NewParser("add pass 6 from any to any\nadd deny ip from any to any\n"),
+		ipfw.NewParser(src),
 		vm.Config[net4, net6]{Environment: networksOnly},
 	)
 	require.NoError(t, err)
@@ -2001,19 +2460,22 @@ func (anyTargets) ResolveTarget(ipfw.Target) ([]net4, []net6, error) {
 
 // everyMatcher is a ruleset touching every matcher of the VM, so that a
 // check of it reaches all of them whatever the packet is.
-const everyMatcher = "table t add 203.0.113.0/24\ntable i add vlan1234 :SECTION\n" +
-	"add deny udp from 198.51.100.0/24 to table(t) 53\n" +
-	"add count ip from any to any icmptypes 0,8\n" +
-	"add count ip from any to any icmp6types 128,129\n" +
-	"add deny tcp from any 1-1023 to me6 not established\n" +
-	"add deny ip from host.example.com to _NETS_ frag\n" +
-	"add count tcp from any to any tcpflags syn,!ack dst-port 8080,8443\n" +
-	"add count ip from any to any { proto 17 or out } keep-state :flow\n" +
-	"add skipto tablearg ip from any to any via table(i) in\n" +
-	":SECTION\n" +
-	"add deny ip from not me to { table(t) or 2001:db8::/32 } antispoof\n" +
-	"add pass tcp from 192.0.2.0/24 not 25 to any 443 via vlan1??? established\n" +
-	"add deny ip from any to any\n"
+var everyMatcher = ruleset(`
+	table t add 203.0.113.0/24
+	table i add vlan1234 :SECTION
+	add deny udp from 198.51.100.0/24 to table(t) 53
+	add count ip from any to any icmptypes 0,8
+	add count ip from any to any icmp6types 128,129
+	add deny tcp from any 1-1023 to me6 not established
+	add deny ip from host.example.com to _NETS_ frag
+	add count tcp from any to any tcpflags syn,!ack dst-port 8080,8443
+	add count ip from any to any { proto 17 or out } keep-state :flow
+	add skipto tablearg ip from any to any via table(i) in
+	:SECTION
+	add deny ip from not me to { table(t) or 2001:db8::/32 } antispoof
+	add pass tcp from 192.0.2.0/24 not 25 to any 443 via vlan1??? established
+	add deny ip from any to any
+`)
 
 // everyMatcherVM builds the ruleset above, whose jump goes to its label
 // and whose names any resolver serves.
@@ -2133,12 +2595,17 @@ func Benchmark_VM_Check_NoRule(b *testing.B) {
 }
 
 func Benchmark_VM_Check_Jumps(b *testing.B) {
-	var ruleset strings.Builder
+	section := ruleset(`
+		add skipto :S%d ip from any to any
+		add deny ip from any to any
+		:S%d
+	`)
+	var rules strings.Builder
 	for idx := range 1000 {
-		fmt.Fprintf(&ruleset, "add skipto :S%d ip from any to any\nadd deny ip from any to any\n:S%d\n", idx, idx)
+		fmt.Fprintf(&rules, section, idx, idx)
 	}
-	ruleset.WriteString("add pass ip from any to any\n")
-	benchmarkCheck(b, ruleset.String())
+	rules.WriteString("add pass ip from any to any\n")
+	benchmarkCheck(b, rules.String())
 }
 
 func Benchmark_VM_Check_EveryMatcher(b *testing.B) {
@@ -2146,15 +2613,15 @@ func Benchmark_VM_Check_EveryMatcher(b *testing.B) {
 }
 
 func Benchmark_VM_Build_Large(b *testing.B) {
-	ruleset := strings.Repeat(everyMatcher, 100)
+	src := strings.Repeat(everyMatcher, 100)
 	cfg := vm.Config[net4, net6]{
 		Environment:     ipfw.Environment[net4, net6]{Networks: nets, Protos: fakeProtos{}, Targets: anyTargets{}},
 		UnresolvedJumps: vm.UnresolvedJumpsFallThrough,
 	}
 	b.ReportAllocs()
-	b.SetBytes(int64(len(ruleset)))
+	b.SetBytes(int64(len(src)))
 	for b.Loop() {
-		if _, err := vm.Build(ipfw.NewParser(ruleset), cfg); err != nil {
+		if _, err := vm.Build(ipfw.NewParser(src), cfg); err != nil {
 			b.Fatal(err)
 		}
 	}
