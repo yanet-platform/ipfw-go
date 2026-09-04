@@ -110,7 +110,7 @@ func (m ErrorKind) Error() string {
 	case ErrExpectedTableCommand:
 		return "expected table command (`create` or `add`)"
 	case ErrExpectedTableKey:
-		return "expected table key (network or interface name)"
+		return "expected table key"
 	case ErrExpectedSkipTo:
 		return "expected skipto target (label, rule number or `tablearg`)"
 	case ErrExpectedU8:

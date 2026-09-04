@@ -417,21 +417,21 @@ func parseTableAdd(s string, table *Table) (string, fail) {
 	return rest, fail{}
 }
 
-// parseTableKey classifies a table key by its shape: IPv4 or IPv6 network
-// text, or else an interface name, none of them validated.
+// parseTableKey classifies a table key by its shape, network text, hostname or
+// name, never cutting it short.
 func parseTableKey(s string) (TableKey, string, fail) {
 	text, rest := token(s)
 	switch {
+	case text == "":
+		return TableKey{}, s, fail{Kind: ErrExpectedTableKey, At: s}
 	case isNetwork6Text(text):
 		return TableKey{Kind: TableKeyNetwork6, Text: text}, rest, fail{}
 	case isNetwork4Text(text):
 		return TableKey{Kind: TableKeyNetwork4, Text: text}, rest, fail{}
+	case isHostnameText(text):
+		return TableKey{Kind: TableKeyHostname, Text: text}, rest, fail{}
 	}
-	name, rest := takeWhile(s, isIfNameByte)
-	if name == "" {
-		return TableKey{}, s, fail{Kind: ErrExpectedTableKey, At: s}
-	}
-	return TableKey{Kind: TableKeyIfName, Text: name}, rest, fail{}
+	return TableKey{Kind: TableKeyName, Text: text}, rest, fail{}
 }
 
 // tableTypeNames are the table types by keyword, in the order tried.

@@ -78,6 +78,8 @@ var (
 	ErrUnsupportedOption = errors.New("unsupported option")
 	ErrUnsupportedAction = errors.New("unsupported action")
 	ErrUnsupportedRecord = errors.New("unsupported record")
+	// ErrUnsupportedTableType is a create of a table type the VM cannot hold.
+	ErrUnsupportedTableType = errors.New("unsupported table type")
 )
 
 // BuildError is a build failure located at a line of the ruleset.
@@ -326,7 +328,7 @@ func Build[V4, V6 Network](p *ipfw.Parser, cfg Config[V4, V6]) (*VM[V4, V6], err
 	if verdict.Kind == 0 {
 		verdict = ipfw.Action{Kind: ipfw.ActionDeny}
 	}
-	sink := newBuilder(tables, cfg.Environment.Networks, cfg.OptionMatcher != nil)
+	sink := newBuilder(tables, cfg.Environment, cfg.OptionMatcher != nil)
 	state := ipfw.NewResolver(sink, cfg.Environment)
 	for {
 		rec, parseErr := p.Next(state)
@@ -378,6 +380,10 @@ type builder[V4, V6 Network] struct {
 	start    rule
 	tables   TableRegistry[V4, V6]
 	networks ipfw.NetworkParser[V4, V6]
+	targets  ipfw.TargetResolver[V4, V6]
+	// tableTypes is the type each created table was given, a table absent
+	// from it being an address table.
+	tableTypes map[string]ipfw.TableType
 	// custom is whether a custom option has a matcher to go to.
 	custom bool
 	// number is the rule number the next instruction gets, an explicit one
@@ -394,12 +400,14 @@ type builder[V4, V6 Network] struct {
 
 func newBuilder[V4, V6 Network](
 	tables TableRegistry[V4, V6],
-	networks ipfw.NetworkParser[V4, V6],
+	env ipfw.Environment[V4, V6],
 	custom bool,
 ) *builder[V4, V6] {
 	return &builder[V4, V6]{
 		tables:         tables,
-		networks:       networks,
+		networks:       env.Networks,
+		targets:        env.Targets,
+		tableTypes:     map[string]ipfw.TableType{},
 		custom:         custom,
 		number:         1,
 		labels:         map[string]int{},
@@ -463,14 +471,49 @@ func (m *builder[V4, V6]) Label(name string) {
 	delete(m.pendingLabels, name)
 }
 
-// Table adds the entry of a table command to the registry, a create
-// command adding nothing, an interface value losing its leading colon.
+// Table records the type of a created table or adds the entry of an add to
+// the registry, an interface value losing its leading colon.
 //
-// Network text the parser rejects is the error kind of its family.
+// A table never created is an address table, as ipfw(8) makes it. An
+// address table takes network text through the network parser and any
+// other key through the target resolver, a name standing for nothing
+// adding nothing and no resolver being ErrUnresolvedTarget. An interface
+// table takes every key as an interface name. A type the VM cannot hold
+// is ErrUnsupportedTableType at its create.
 func (m *builder[V4, V6]) Table(table *ipfw.Table) error {
-	if table.Kind != ipfw.TableAdd {
-		return nil
+	switch table.Kind {
+	case ipfw.TableCreate:
+		return m.createTable(table)
+	case ipfw.TableAdd:
+		if m.tableTypes[table.Name] == ipfw.TableTypeIface {
+			m.tables.AddInterface(table.Name, table.Key.Text, strings.TrimPrefix(table.Value, ":"))
+			return nil
+		}
+		return m.addAddress(table)
 	}
+	return nil
+}
+
+// createTable records the type of the table, an omitted one being addr.
+func (m *builder[V4, V6]) createTable(table *ipfw.Table) error {
+	switch table.Type {
+	case ipfw.TableTypeUnset, ipfw.TableTypeAddr:
+		m.tableTypes[table.Name] = ipfw.TableTypeAddr
+	case ipfw.TableTypeIface:
+		m.tableTypes[table.Name] = ipfw.TableTypeIface
+	default:
+		return ErrUnsupportedTableType
+	}
+	return nil
+}
+
+// addAddress adds the key of an address table, network text through the
+// network parser and a name through the target resolver.
+//
+// Network text the parser rejects is the error kind of its family, the
+// resolver's error comes back as is.
+func (m *builder[V4, V6]) addAddress(table *ipfw.Table) error {
+	target := ipfw.Target{Kind: ipfw.TargetCustom, Text: table.Key.Text}
 	switch table.Key.Kind {
 	case ipfw.TableKeyNetwork4:
 		network, err := m.networks.ParseNetwork4(table.Key.Text)
@@ -478,14 +521,29 @@ func (m *builder[V4, V6]) Table(table *ipfw.Table) error {
 			return ipfw.ErrExpectedIPv4Network
 		}
 		m.tables.AddNetwork4(table.Name, network)
+		return nil
 	case ipfw.TableKeyNetwork6:
 		network, err := m.networks.ParseNetwork6(table.Key.Text)
 		if err != nil {
 			return ipfw.ErrExpectedIPv6Network
 		}
 		m.tables.AddNetwork6(table.Name, network)
-	case ipfw.TableKeyIfName:
-		m.tables.AddInterface(table.Name, table.Key.Text, strings.TrimPrefix(table.Value, ":"))
+		return nil
+	case ipfw.TableKeyHostname:
+		target.Kind = ipfw.TargetHostname
+	}
+	if m.targets == nil {
+		return ipfw.ErrUnresolvedTarget
+	}
+	nets4, nets6, err := m.targets.ResolveTarget(target)
+	if err != nil {
+		return err
+	}
+	for _, network := range nets4 {
+		m.tables.AddNetwork4(table.Name, network)
+	}
+	for _, network := range nets6 {
+		m.tables.AddNetwork6(table.Name, network)
 	}
 	return nil
 }
