@@ -168,6 +168,15 @@ func Test_ParseProtocols_Table(t *testing.T) {
 			),
 		},
 		{
+			name:  "group with the deprecated separator",
+			input: "{ tcp o udp } from any to any",
+			n:     13,
+			state: protos(
+				ipfw.ProtoMatch{Proto: ipfw.Proto{Name: "tcp"}},
+				ipfw.ProtoMatch{Proto: ipfw.Proto{Name: "udp"}},
+			),
+		},
+		{
 			name:  "group mixing an IP keyword and a transport name",
 			input: "{ ip or tcp } x",
 			n:     13,

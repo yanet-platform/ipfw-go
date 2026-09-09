@@ -56,7 +56,7 @@ func ParseDestinationTargets(s string, state State) (int, error) {
 // into the source or the destination side of the state, the alternatives of
 // the group numbered from zero.
 func parseTargets(s string, state State, side bodySide) (string, fail) {
-	g, rest := openGroup(s)
+	g, rest := openGroup(s, headerPosition)
 	for pattern := uint16(0); ; pattern++ {
 		afterElement, err := parseTargetElement(rest, state, side, pattern)
 		if err.Failed() {

@@ -234,54 +234,143 @@ func Test_ParseU32_Table(t *testing.T) {
 	}
 }
 
-// verifies that a group opens on a brace, the spaces after it skipped, and
-// that anything else is a lone element left untouched.
+// verifies that a group opens on a brace, skips the spaces after it and keeps
+// its grammar position, while anything else remains a lone element.
 func Test_OpenGroup_Table(t *testing.T) {
 	cases := []struct {
-		name   string
-		input  string
-		braced bool
-		rest   string
+		name     string
+		input    string
+		position groupPosition
+		braced   bool
+		rest     string
 	}{
 		{name: "brace then space", input: "{ a or b }", braced: true, rest: "a or b }"},
 		{name: "tight brace", input: "{a or b}", braced: true, rest: "a or b}"},
+		{
+			name:     "trailing position",
+			input:    "{ a or b }",
+			position: trailingPosition,
+			braced:   true,
+			rest:     "a or b }",
+		},
 		{name: "newline after the brace", input: "{\n\ta }", braced: true, rest: "a }"},
 		{name: "brace at end of input", input: "{", braced: true, rest: ""},
 		{name: "lone element", input: "a rest", braced: false, rest: "a rest"},
-		{name: "lone element keeps its spaces", input: " a", braced: false, rest: " a"},
-		{name: "empty input", input: "", braced: false, rest: ""},
+		{
+			name:   "lone element keeps its spaces",
+			input:  " a",
+			braced: false,
+			rest:   " a",
+		},
+		{name: "empty input keeps position", input: "", position: trailingPosition, rest: ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			g, rest := openGroup(tc.input)
+			g, rest := openGroup(tc.input, tc.position)
 			require.Equal(t, tc.braced, g.Braced)
+			require.Equal(t, tc.position, g.Position)
 			require.Equal(t, tc.rest, rest)
 		})
 	}
 }
 
-// verifies that after an element a braced group goes on at `or` and ends at
-// `}`, fails with ErrExpectedOr otherwise, and a lone element just ends.
+// verifies that a braced group continues at a separator allowed in its
+// grammar position and ends at `}`, while a lone element just ends.
 //
-// The spaces after `or` are skipped and the failure points at the first
-// non-space byte, the input coming back unchanged.
+// A separator is a whole token: one glued to what follows, `orudp` or `or}`
+// say, is none. Protocol and address groups take `or` with the deprecated
+// `o`, option groups `or` and the pipe. The spaces after a separator are
+// skipped and the failure points at the first non-space byte, the input
+// coming back unchanged.
 func Test_Group_Next_Table(t *testing.T) {
 	cases := []struct {
-		name   string
-		braced bool
-		input  string
-		rest   string
-		more   bool
-		kind   ErrorKind
-		at     string
+		name     string
+		position groupPosition
+		braced   bool
+		input    string
+		rest     string
+		more     bool
+		kind     ErrorKind
+		at       string
 	}{
 		{name: "or then space", braced: true, input: " or b }", rest: "b }", more: true},
 		{name: "tight or", braced: true, input: "or b}", rest: "b}", more: true},
-		{name: "newlines around or", braced: true, input: "\nor\n\tb }", rest: "b }", more: true},
+		{
+			name:   "newlines around or",
+			braced: true,
+			input:  "\nor\n\tb }",
+			rest:   "b }",
+			more:   true,
+		},
 		{name: "or at end of input", braced: true, input: " or", rest: "", more: true},
+		{name: "deprecated o then space", braced: true, input: " o b }", rest: "b }", more: true},
+		{
+			name:     "pipe then space, options",
+			position: trailingPosition,
+			braced:   true,
+			input:    " | b }",
+			rest:     "b }",
+			more:     true,
+		},
 		{name: "closing brace", braced: true, input: " } rest", rest: " rest", more: false},
 		{name: "tight closing brace", braced: true, input: "}", rest: "", more: false},
-		{name: "closing brace after a newline", braced: true, input: "\n}", rest: "", more: false},
+		{
+			name:   "closing brace after a newline",
+			braced: true,
+			input:  "\n}",
+			rest:   "",
+			more:   false,
+		},
+		{
+			name:   "separator glued to an element",
+			braced: true,
+			input:  " orudp }",
+			rest:   " orudp }",
+			kind:   ErrExpectedOr,
+			at:     "orudp }",
+		},
+		{
+			name:   "separator glued to the closing brace",
+			braced: true,
+			input:  " or}",
+			rest:   " or}",
+			kind:   ErrExpectedOr,
+			at:     "or}",
+		},
+		{
+			name:   "deprecated o glued to the closing brace",
+			braced: true,
+			input:  " o}",
+			rest:   " o}",
+			kind:   ErrExpectedOr,
+			at:     "o}",
+		},
+		{
+			name:     "pipe glued to the closing brace, options",
+			position: trailingPosition,
+			braced:   true,
+			input:    " |}",
+			rest:     " |}",
+			kind:     ErrExpectedOr,
+			at:       "|}",
+		},
+		{
+			name:   "pipe is not a protocol separator",
+			braced: true,
+			input:  " | b }",
+			rest:   " | b }",
+			kind:   ErrExpectedOr,
+			at:     "| b }",
+		},
+		{
+			name:     "deprecated o is not an option separator",
+			position: trailingPosition,
+			braced:   true,
+			input:    " o b }",
+			rest:     " o b }",
+			kind:     ErrExpectedOr,
+			at:       "o b }",
+		},
 		{
 			name:   "missing separator",
 			braced: true,
@@ -307,12 +396,25 @@ func Test_Group_Next_Table(t *testing.T) {
 			at:     "",
 		},
 		{name: "lone element", braced: false, input: " rest", rest: " rest", more: false},
-		{name: "lone element before or", braced: false, input: " or b", rest: " or b", more: false},
-		{name: "lone element at end of input", braced: false, input: "", rest: "", more: false},
+		{
+			name:   "lone element before or",
+			braced: false,
+			input:  " or b",
+			rest:   " or b",
+			more:   false,
+		},
+		{
+			name:   "lone element at end of input",
+			braced: false,
+			input:  "",
+			rest:   "",
+			more:   false,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rest, more, err := group{Braced: tc.braced}.Next(tc.input)
+			g := group{Braced: tc.braced, Position: tc.position}
+			rest, more, err := g.Next(tc.input)
 			require.Equal(t, tc.kind, err.Kind)
 			require.Equal(t, tc.at, err.At)
 			require.Equal(t, tc.more, more)
@@ -411,7 +513,7 @@ func Test_Group_Loop_Table(t *testing.T) {
 // theirs and collects the elements it saw.
 func groupLetters(s string) (string, []string, fail) {
 	var elements []string
-	g, rest := openGroup(s)
+	g, rest := openGroup(s, headerPosition)
 	for {
 		element, afterElement := takeWhile(rest, isLetter)
 		if element == "" {
@@ -506,7 +608,7 @@ func Test_Group_NoAllocs(t *testing.T) {
 // theirs and counts the elements.
 func groupElements(s string) (string, int, fail) {
 	count := 0
-	g, rest := openGroup(s)
+	g, rest := openGroup(s, headerPosition)
 	for {
 		afterElement, err := benchElement(rest)
 		if err.Failed() {

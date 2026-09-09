@@ -110,7 +110,7 @@ const (
 // parseOptionGroup parses one option or a `{ a or b … }` group of them,
 // every member after the first carrying the Or flag.
 func parseOptionGroup(s string, state State, hook OptionHook) (string, fail) {
-	g, rest := openGroup(s)
+	g, rest := openGroup(s, trailingPosition)
 	place := topLevel
 	if g.Braced {
 		place = groupFirst
