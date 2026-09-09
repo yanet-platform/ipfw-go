@@ -74,7 +74,8 @@ func rangeMatch(pattern string, c byte) (string, bool) {
 		lo := pattern[idx]
 		idx++
 		switch {
-		case lo == ']':
+		// A closing bracket is literal when it is the first class member.
+		case lo == ']' && idx > 1:
 			if matched != negate {
 				return pattern[idx:], true
 			}
