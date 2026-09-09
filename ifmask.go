@@ -111,17 +111,11 @@ func rangeMatch(pattern string, c byte) (string, bool) {
 	}
 }
 
-// validateIfMask rejects the mask patterns ipfw(8) does not accept: a
-// double star and a class without its closing bracket.
+// validateIfMask rejects an interface mask with an unclosed class.
 func validateIfMask(pattern string) ErrorKind {
 	idx := 0
 	for idx < len(pattern) {
 		switch pattern[idx] {
-		case '*':
-			if idx+1 < len(pattern) && pattern[idx+1] == '*' {
-				return ErrExpectedIfMask
-			}
-			idx++
 		case '[':
 			if idx+4 <= len(pattern) && pattern[idx+1] == '!' {
 				if close := strings.IndexByte(pattern[idx+3:], ']'); close >= 0 {

@@ -1760,6 +1760,17 @@ func Test_Parser_Next_Options(t *testing.T) {
 			},
 		},
 		{
+			name:  "via mask with repeated stars",
+			input: "add pass tcp from any to any 80 via tun**\n",
+			state: ipfw.ReduceState{
+				Protos:           tcp,
+				Sources:          anyToAny,
+				Destinations:     anyToAny,
+				DestinationPorts: []ipfw.PortMatch{portNumber(80)},
+				Options:          []ipfw.Opt{viaMask("tun**")},
+			},
+		},
+		{
 			name:  "via table then in",
 			input: "add allow ip from any to any via table(t) in\n",
 			state: ipfw.ReduceState{
@@ -1949,16 +1960,6 @@ func Test_Parser_Next_OptionErrors(t *testing.T) {
 				Line:   1,
 				Column: 51,
 				Text:   "add allow tcp from any to any established tcpflags foo",
-			},
-		},
-		{
-			name:  "via mask with a double star",
-			input: "add allow ip from any to any established via tun**",
-			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedIfMask,
-				Line:   1,
-				Column: 45,
-				Text:   "add allow ip from any to any established via tun**",
 			},
 		},
 		{
