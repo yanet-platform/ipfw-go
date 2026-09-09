@@ -764,6 +764,15 @@ func Test_VM_Check_Via(t *testing.T) {
 			verdict: deny,
 		},
 		{
+			name: "mask class with a leading closing bracket",
+			rules: ruleset(`
+				add deny ip from any to any via vlan[]0]
+				add pass ip from any to any
+			`),
+			ifname:  "vlan0",
+			verdict: deny,
+		},
+		{
 			name: "star mask takes the empty name",
 			rules: ruleset(`
 				add pass ip from any to any via *
