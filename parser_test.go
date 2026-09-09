@@ -184,6 +184,38 @@ func Test_Parser_Next_LineNumbers(t *testing.T) {
 	next(t, parser, eof)
 }
 
+// verifies that CRLF terminates rules, empty lines and failures without
+// changing record text, error positions or the next physical line.
+func Test_Parser_Next_CRLF(t *testing.T) {
+	t.Run("records", func(t *testing.T) {
+		parser := ipfw.NewParser("add pass ip from any to any\r\n\r\n:L\r\n")
+		var state ipfw.ReduceState
+		rec, err := parser.Next(&state)
+		require.Nil(t, err)
+		require.Equal(t, passAnyToAny(1, "add pass ip from any to any"), *rec)
+		require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), state)
+		next(t, parser, ipfw.Record{Line: 2, Kind: ipfw.RecordEmpty})
+		next(t, parser, ipfw.Record{Line: 3, Text: ":L", Kind: ipfw.RecordLabel, Label: "L"})
+		next(t, parser, eof)
+	})
+
+	t.Run("positioned error", func(t *testing.T) {
+		parser := ipfw.NewParser("\t:X y\t\r\n:L\r\n")
+		nextError(
+			t,
+			parser,
+			ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedNewlineOrEOF,
+				Line:   1,
+				Column: 3,
+				Text:   ":X y",
+			},
+		)
+		next(t, parser, ipfw.Record{Line: 2, Text: ":L", Kind: ipfw.RecordLabel, Label: "L"})
+		next(t, parser, eof)
+	})
+}
+
 // verifies that the last line needs no newline.
 func Test_Parser_Next_NoTrailingNewline(t *testing.T) {
 	parser := ipfw.NewParser(":L")
