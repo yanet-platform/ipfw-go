@@ -1173,8 +1173,7 @@ func Test_Parser_Next_Log(t *testing.T) {
 	}
 }
 
-// verifies that `tag N` after the log part lands in the record, for
-// check-state too, a zero tag being indistinguishable from none.
+// verifies that tag reaches the record after log, for check-state and the positive 32-bit range.
 func Test_Parser_Next_Tag(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -1220,10 +1219,29 @@ func Test_Parser_Next_Tag(t *testing.T) {
 			},
 		},
 		{
-			name:  "tag zero reads as none",
-			input: "add allow tag 0 ip from any to any\n",
+			name:  "minimum tag",
+			input: "add allow tag 1 ip from any to any\n",
 			instruction: ipfw.Instruction{
 				Action: ipfw.Action{Kind: ipfw.ActionPass},
+				Tag:    1,
+			},
+			state: anyToAnyState(ipfw.ProtoIPAny),
+		},
+		{
+			name:  "tag above native range",
+			input: "add allow tag 65535 ip from any to any\n",
+			instruction: ipfw.Instruction{
+				Action: ipfw.Action{Kind: ipfw.ActionPass},
+				Tag:    65535,
+			},
+			state: anyToAnyState(ipfw.ProtoIPAny),
+		},
+		{
+			name:  "maximum tag",
+			input: "add allow tag 4294967295 ip from any to any\n",
+			instruction: ipfw.Instruction{
+				Action: ipfw.Action{Kind: ipfw.ActionPass},
+				Tag:    4294967295,
 			},
 			state: anyToAnyState(ipfw.ProtoIPAny),
 		},
@@ -1244,10 +1262,7 @@ func Test_Parser_Next_Tag(t *testing.T) {
 	}
 }
 
-// verifies that the tag keyword matches by prefix, needs its number, and
-// comes after the log part.
-//
-// Each failure is positioned where the next piece was due.
+// verifies that tag requires a positive 32-bit number after the optional log part.
 func Test_Parser_Next_TagErrors(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -1282,6 +1297,16 @@ func Test_Parser_Next_TagErrors(t *testing.T) {
 				Line:   1,
 				Column: 14,
 				Text:   "add allow tag 4294967296 ip from any to any",
+			},
+		},
+		{
+			name:  "tag zero",
+			input: "add allow tag 0 ip from any to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedTag,
+				Line:   1,
+				Column: 14,
+				Text:   "add allow tag 0 ip from any to any",
 			},
 		},
 		{

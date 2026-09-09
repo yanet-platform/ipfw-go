@@ -56,6 +56,7 @@ const (
 	ErrExpectedNewlineOrEOF
 	// ErrState wraps an error a State or a hook returned, see ParseError.Err.
 	ErrState
+	ErrExpectedTag
 )
 
 // Error returns the message of the kind.
@@ -113,6 +114,8 @@ func (m ErrorKind) Error() string {
 		return "expected table key"
 	case ErrExpectedSkipTo:
 		return "expected skipto target (label, rule number or `tablearg`)"
+	case ErrExpectedTag:
+		return "expected positive tag number"
 	case ErrExpectedU8:
 		return "expected 8-bit unsigned integer"
 	case ErrExpectedU16:
