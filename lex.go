@@ -192,27 +192,37 @@ func parseUint(s string, max uint64) (uint64, string, bool) {
 // The callers drive it with direct calls: an element parser passed as a
 // function value is an indirect call the compiler cannot inline.
 type group struct {
-	// Braced is whether the list is in braces, `or` separating the
-	// elements and `}` ending it.
+	// Braced is whether the list is in braces.
 	Braced bool
+	// Position determines which alias for `or` is accepted.
+	Position groupPosition
 }
 
-// openGroup consumes the opening brace and the spaces after it when there is
-// one, and leaves a lone element untouched.
-func openGroup(s string) (group, string) {
+// groupPosition selects the separator alias accepted beside `or`: deprecated
+// `o` in protocol and address groups or `|` in trailing option groups.
+type groupPosition uint8
+
+const (
+	headerPosition groupPosition = iota
+	trailingPosition
+)
+
+// openGroup records the grammar position and consumes an opening brace with
+// its following spaces, leaving a lone element untouched.
+func openGroup(s string, position groupPosition) (group, string) {
 	rest, ok := prefix(s, "{")
 	if !ok {
-		return group{}, s
+		return group{Position: position}, s
 	}
-	return group{Braced: true}, skipSpace(rest)
+	return group{Braced: true, Position: position}, skipSpace(rest)
 }
 
 // Next reads what follows an element and reports whether another one comes.
 //
-// Inside braces `or` goes on with the next element, the spaces after it
-// skipped, and `}` ends the list. Anything else is ErrExpectedOr at the
-// first non-space byte, the input being returned unchanged. A lone element
-// ends the list with the input untouched.
+// Inside braces only a complete separator token continues the list, so
+// `orudp` and `or}` are not separators. Anything other than a separator or
+// `}` is ErrExpectedOr at the first non-space byte, the input being returned
+// unchanged. A lone element ends the list with the input untouched.
 func (m group) Next(s string) (string, bool, fail) {
 	if !m.Braced {
 		return s, false, fail{}
@@ -221,9 +231,25 @@ func (m group) Next(s string) (string, bool, fail) {
 	if closed, ok := prefix(rest, "}"); ok {
 		return closed, false, fail{}
 	}
-	rest, ok := prefix(rest, "or")
+	after, ok := m.takeSeparator(rest)
 	if !ok {
 		return s, false, fail{Kind: ErrExpectedOr, At: rest}
 	}
-	return skipSpace(rest), true, fail{}
+	return skipSpace(after), true, fail{}
+}
+
+func (m group) takeSeparator(s string) (string, bool) {
+	if rest, ok := prefix(s, "or"); ok && atTokenEnd(rest) {
+		return rest, true
+	}
+	alternateSeparator := "|"
+	if m.Position == headerPosition {
+		alternateSeparator = "o"
+	}
+	rest, ok := prefix(s, alternateSeparator)
+	return rest, ok && atTokenEnd(rest)
+}
+
+func atTokenEnd(s string) bool {
+	return s == "" || isASCIISpace(s[0])
 }

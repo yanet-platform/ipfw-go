@@ -473,6 +473,16 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 			},
 		},
 		{
+			name:  "proto group separator glued to its element",
+			input: "add pass { tcp orudp } from any to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedOr,
+				Line:   1,
+				Column: 15,
+				Text:   "add pass { tcp orudp } from any to any",
+			},
+		},
+		{
 			name:  "target group left open",
 			input: "add pass ip from { any",
 			expected: ipfw.ParseError{
@@ -781,6 +791,21 @@ func Test_Parser_Next_TargetGroups(t *testing.T) {
 		{
 			name:  "protocol and source groups",
 			input: "add pass { tcp or udp } from { 192.0.2.0/24 or ::1 } to any\n",
+			state: ipfw.ReduceState{
+				Protos: []ipfw.ProtoMatch{
+					{Proto: ipfw.Proto{Name: "tcp"}},
+					{Proto: ipfw.Proto{Name: "udp"}},
+				},
+				Sources: []ipfw.Target{
+					{Kind: ipfw.TargetNetwork4, Text: "192.0.2.0/24"},
+					{Pattern: 1, Kind: ipfw.TargetNetwork6, Text: "::1"},
+				},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+			},
+		},
+		{
+			name:  "protocol and source groups with the deprecated separator",
+			input: "add pass { tcp o udp } from { 192.0.2.0/24 o ::1 } to any\n",
 			state: ipfw.ReduceState{
 				Protos: []ipfw.ProtoMatch{
 					{Proto: ipfw.Proto{Name: "tcp"}},
@@ -1463,6 +1488,19 @@ func Test_Parser_Next_Options(t *testing.T) {
 		{
 			name:  "or-group with a negated member",
 			input: "add allow tcp from any to any { established or not established }\n",
+			state: ipfw.ReduceState{
+				Protos:       tcp,
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options: []ipfw.Opt{
+					established,
+					{Neg: true, Or: true, Kind: ipfw.OptEstablished},
+				},
+			},
+		},
+		{
+			name:  "or-group joined by the pipe",
+			input: "add allow tcp from any to any { established | not established }\n",
 			state: ipfw.ReduceState{
 				Protos:       tcp,
 				Sources:      anyToAny,

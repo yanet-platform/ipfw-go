@@ -190,6 +190,12 @@ func Test_ParseOptions_Table(t *testing.T) {
 			options: []ipfw.Opt{established, {Or: true, Kind: ipfw.OptEstablished}},
 		},
 		{
+			name:    "group of two with the pipe",
+			input:   "{ established | established }",
+			n:       29,
+			options: []ipfw.Opt{established, {Or: true, Kind: ipfw.OptEstablished}},
+		},
+		{
 			name:    "tight group",
 			input:   "{established or established}",
 			n:       28,

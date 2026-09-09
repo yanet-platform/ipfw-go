@@ -501,6 +501,15 @@ func Test_ParseTargets_Table(t *testing.T) {
 			}},
 		},
 		{
+			name:  "group with the deprecated separator",
+			input: "{ 192.0.2.1 o 198.51.100.1 } x",
+			n:     28,
+			state: ipfw.ReduceState{Sources: []ipfw.Target{
+				{Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"},
+				{Pattern: 1, Kind: ipfw.TargetNetwork4, Text: "198.51.100.1"},
+			}},
+		},
+		{
 			name:  "not glued to a keyword is custom",
 			input: "notany x",
 			n:     6,

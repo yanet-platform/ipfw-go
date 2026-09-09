@@ -71,7 +71,7 @@ func ParseProtocols(s string, state State) (int, error) {
 // parseProtocols parses one protocol or a `{ a or b … }` group of them, the
 // list being an alternative by nature so no grouping is conveyed.
 func parseProtocols(s string, state State) (string, fail) {
-	g, rest := openGroup(s)
+	g, rest := openGroup(s, headerPosition)
 	for {
 		afterElement, err := parseProtocolElement(rest, state)
 		if err.Failed() {
