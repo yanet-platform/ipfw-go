@@ -325,12 +325,13 @@ func (m *Parser) parseBody(s string, state State) (string, fail) {
 	// discarding state to tell an option from a port without emitting it.
 	//
 	// `to any established` is an option, `to any domain` a port and `to any
-	// 22 established` both. An option list failing past its first group
-	// fails the line at the option. A token that is not a port leaves the
-	// input where the destination ended, a port the state refuses fails
-	// the line.
+	// 22 established` both. A recognized option is reparsed into the state
+	// even when malformed, preserving its error. Only an unknown option
+	// falls back to ports. A token that is not a port leaves the input where
+	// the destination ended, a port the state refuses fails the line.
 	if buf, ok := ws1(rest); ok {
-		if _, err = parseOptionGroup(buf, DiscardState{}, m.opts.OptionHook); !err.Failed() {
+		_, err = parseOptionGroup(buf, DiscardState{}, m.opts.OptionHook)
+		if !err.Failed() || err.Kind != ErrUnknownOption {
 			return parseOptions(buf, state, m.opts.OptionHook)
 		}
 		if buf, err = parsePorts(buf, state, destinationSide); !err.Failed() {

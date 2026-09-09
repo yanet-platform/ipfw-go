@@ -1680,18 +1680,6 @@ func Test_Parser_Next_Options(t *testing.T) {
 			},
 		},
 		{
-			name:  "port option without its argument is a port range",
-			input: "add allow tcp from any to any dst-port\n",
-			state: ipfw.ReduceState{
-				Protos:       tcp,
-				Sources:      anyToAny,
-				Destinations: anyToAny,
-				DestinationPorts: []ipfw.PortMatch{
-					portSpan(ipfw.Port{Name: "dst"}, ipfw.Port{Name: "port"}),
-				},
-			},
-		},
-		{
 			name:  "negated port list is atomic",
 			input: "add allow tcp from any to any not dst-port 22,80\n",
 			state: ipfw.ReduceState{
@@ -1927,7 +1915,17 @@ func Test_Parser_Next_OptionErrors(t *testing.T) {
 			},
 		},
 		{
-			name:  "port option without its argument",
+			name:  "leading port option without its argument",
+			input: "add allow tcp from any to any dst-port\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 38,
+				Text:   "add allow tcp from any to any dst-port",
+			},
+		},
+		{
+			name:  "later port option without its argument",
 			input: "add allow tcp from any to any established dst-port\n",
 			expected: ipfw.ParseError{
 				Kind:   ipfw.ErrExpectedWhitespace,
