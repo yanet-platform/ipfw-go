@@ -132,8 +132,9 @@ func Test_Parser_Next_ActionCount(t *testing.T) {
 	require.Equal(t, expected, *rec)
 }
 
-// verifies that skipto takes a label, a rule number or tablearg after
-// whitespace, a missing or unknown target being positioned after the keyword.
+// verifies that skipto takes a label, a positive rule number or tablearg
+// after whitespace, a missing, zero or unknown target being positioned after
+// the keyword.
 func Test_Parser_Next_ActionSkipTo(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -199,6 +200,16 @@ func Test_Parser_Next_ActionSkipTo(t *testing.T) {
 				Line:   1,
 				Column: 11,
 				Text:   "add skipto 4294967296",
+			},
+		},
+		{
+			name:  "zero target",
+			input: "add skipto 0",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedSkipTo,
+				Line:   1,
+				Column: 11,
+				Text:   "add skipto 0",
 			},
 		},
 	}
