@@ -131,6 +131,9 @@ func (m *Parser) parseLine(text string, state State) (string, fail) {
 		s, commanded = rest, true
 	}
 	s = ws0(s)
+	if rest, ok := parseLineEnd(s); ok {
+		return rest, fail{}
+	}
 	if !commanded {
 		if rest, ok := prefix(s, "#"); ok {
 			record.Comment, rest = takeWhile(rest, isNotNewline)
@@ -144,7 +147,7 @@ func (m *Parser) parseLine(text string, state State) (string, fail) {
 			s, commanded = ws0(s), true
 		}
 	}
-	if rest, ok := prefix(s, "\n"); ok {
+	if rest, ok := parseLineEnd(s); ok {
 		return rest, fail{}
 	}
 	if s == "" {
@@ -154,6 +157,14 @@ func (m *Parser) parseLine(text string, state State) (string, fail) {
 		return text, fail{Kind: ErrExpectedLine, At: s}
 	}
 	return text, fail{Kind: ErrExpectedNewlineOrEOF, At: s}
+}
+
+// parseLineEnd consumes LF or CRLF, never a lone carriage return.
+func parseLineEnd(s string) (string, bool) {
+	if rest, ok := prefix(s, "\r\n"); ok {
+		return rest, true
+	}
+	return prefix(s, "\n")
 }
 
 // hookLine hands a line the grammar does not know to the command hook, the
