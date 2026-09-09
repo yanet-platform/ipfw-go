@@ -164,6 +164,9 @@ func parseSkipTo(s string) (SkipTo, string, fail) {
 		return SkipTo{Kind: SkipToLabel, Label: label}, rest, fail{}
 	}
 	if number, rest, kind := parseU32(s); kind == 0 {
+		if number == 0 {
+			return SkipTo{}, s, fail{Kind: ErrExpectedSkipTo, At: s}
+		}
 		return SkipTo{Kind: SkipToNumber, Number: number}, rest, fail{}
 	}
 	if rest, ok := prefix(s, "tablearg"); ok {
