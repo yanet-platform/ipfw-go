@@ -342,8 +342,7 @@ func parseProtoOption(s string, state State, neg bool, place optionPlace) (strin
 // parseTCPFlagsOption parses the comma list of `[!]flag` after `tcpflags`
 // into one option.
 //
-// Every flag goes into the mask, the ones without a bang into the set as
-// well.
+// A bang separates flags that must be clear from those that must be set.
 func parseTCPFlagsOption(s string, state State, neg bool, place optionPlace) (string, fail) {
 	rest, ok := ws1(s)
 	if !ok {
@@ -357,8 +356,9 @@ func parseTCPFlagsOption(s string, state State, neg bool, place optionPlace) (st
 		if !ok {
 			return s, fail{Kind: ErrUnknownTCPFlag, At: afterBang}
 		}
-		flags.Mask |= flag
-		if !cleared {
+		if cleared {
+			flags.Clear |= flag
+		} else {
 			flags.Set |= flag
 		}
 		if buf, ok = prefix(afterFlag, ","); !ok {
@@ -608,13 +608,12 @@ const (
 	TCPUrg
 )
 
-// TCPFlags is a `tcpflags` argument: the flags that must be set among those
-// in the mask.
+// TCPFlags is the set of requirements in a `tcpflags` argument.
 type TCPFlags struct {
-	// Set are the flags that must be set.
+	// Set contains the flags that must be set.
 	Set TCPFlag
-	// Mask are the flags that are examined.
-	Mask TCPFlag
+	// Clear contains the flags that must be clear.
+	Clear TCPFlag
 }
 
 // ViaKind is how a `via` option names interfaces.

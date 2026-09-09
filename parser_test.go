@@ -1729,7 +1729,7 @@ func Test_Parser_Next_Options(t *testing.T) {
 				Protos:       tcp,
 				Sources:      anyToAny,
 				Destinations: anyToAny,
-				Options:      []ipfw.Opt{tcpFlags(ipfw.TCPRst, ipfw.TCPRst)},
+				Options:      []ipfw.Opt{tcpFlags(ipfw.TCPRst, 0)},
 			},
 		},
 		{
@@ -1739,7 +1739,7 @@ func Test_Parser_Next_Options(t *testing.T) {
 				Protos:       tcp,
 				Sources:      anyToAny,
 				Destinations: anyToAny,
-				Options:      []ipfw.Opt{tcpFlags(ipfw.TCPSyn, ipfw.TCPSyn|ipfw.TCPAck)},
+				Options:      []ipfw.Opt{tcpFlags(ipfw.TCPSyn, ipfw.TCPAck)},
 			},
 		},
 		{

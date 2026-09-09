@@ -1127,8 +1127,8 @@ func Test_VM_Check_PortOptions(t *testing.T) {
 	require.Equal(t, deny, named.Check(&vm.Context{}, tcp(50000, 26)))
 }
 
-// verifies that tcpflags matches a TCP packet whose examined flags are
-// exactly the ones to be set, and never a packet without TCP flags.
+// verifies that tcpflags independently requires listed flags set or clear,
+// and never matches a packet without TCP flags.
 func Test_VM_Check_TCPFlags(t *testing.T) {
 	udp := vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")).WithUDP(50000, 22)
 	cases := []struct {
@@ -1174,13 +1174,22 @@ func Test_VM_Check_TCPFlags(t *testing.T) {
 			verdict: deny,
 		},
 		{
-			name: "ip rule, syn and not ack, SYN with PSH outside the mask",
+			name: "ip rule, syn and not ack, SYN with unlisted PSH",
 			rules: ruleset(`
 				add allow ip from any to any tcpflags syn,!ack
 				add deny ip from any to any
 			`),
 			packet:  tcp4Flags(ipfw.TCPSyn | ipfw.TCPPsh),
 			verdict: pass,
+		},
+		{
+			name: "contradictory SYN requirements",
+			rules: ruleset(`
+				add allow tcp from any to any tcpflags syn,!syn
+				add deny ip from any to any
+			`),
+			packet:  tcp4Flags(ipfw.TCPSyn),
+			verdict: deny,
 		},
 		{
 			name: "ip rule, syn and not ack, UDP",
