@@ -97,8 +97,7 @@ func parseOptions(s string, state State, hook OptionHook) (string, fail) {
 	return rest, fail{}
 }
 
-// optionPlace is where an option stands, which decides its Or flag and
-// how a negated port list is split.
+// optionPlace distinguishes a top-level option from members of an or-group.
 type optionPlace uint8
 
 const (
@@ -228,8 +227,8 @@ func parseKeywordOption(
 	return rest, fail{}
 }
 
-// parseCustomOption hands an unknown keyword to the hook, the negation and
-// the or-flag being the parser's to set on what the hook returns.
+// parseCustomOption hands an unknown keyword to the hook, reserving the
+// grouping flags for the parser to set on what the hook returns.
 //
 // The hook runs during the speculative pass over the options as well, so
 // it must be free of side effects.
@@ -251,7 +250,7 @@ func parseCustomOption(
 	if n == 0 {
 		return s, fail{Kind: ErrUnknownOption, At: s}
 	}
-	opt.Neg, opt.Or = neg, place == groupNext
+	opt.Neg, opt.Or, opt.PortOr = neg, place == groupNext, false
 	if failure := failFrom(state.OnOption(opt), s); failure.Failed() {
 		return s, failure
 	}
@@ -475,12 +474,11 @@ func isTableValueByte(c byte) bool {
 }
 
 // parsePortsOption parses the port list after `src-port` or `dst-port`,
-// one option per range.
+// one callback per range.
 //
-// The list is an or-group of its own, every range after the first carrying
-// the Or flag. A negated list at the top level means none of the ports, so
-// its ranges are separate and-terms, each one negated. Inside a group the
-// negation stays on each range with the group's flags.
+// Every range keeps the expanded flags expected by streaming consumers. List
+// membership is also marked separately, so consumers can apply negation and
+// outer group membership once after testing all ranges.
 func parsePortsOption(
 	s string,
 	state State,
@@ -493,15 +491,23 @@ func parsePortsOption(
 		return s, fail{Kind: ErrExpectedWhitespace, At: rest}
 	}
 	or := place == groupNext
+	first := true
 	for {
 		portRange, buf, err := parsePortRange(rest)
 		if err.Failed() {
 			return s, err
 		}
-		opt := Opt{Neg: neg, Or: or, Kind: kind, Ports: portRange}
+		opt := Opt{
+			Neg:    neg,
+			Or:     or,
+			PortOr: !first,
+			Kind:   kind,
+			Ports:  portRange,
+		}
 		if err = failFrom(state.OnOption(opt), rest); err.Failed() {
 			return s, err
 		}
+		first = false
 		or = !neg || place != topLevel
 		if buf, ok = prefix(buf, ","); !ok {
 			return buf, fail{}
@@ -547,6 +553,10 @@ type Opt struct {
 	Neg bool
 	// Or joins the option with the previous one into an or-group.
 	Or bool
+	// PortOr marks the port range as a continuation of the previous option.
+	// Consumers combine continuations before applying negation and group
+	// membership.
+	PortOr bool
 	// Kind is the option.
 	Kind OptKind
 	// Text is the comment, the keep-state flow name or the custom keyword.

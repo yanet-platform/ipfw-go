@@ -73,6 +73,12 @@ func orOpt(opt ipfw.Opt) ipfw.Opt {
 	return opt
 }
 
+// portOr joins the port range to the previous range of the same option.
+func portOr(opt ipfw.Opt) ipfw.Opt {
+	opt.PortOr = true
+	return opt
+}
+
 // OnOption implements State.
 func (m rejectingState) OnOption(ipfw.Opt) error {
 	return m.err
@@ -293,47 +299,80 @@ func Test_ParseOptions_Table(t *testing.T) {
 			options: []ipfw.Opt{srcPort(179)},
 		},
 		{
-			name:    "port list",
+			name:    "second port keeps OR and marks list continuation",
 			input:   "dst-port 22,80",
 			n:       14,
-			options: []ipfw.Opt{dstPort(22), orOpt(dstPort(80))},
+			options: []ipfw.Opt{dstPort(22), portOr(orOpt(dstPort(80)))},
 		},
 		{
-			name:  "port range in the list",
+			name:  "second range keeps OR and marks list continuation",
 			input: "dst-port 22,1024-65535",
 			n:     22,
 			options: []ipfw.Opt{
 				dstPort(22),
 				{
-					Or:    true,
-					Kind:  ipfw.OptDestinationPort,
-					Ports: ipfw.PortRange{Lo: ipfw.Port{Number: 1024}, Hi: ipfw.Port{Number: 65535}},
+					Or:     true,
+					PortOr: true,
+					Kind:   ipfw.OptDestinationPort,
+					Ports:  ipfw.PortRange{Lo: ipfw.Port{Number: 1024}, Hi: ipfw.Port{Number: 65535}},
 				},
 			},
 		},
 		{
-			name:    "negated port list at top level is two and terms",
+			name:    "negated port list at top level is atomic",
 			input:   "not dst-port 22,80",
 			n:       18,
-			options: []ipfw.Opt{notOpt(dstPort(22)), notOpt(dstPort(80))},
+			options: []ipfw.Opt{notOpt(dstPort(22)), portOr(notOpt(dstPort(80)))},
 		},
 		{
-			name:    "port list opening a group",
-			input:   "{ dst-port 22,80 or in }",
-			n:       24,
-			options: []ipfw.Opt{dstPort(22), orOpt(dstPort(80)), {Or: true, Kind: ipfw.OptIn}},
+			name:  "group-leading list separates continuation from next alternative",
+			input: "{ dst-port 22,80 or in }",
+			n:     24,
+			options: []ipfw.Opt{
+				dstPort(22),
+				portOr(orOpt(dstPort(80))),
+				{Or: true, Kind: ipfw.OptIn},
+			},
 		},
 		{
-			name:    "negated port list opening a group keeps the or",
-			input:   "{ not dst-port 22,80 or in }",
-			n:       28,
-			options: []ipfw.Opt{notOpt(dstPort(22)), notOpt(orOpt(dstPort(80))), {Or: true, Kind: ipfw.OptIn}},
+			name:  "negated port list opening a group stays atomic",
+			input: "{ not dst-port 22,80 or in }",
+			n:     28,
+			options: []ipfw.Opt{
+				notOpt(dstPort(22)),
+				portOr(notOpt(orOpt(dstPort(80)))),
+				{Or: true, Kind: ipfw.OptIn},
+			},
 		},
 		{
-			name:    "port list inside a group",
-			input:   "{ in or dst-port 22,80 }",
-			n:       24,
-			options: []ipfw.Opt{{Kind: ipfw.OptIn}, orOpt(dstPort(22)), orOpt(dstPort(80))},
+			name:  "group-trailing list separates outer OR from continuation",
+			input: "{ in or dst-port 22,80 }",
+			n:     24,
+			options: []ipfw.Opt{
+				{Kind: ipfw.OptIn},
+				orOpt(dstPort(22)),
+				portOr(orOpt(dstPort(80))),
+			},
+		},
+		{
+			name:  "group-trailing negated list stays atomic",
+			input: "{ in or not dst-port 22,80 }",
+			n:     28,
+			options: []ipfw.Opt{
+				{Kind: ipfw.OptIn},
+				notOpt(orOpt(dstPort(22))),
+				portOr(notOpt(orOpt(dstPort(80)))),
+			},
+		},
+		{
+			name:  "adjacent destination port options stay separate",
+			input: "{ not dst-port 22,80 or dst-port 81 }",
+			n:     37,
+			options: []ipfw.Opt{
+				notOpt(dstPort(22)),
+				portOr(notOpt(orOpt(dstPort(80)))),
+				orOpt(dstPort(81)),
+			},
 		},
 		{
 			name:  "port option without whitespace",

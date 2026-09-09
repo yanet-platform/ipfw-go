@@ -886,6 +886,7 @@ func Test_VM_Check_PortOptions(t *testing.T) {
 	cases := []struct {
 		name    string
 		rules   string
+		context vm.Context
 		packet  vm.Packet
 		verdict ipfw.Action
 	}{
@@ -1001,6 +1002,96 @@ func Test_VM_Check_PortOptions(t *testing.T) {
 			verdict: pass,
 		},
 		{
+			name: "outbound destination first list member is denied",
+			rules: ruleset(`
+				add pass tcp from any to any { not dst-port 22,80 or in }
+				add deny ip from any to any
+			`),
+			context: vm.Context{Direction: vm.Out},
+			packet:  tcp(50000, 22),
+			verdict: deny,
+		},
+		{
+			name: "outbound destination second list member is denied",
+			rules: ruleset(`
+				add pass tcp from any to any { not dst-port 22,80 or in }
+				add deny ip from any to any
+			`),
+			context: vm.Context{Direction: vm.Out},
+			packet:  tcp(50000, 80),
+			verdict: deny,
+		},
+		{
+			name: "outbound destination port outside list passes",
+			rules: ruleset(`
+				add pass tcp from any to any { not dst-port 22,80 or in }
+				add deny ip from any to any
+			`),
+			context: vm.Context{Direction: vm.Out},
+			packet:  tcp(50000, 81),
+			verdict: pass,
+		},
+		{
+			name: "outbound source first list member is denied",
+			rules: ruleset(`
+				add pass tcp from any to any { not src-port 22,80 or in }
+				add deny ip from any to any
+			`),
+			context: vm.Context{Direction: vm.Out},
+			packet:  tcp(22, 50000),
+			verdict: deny,
+		},
+		{
+			name: "outbound source second list member is denied",
+			rules: ruleset(`
+				add pass tcp from any to any { not src-port 22,80 or in }
+				add deny ip from any to any
+			`),
+			context: vm.Context{Direction: vm.Out},
+			packet:  tcp(80, 50000),
+			verdict: deny,
+		},
+		{
+			name: "outbound source port outside list passes",
+			rules: ruleset(`
+				add pass tcp from any to any { not src-port 22,80 or in }
+				add deny ip from any to any
+			`),
+			context: vm.Context{Direction: vm.Out},
+			packet:  tcp(81, 50000),
+			verdict: pass,
+		},
+		{
+			name: "later destination list denies its member",
+			rules: ruleset(`
+				add pass tcp from any to any { in or not dst-port 22,80 }
+				add deny ip from any to any
+			`),
+			context: vm.Context{Direction: vm.Out},
+			packet:  tcp(50000, 22),
+			verdict: deny,
+		},
+		{
+			name: "later destination list passes an outside port",
+			rules: ruleset(`
+				add pass tcp from any to any { in or not dst-port 22,80 }
+				add deny ip from any to any
+			`),
+			context: vm.Context{Direction: vm.Out},
+			packet:  tcp(50000, 81),
+			verdict: pass,
+		},
+		{
+			name: "adjacent destination option passes its port",
+			rules: ruleset(`
+				add pass tcp from any to any { not dst-port 22,80 or dst-port 81 }
+				add deny ip from any to any
+			`),
+			context: vm.Context{Direction: vm.Out},
+			packet:  tcp(50000, 81),
+			verdict: pass,
+		},
+		{
 			name: "range with another option",
 			rules: ruleset(`
 				add pass tcp from any to any established src-port 1024-65535
@@ -1022,7 +1113,7 @@ func Test_VM_Check_PortOptions(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			machine := build(t, tc.rules, none)
-			require.Equal(t, tc.verdict, machine.Check(&vm.Context{}, tc.packet))
+			require.Equal(t, tc.verdict, machine.Check(&tc.context, tc.packet))
 		})
 	}
 
