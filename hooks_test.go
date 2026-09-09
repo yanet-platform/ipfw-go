@@ -290,8 +290,8 @@ func customOptions(rest string) (ipfw.Opt, int, error) {
 // verifies that an option hook takes the keywords the grammar does not
 // know in every place an option can stand.
 //
-// The parser adds the negation and the or-flag, and the hook takes part in
-// the option-versus-port precedence.
+// The parser owns the negation and grouping flags, and the hook takes part
+// in the option-versus-port precedence.
 func Test_OptionHook_Table(t *testing.T) {
 	anyToAny := []ipfw.Target{{Kind: ipfw.TargetAny}}
 	tcp := []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}}
@@ -299,6 +299,7 @@ func Test_OptionHook_Table(t *testing.T) {
 	cases := []struct {
 		name    string
 		input   string
+		hook    ipfw.OptionHook
 		options []ipfw.Opt
 	}{
 		{
@@ -326,11 +327,25 @@ func Test_OptionHook_Table(t *testing.T) {
 			input:   "add allow tcp from any to any setup\n",
 			options: []ipfw.Opt{setup},
 		},
+		{
+			name:  "hook-provided port option cannot continue the preceding list",
+			input: "add allow tcp from any to any dst-port 22 setup\n",
+			hook: func(string) (ipfw.Opt, int, error) {
+				opt := dstPort(80)
+				opt.PortOr = true
+				return opt, len("setup"), nil
+			},
+			options: []ipfw.Opt{dstPort(22), dstPort(80)},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			hook := tc.hook
+			if hook == nil {
+				hook = customOptions
+			}
 			var state ipfw.ReduceState
-			rec, err := ipfw.NewParser(tc.input, ipfw.WithOptionHook(customOptions)).Next(&state)
+			rec, err := ipfw.NewParser(tc.input, ipfw.WithOptionHook(hook)).Next(&state)
 			require.Nil(t, err)
 			require.Equal(t, passAnyToAny(1, strings.TrimSuffix(tc.input, "\n")), *rec)
 			require.Equal(t, ipfw.ReduceState{

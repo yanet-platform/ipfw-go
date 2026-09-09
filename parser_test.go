@@ -1660,13 +1660,16 @@ func Test_Parser_Next_Options(t *testing.T) {
 			},
 		},
 		{
-			name:  "negated port list is two and terms",
+			name:  "negated port list is atomic",
 			input: "add allow tcp from any to any not dst-port 22,80\n",
 			state: ipfw.ReduceState{
 				Protos:       tcp,
 				Sources:      anyToAny,
 				Destinations: anyToAny,
-				Options:      []ipfw.Opt{notOpt(dstPort(22)), notOpt(dstPort(80))},
+				Options: []ipfw.Opt{
+					notOpt(dstPort(22)),
+					portOr(notOpt(dstPort(80))),
+				},
 			},
 		},
 		{

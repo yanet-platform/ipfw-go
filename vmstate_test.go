@@ -258,23 +258,46 @@ func Test_Resolver_Names(t *testing.T) {
 			},
 		},
 		{
-			name:  "option arguments",
-			input: "add allow ip from any to any proto udp dst-port ssh,domain-70 established\n",
+			name:  "protocol option name becomes a number",
+			input: "add allow ip from any to any proto udp\n",
 			state: ipfw.ReduceVMState[net4, net6]{
 				IPProtos:     ipAny,
 				Sources:      []ipfw.TargetMatch[net4, net6]{anyTarget},
 				Destinations: []ipfw.TargetMatch[net4, net6]{anyTarget},
 				Options: []ipfw.Opt{
 					{Kind: ipfw.OptProto, Proto: ipfw.Proto{Number: 17}},
+				},
+			},
+		},
+		{
+			name:  "service port list keeps list membership",
+			input: "add allow ip from any to any dst-port ssh,domain-70\n",
+			state: ipfw.ReduceVMState[net4, net6]{
+				IPProtos:     ipAny,
+				Sources:      []ipfw.TargetMatch[net4, net6]{anyTarget},
+				Destinations: []ipfw.TargetMatch[net4, net6]{anyTarget},
+				Options: []ipfw.Opt{
 					{
 						Kind:  ipfw.OptDestinationPort,
 						Ports: ipfw.PortRange{Lo: ipfw.Port{Number: 22}, Hi: ipfw.Port{Number: 22}},
 					},
 					{
-						Or:    true,
-						Kind:  ipfw.OptDestinationPort,
-						Ports: ipfw.PortRange{Lo: ipfw.Port{Number: 53}, Hi: ipfw.Port{Number: 70}},
+						Or:     true,
+						PortOr: true,
+						Kind:   ipfw.OptDestinationPort,
+						Ports:  ipfw.PortRange{Lo: ipfw.Port{Number: 53}, Hi: ipfw.Port{Number: 70}},
 					},
+				},
+			},
+		},
+		{
+			name:  "argument-free option passes through",
+			input: "add allow ip from any to any established\n",
+			state: ipfw.ReduceVMState[net4, net6]{
+				IPProtos:     ipAny,
+				Sources:      []ipfw.TargetMatch[net4, net6]{anyTarget},
+				Destinations: []ipfw.TargetMatch[net4, net6]{anyTarget},
+				Options: []ipfw.Opt{
 					{Kind: ipfw.OptEstablished},
 				},
 			},

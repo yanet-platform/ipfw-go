@@ -809,10 +809,11 @@ func matchPorts(matches []ipfw.PortNumberMatch, port uint16) bool {
 // noTarget is the tablearg target of a rule whose options named none.
 const noTarget = -1
 
-// matchOptions folds the options left to right: an option starting a
-// term must find the previous term true, one marked Or extends the term.
+// matchOptions folds the options left to right after combining each port list.
 //
-// The target is the first one an option yields.
+// A port list is tested before its negation and outer group membership are
+// applied. An option starting a term must find the previous term true, one
+// marked Or extends the term. The target is the first one an option yields.
 func (m *VM[V4, V6]) matchOptions(
 	options []ipfw.Opt,
 	ctx *Context,
@@ -820,11 +821,26 @@ func (m *VM[V4, V6]) matchOptions(
 	fields *packetFields,
 ) (bool, int) {
 	term, target := true, noTarget
-	for idx := range options {
+	for idx := 0; idx < len(options); idx++ {
 		opt := &options[idx]
 		raw, found := m.matchOption(opt, ctx, pkt, fields)
 		if target == noTarget {
 			target = found
+		}
+		portList := opt.Kind == ipfw.OptSourcePort || opt.Kind == ipfw.OptDestinationPort
+		for portList && idx+1 < len(options) {
+			next := &options[idx+1]
+			if !next.PortOr || next.Kind != opt.Kind {
+				break
+			}
+			idx++
+			if raw {
+				continue
+			}
+			raw, found = m.matchOption(next, ctx, pkt, fields)
+			if target == noTarget {
+				target = found
+			}
 		}
 		hit := raw != opt.Neg
 		if opt.Or {
