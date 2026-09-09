@@ -256,8 +256,8 @@ func Test_Parser_Next_ActionSkipTo(t *testing.T) {
 	}
 }
 
-// verifies that a check-state rule has no body: the line ends right after
-// the optional flow name, and anything else there is trailing content.
+// verifies that a check-state rule has no body: an optional flow and inline
+// comment may follow, while other trailing content fails.
 func Test_Parser_Next_ActionCheckState(t *testing.T) {
 	checkState := func(line int, text, flow string, num uint32) ipfw.Record {
 		return ipfw.Record{
@@ -282,8 +282,10 @@ func Test_Parser_Next_ActionCheckState(t *testing.T) {
 		checkState(1, "add 10 check-state :x", "x", 10),
 	)
 
-	parser := ipfw.NewParser("add check-state :any\nadd pass ip from any to any\n")
-	next(t, parser, checkState(1, "add check-state :any", "any", 0))
+	parser := ipfw.NewParser("add check-state :any // comment\nadd pass ip from any to any\n")
+	expected := checkState(1, "add check-state :any // comment", "any", 0)
+	expected.Instruction.InlineComment = " comment"
+	next(t, parser, expected)
 	var state ipfw.ReduceState
 	rec, err := parser.Next(&state)
 	require.Nil(t, err)
@@ -314,16 +316,6 @@ func Test_Parser_Next_ActionCheckState(t *testing.T) {
 				Line:   1,
 				Column: 16,
 				Text:   "add check-state foo",
-			},
-		},
-		{
-			name:  "inline comment is not accepted either",
-			input: "add check-state // c",
-			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedNewlineOrEOF,
-				Line:   1,
-				Column: 16,
-				Text:   "add check-state // c",
 			},
 		},
 		{
