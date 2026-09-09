@@ -40,10 +40,9 @@ func icmp6Types(types ...uint8) ipfw.Opt {
 	return ipfw.Opt{Kind: ipfw.OptICMP6Types, Types: typeSet(types...)}
 }
 
-// tcpFlags is a tcpflags option with the flags that must be set among the
-// ones in the mask.
-func tcpFlags(set, mask ipfw.TCPFlag) ipfw.Opt {
-	return ipfw.Opt{Kind: ipfw.OptTCPFlags, TCPFlags: ipfw.TCPFlags{Set: set, Mask: mask}}
+// tcpFlags is a tcpflags option with independent set and clear requirements.
+func tcpFlags(set, clear ipfw.TCPFlag) ipfw.Opt {
+	return ipfw.Opt{Kind: ipfw.OptTCPFlags, TCPFlags: ipfw.TCPFlags{Set: set, Clear: clear}}
 }
 
 // viaExact is a via option naming one interface.
@@ -518,19 +517,40 @@ func Test_ParseOptions_Table(t *testing.T) {
 			name:    "tcpflags single",
 			input:   "tcpflags rst",
 			n:       12,
-			options: []ipfw.Opt{tcpFlags(ipfw.TCPRst, ipfw.TCPRst)},
+			options: []ipfw.Opt{tcpFlags(ipfw.TCPRst, 0)},
 		},
 		{
 			name:    "tcpflags with a cleared flag",
 			input:   "tcpflags syn,!ack",
 			n:       17,
-			options: []ipfw.Opt{tcpFlags(ipfw.TCPSyn, ipfw.TCPSyn|ipfw.TCPAck)},
+			options: []ipfw.Opt{tcpFlags(ipfw.TCPSyn, ipfw.TCPAck)},
 		},
 		{
-			name:    "tcpflags all six",
-			input:   "tcpflags fin,syn,rst,psh,ack,urg",
-			n:       32,
-			options: []ipfw.Opt{tcpFlags(ipfw.TCPFin|ipfw.TCPSyn|ipfw.TCPRst|ipfw.TCPPsh|ipfw.TCPAck|ipfw.TCPUrg, 63)},
+			name:    "tcpflags duplicate set requirement",
+			input:   "tcpflags syn,syn",
+			n:       16,
+			options: []ipfw.Opt{tcpFlags(ipfw.TCPSyn, 0)},
+		},
+		{
+			name:    "tcpflags duplicate clear requirement",
+			input:   "tcpflags !syn,!syn",
+			n:       18,
+			options: []ipfw.Opt{tcpFlags(0, ipfw.TCPSyn)},
+		},
+		{
+			name:    "tcpflags contradictory requirements",
+			input:   "tcpflags syn,!syn",
+			n:       17,
+			options: []ipfw.Opt{tcpFlags(ipfw.TCPSyn, ipfw.TCPSyn)},
+		},
+		{
+			name:  "tcpflags all six",
+			input: "tcpflags fin,syn,rst,psh,ack,urg",
+			n:     32,
+			options: []ipfw.Opt{tcpFlags(
+				ipfw.TCPFin|ipfw.TCPSyn|ipfw.TCPRst|ipfw.TCPPsh|ipfw.TCPAck|ipfw.TCPUrg,
+				0,
+			)},
 		},
 		{
 			name:    "tcpflags all cleared",
