@@ -2704,6 +2704,120 @@ func Benchmark_VM_Check_NoRule(b *testing.B) {
 	benchmarkCheck(b, benchmarkRuleset(1000, ""))
 }
 
+// Benchmark_VM_Check_SourceReject measures scans that reject every rule by source address.
+func Benchmark_VM_Check_SourceReject(b *testing.B) {
+	cases := []struct {
+		name   string
+		rule   string
+		packet vm.Packet
+	}{
+		{
+			name:   "IPv4",
+			rule:   "add pass tcp from 198.51.100.0/24 to any\n",
+			packet: syntheticPackets["tcp4 syn"],
+		},
+		{
+			name:   "IPv6",
+			rule:   "add pass tcp from 2001:db8:ffff::/48 to any\n",
+			packet: syntheticPackets["tcp6"],
+		},
+	}
+	for _, testCase := range cases {
+		for _, count := range []int{1, 64, 1024} {
+			b.Run(testCase.name+"/"+strconv.Itoa(count), func(b *testing.B) {
+				machine, err := vm.Build(
+					ipfw.NewParser(strings.Repeat(testCase.rule, count)),
+					vm.Config[net4, net6]{Environment: resolving},
+				)
+				require.NoError(b, err)
+				require.Equal(b, count, machine.Len())
+				require.Equal(b, deny, machine.Check(syntheticContext, testCase.packet))
+				b.ReportAllocs()
+				for b.Loop() {
+					machine.Check(syntheticContext, testCase.packet)
+				}
+			})
+		}
+	}
+}
+
+// Benchmark_VM_Check_SourceList measures late matches and negation over 64 source alternatives.
+func Benchmark_VM_Check_SourceList(b *testing.B) {
+	addresses := make([]string, 64)
+	for idx := range addresses {
+		addresses[idx] = "192.0.2." + strconv.Itoa(idx+1)
+	}
+	list := strings.Join(addresses, ",")
+	member := tcp4("192.0.2.64", "203.0.113.1")
+	outside := tcp4("198.51.100.1", "203.0.113.1")
+	cases := []struct {
+		name    string
+		targets string
+		packet  vm.Packet
+		verdict ipfw.Action
+	}{
+		{
+			name:    "OrLast",
+			targets: "{ " + strings.Join(addresses, " or ") + " }",
+			packet:  member,
+			verdict: pass,
+		},
+		{
+			name:    "ListLast",
+			targets: list,
+			packet:  member,
+			verdict: pass,
+		},
+		{
+			name:    "NegatedMember",
+			targets: "not " + list,
+			packet:  member,
+			verdict: deny,
+		},
+		{
+			name:    "NegatedOutside",
+			targets: "not " + list,
+			packet:  outside,
+			verdict: pass,
+		},
+	}
+	for _, testCase := range cases {
+		b.Run(testCase.name, func(b *testing.B) {
+			source := "add pass tcp from " + testCase.targets + " to any\n"
+			machine, err := vm.Build(
+				ipfw.NewParser(source),
+				vm.Config[net4, net6]{Environment: resolving},
+			)
+			require.NoError(b, err)
+			require.Equal(b, testCase.verdict, machine.Check(syntheticContext, testCase.packet))
+			b.ReportAllocs()
+			for b.Loop() {
+				machine.Check(syntheticContext, testCase.packet)
+			}
+		})
+	}
+}
+
+// Benchmark_VM_CheckTrace_SourceReject includes tracing every rule of a 1024-rule scan.
+func Benchmark_VM_CheckTrace_SourceReject(b *testing.B) {
+	source := strings.Repeat("add pass tcp from 198.51.100.0/24 to any\n", 1024)
+	machine, err := vm.Build(
+		ipfw.NewParser(source),
+		vm.Config[net4, net6]{Environment: resolving},
+	)
+	require.NoError(b, err)
+	packet := syntheticPackets["tcp4 syn"]
+	tracer := &recordingTracer{}
+	action, matched := machine.CheckTrace(syntheticContext, packet, tracer)
+	require.Equal(b, ipfw.Action{}, action)
+	require.False(b, matched)
+	require.Len(b, tracer.seen, 1024)
+	b.ReportAllocs()
+	for b.Loop() {
+		machine.CheckTrace(syntheticContext, packet, nopTracer{})
+	}
+}
+
 func Benchmark_VM_Check_Jumps(b *testing.B) {
 	section := ruleset(`
 		add skipto :S%d ip from any to any
