@@ -395,8 +395,13 @@ func Test_ParseOptions_Table(t *testing.T) {
 			name:    "port option with a trailing comma",
 			input:   "src-port 22,",
 			n:       12,
-			err:     ipfw.ErrExpectedPort,
 			options: []ipfw.Opt{srcPort(22)},
+		},
+		{
+			name:    "port option with a spaced list",
+			input:   "dst-port 22, 80",
+			n:       15,
+			options: []ipfw.Opt{dstPort(22), portOr(orOpt(dstPort(80)))},
 		},
 		{
 			name:    "proto by name",
@@ -472,10 +477,16 @@ func Test_ParseOptions_Table(t *testing.T) {
 			err:   ipfw.ErrUnknownICMPType,
 		},
 		{
-			name:  "icmptypes with a trailing comma",
-			input: "icmptypes 8,",
-			n:     12,
-			err:   ipfw.ErrExpectedU8,
+			name:    "icmptypes with a trailing comma",
+			input:   "icmptypes 8,",
+			n:       12,
+			options: []ipfw.Opt{icmpTypes(8)},
+		},
+		{
+			name:    "icmptypes with a spaced list",
+			input:   "icmptypes 3, 8",
+			n:       14,
+			options: []ipfw.Opt{icmpTypes(3, 8)},
 		},
 		{
 			name:  "icmptypes overflow",
@@ -571,10 +582,16 @@ func Test_ParseOptions_Table(t *testing.T) {
 			err:   ipfw.ErrUnknownTCPFlag,
 		},
 		{
-			name:  "tcpflags with a trailing comma",
-			input: "tcpflags syn,",
-			n:     13,
-			err:   ipfw.ErrUnknownTCPFlag,
+			name:    "tcpflags with a trailing comma",
+			input:   "tcpflags syn,",
+			n:       13,
+			options: []ipfw.Opt{tcpFlags(ipfw.TCPSyn, 0)},
+		},
+		{
+			name:    "tcpflags with a spaced list",
+			input:   "tcpflags syn, !ack",
+			n:       18,
+			options: []ipfw.Opt{tcpFlags(ipfw.TCPSyn, ipfw.TCPAck)},
 		},
 		{
 			name:  "tcpflags without whitespace",

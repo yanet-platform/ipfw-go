@@ -532,13 +532,21 @@ func Test_ParseTargets_Table(t *testing.T) {
 			state: ipfw.ReduceState{Sources: []ipfw.Target{{Kind: ipfw.TargetAny}}},
 		},
 		{
-			name:  "trailing address list comma keeps the first element",
+			name:  "trailing address list comma",
 			input: "192.0.2.1,",
 			n:     10,
-			err:   ipfw.ErrExpectedTarget,
 			state: ipfw.ReduceState{
 				Sources: []ipfw.Target{{Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"}},
 			},
+		},
+		{
+			name:  "address list with all comma separators",
+			input: "192.0.2.1, \t\f\v\r198.51.100.1 x",
+			n:     27,
+			state: ipfw.ReduceState{Sources: []ipfw.Target{
+				{Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"},
+				{Kind: ipfw.TargetNetwork4, Text: "198.51.100.1"},
+			}},
 		},
 		{
 			name:  "empty address list member keeps the first element",
