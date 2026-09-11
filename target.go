@@ -210,8 +210,11 @@ func classifyQuotedHostname(token string) (Target, ErrorKind) {
 // The colon tells it from IPv4 text, so it is checked first: an IPv4-mapped
 // address such as `::ffff:192.0.2.1` has both shapes.
 func isNetwork6Text(token string) bool {
+	if strings.IndexByte(token, ':') < 0 {
+		return false
+	}
 	_, rest := takeWhile(token, isNetwork6Byte)
-	return rest == "" && strings.IndexByte(token, ':') >= 0
+	return rest == ""
 }
 
 func isNetwork6Byte(c byte) bool {
