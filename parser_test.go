@@ -2374,13 +2374,18 @@ func benchmarkNext(b *testing.B, line string) {
 	b.Helper()
 	parser := ipfw.NewParser(line)
 	var state ipfw.ReduceState
-	_, _ = parser.Next(&state)
+	if _, err := parser.Next(&state); err != nil {
+		b.Fatal(err)
+	}
 	b.SetBytes(int64(len(line)))
 	b.ReportAllocs()
 	for b.Loop() {
 		parser.Reset(line)
 		state.Reset()
 		benchRecord, benchErr = parser.Next(&state)
+	}
+	if benchErr != nil {
+		b.Fatal(benchErr)
 	}
 }
 
@@ -2668,6 +2673,14 @@ func Benchmark_Parser_Next_OptionsAfterTarget(b *testing.B) {
 
 func Benchmark_Parser_Next_Comment(b *testing.B) {
 	benchmarkNext(b, "# a comment line of an ordinary length\n")
+}
+
+func Benchmark_Parser_Next_CommentLong(b *testing.B) {
+	benchmarkNext(b, "# "+strings.Repeat("example comment ", 256)+"\n")
+}
+
+func Benchmark_Parser_Next_InlineCommentLong(b *testing.B) {
+	benchmarkNext(b, "add pass ip from any to any // "+strings.Repeat("example comment ", 256)+"\n")
 }
 
 func Benchmark_Parser_Next_Label(b *testing.B) {
