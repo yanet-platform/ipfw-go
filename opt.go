@@ -280,6 +280,10 @@ func parseTypesOption(s string, state State, kind OptKind, neg bool, place optio
 		if buf, ok = prefix(afterType, ","); !ok {
 			break
 		}
+		buf = skipCommaSpace(buf)
+		if listEnded(buf) {
+			break
+		}
 	}
 	opt := Opt{Neg: neg, Or: place == groupNext, Kind: kind, Types: types}
 	if err := failFrom(state.OnOption(opt), rest); err.Failed() {
@@ -362,6 +366,10 @@ func parseTCPFlagsOption(s string, state State, neg bool, place optionPlace) (st
 			flags.Set |= flag
 		}
 		if buf, ok = prefix(afterFlag, ","); !ok {
+			break
+		}
+		buf = skipCommaSpace(buf)
+		if listEnded(buf) {
 			break
 		}
 	}
@@ -509,7 +517,10 @@ func parsePortsOption(
 		if buf, ok = prefix(buf, ","); !ok {
 			return buf, fail{}
 		}
-		rest = buf
+		rest = skipCommaSpace(buf)
+		if listEnded(rest) {
+			return rest, fail{}
+		}
 	}
 }
 

@@ -161,10 +161,9 @@ func Test_ParsePorts_Table(t *testing.T) {
 			ports: []ipfw.PortMatch{portService("http"), portService("https")},
 		},
 		{
-			name:  "trailing comma keeps the elements before it",
+			name:  "trailing comma",
 			input: "22,80,",
 			n:     6,
-			err:   ipfw.ErrExpectedPort,
 			ports: []ipfw.PortMatch{portNumber(22), portNumber(80)},
 		},
 		{
@@ -176,9 +175,14 @@ func Test_ParsePorts_Table(t *testing.T) {
 		{
 			name:  "space after the comma",
 			input: "22, 80",
-			n:     3,
-			err:   ipfw.ErrExpectedPort,
-			ports: []ipfw.PortMatch{portNumber(22)},
+			n:     6,
+			ports: []ipfw.PortMatch{portNumber(22), portNumber(80)},
+		},
+		{
+			name:  "all separators after the comma",
+			input: "22,\t\f\v\r80",
+			n:     9,
+			ports: []ipfw.PortMatch{portNumber(22), portNumber(80)},
 		},
 		{
 			name:  "negated port",

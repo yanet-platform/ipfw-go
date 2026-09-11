@@ -67,7 +67,10 @@ func parsePorts(s string, state State, side bodySide) (string, fail) {
 		if buf, ok = prefix(buf, ","); !ok {
 			return buf, fail{}
 		}
-		rest = buf
+		rest = skipCommaSpace(buf)
+		if listEnded(rest) {
+			return rest, fail{}
+		}
 	}
 }
 

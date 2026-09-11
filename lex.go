@@ -94,6 +94,23 @@ func skipSpace(s string) string {
 	return rest
 }
 
+func skipCommaSpace(s string) string {
+	idx := 0
+	for idx < len(s) {
+		switch s[idx] {
+		case ' ', '\t', '\f', '\v', '\r':
+			idx++
+		default:
+			return s[idx:]
+		}
+	}
+	return s[idx:]
+}
+
+func listEnded(s string) bool {
+	return s == "" || s[0] == '\n'
+}
+
 func token(s string) (string, string) {
 	return takeWhile(s, isTokenByte)
 }

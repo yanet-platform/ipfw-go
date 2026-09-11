@@ -99,7 +99,10 @@ func parseTargetElement(
 		if !ok {
 			return afterTarget, fail{}
 		}
-		rest = ws0(afterComma)
+		rest = skipCommaSpace(afterComma)
+		if listEnded(rest) {
+			return rest, fail{}
+		}
 		token, afterTarget = scanTargetToken(rest)
 		target, kind = classifyTarget(token)
 		if kind != 0 || !isAddressListTarget(target) {

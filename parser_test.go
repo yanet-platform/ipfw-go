@@ -977,8 +977,8 @@ func Test_Parser_Next_Ports(t *testing.T) {
 			},
 		},
 		{
-			name:  "destination port list",
-			input: "add pass tcp from any to any 11,22,33\n",
+			name:  "spaced destination port list",
+			input: "add pass tcp from any to any 11, 22, 33\n",
 			state: ipfw.ReduceState{
 				Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 				Sources:          anyToAny,
@@ -1089,36 +1089,38 @@ func Test_Parser_Next_Ports(t *testing.T) {
 	}
 }
 
-// verifies that a trailing comma fails a port list after its elements were
-// emitted.
+// verifies that a comma joins following whitespace to the list, while a
+// line-final comma is discarded.
 //
-// A source list fails the line at the missing port, a destination list is
-// abandoned and its first element is then an unknown option.
+// A following keyword therefore becomes a service name before the missing
+// structural keyword fails the line.
 func Test_Parser_Next_PortListTrailingComma(t *testing.T) {
 	var state ipfw.ReduceState
 	_, err := ipfw.NewParser("add pass tcp from any 22, to any\n").Next(&state)
 	require.NotNil(t, err)
 	require.Equal(t, ipfw.ParseError{
-		Kind:   ipfw.ErrExpectedPort,
+		Kind:   ipfw.ErrExpectedPrefix,
 		Line:   1,
-		Column: 25,
+		Column: 29,
 		Text:   "add pass tcp from any 22, to any",
 	}, *err)
 	require.Equal(t, ipfw.ReduceState{
 		Protos:      []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 		Sources:     []ipfw.Target{{Kind: ipfw.TargetAny}},
-		SourcePorts: []ipfw.PortMatch{portNumber(22)},
+		SourcePorts: []ipfw.PortMatch{portNumber(22), portService("to")},
 	}, state)
 
 	state = ipfw.ReduceState{}
-	_, err = ipfw.NewParser("add pass tcp from any to any 22,\n").Next(&state)
-	require.NotNil(t, err)
-	require.Equal(t, ipfw.ParseError{
-		Kind:   ipfw.ErrUnknownOption,
-		Line:   1,
-		Column: 29,
-		Text:   "add pass tcp from any to any 22,",
-	}, *err)
+	rec, err := ipfw.NewParser("add pass tcp from any to any 22,\n").Next(&state)
+	require.Nil(t, err)
+	require.Equal(t, ipfw.Record{
+		Line: 1,
+		Text: "add pass tcp from any to any 22,",
+		Kind: ipfw.RecordInstruction,
+		Instruction: ipfw.Instruction{
+			Action: ipfw.Action{Kind: ipfw.ActionPass},
+		},
+	}, *rec)
 	require.Equal(t, ipfw.ReduceState{
 		Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 		Sources:          []ipfw.Target{{Kind: ipfw.TargetAny}},
@@ -1748,8 +1750,8 @@ func Test_Parser_Next_Options(t *testing.T) {
 			},
 		},
 		{
-			name:  "icmptypes",
-			input: "add allow icmp from any to any icmptypes 3,8,11,12\n",
+			name:  "spaced icmptypes",
+			input: "add allow icmp from any to any icmptypes 3, 8, 11, 12\n",
 			state: ipfw.ReduceState{
 				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "icmp"}}},
 				Sources:      anyToAny,
@@ -1778,8 +1780,8 @@ func Test_Parser_Next_Options(t *testing.T) {
 			},
 		},
 		{
-			name:  "tcpflags with a cleared flag",
-			input: "add allow tcp from any to any tcpflags syn,!ack\n",
+			name:  "spaced tcpflags with a cleared flag",
+			input: "add allow tcp from any to any tcpflags syn, !ack\n",
 			state: ipfw.ReduceState{
 				Protos:       tcp,
 				Sources:      anyToAny,
@@ -2211,8 +2213,8 @@ func Test_Parser_Next_Network4Unvalidated(t *testing.T) {
 // negation and every member in parser state.
 func Test_Parser_Next_AddressLists(t *testing.T) {
 	var state ipfw.ReduceState
-	src := "add allow ip from not 192.0.2.1,203.0.113.1 " +
-		"to 2001:db8::1,2001:db8::2\n"
+	src := "add allow ip from not 192.0.2.1,\f203.0.113.1 " +
+		"to 2001:db8::1,2001:db8::2,\n"
 	rec, err := ipfw.NewParser(src).Next(&state)
 	require.Nil(t, err)
 	require.Equal(t, passAnyToAny(1, strings.TrimSpace(src)), *rec)
@@ -2246,23 +2248,6 @@ func Test_Parser_Next_AddressListErrors(t *testing.T) {
 				Line:   1,
 				Column: 35,
 				Text:   "add allow ip from any to 192.0.2.1,,203.0.113.1",
-			},
-			state: ipfw.ReduceState{
-				IPProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
-				Sources:  []ipfw.Target{{Kind: ipfw.TargetAny}},
-				Destinations: []ipfw.Target{
-					{Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"},
-				},
-			},
-		},
-		{
-			name:  "destination list ends after comma",
-			input: "add allow ip from any to 192.0.2.1,",
-			err: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedTarget,
-				Line:   1,
-				Column: 35,
-				Text:   "add allow ip from any to 192.0.2.1,",
 			},
 			state: ipfw.ReduceState{
 				IPProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
