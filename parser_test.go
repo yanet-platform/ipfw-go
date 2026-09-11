@@ -2061,6 +2061,69 @@ func Test_Parser_Next_OptionErrors(t *testing.T) {
 	}
 }
 
+// verifies that state-producing options are unique, stay outside OR groups,
+// and use fresh context for every rule.
+func Test_Parser_Next_KeepStateContext(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		expected ipfw.ParseError
+		state    ipfw.ReduceState
+	}{
+		{
+			name:  "duplicate after destination port",
+			input: "add pass tcp from any to any 80 keep-state keep-state\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrDuplicateStateOption,
+				Line:   1,
+				Column: 43,
+				Text:   "add pass tcp from any to any 80 keep-state keep-state",
+			},
+			state: ipfw.ReduceState{
+				Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+				Sources:          []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations:     []ipfw.Target{{Kind: ipfw.TargetAny}},
+				DestinationPorts: []ipfw.PortMatch{portNumber(80)},
+				Options:          []ipfw.Opt{{Kind: ipfw.OptKeepState}},
+			},
+		},
+		{
+			name:  "inside OR group",
+			input: "add pass ip from any to any { in or keep-state }\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrStateOptionInGroup,
+				Line:   1,
+				Column: 36,
+				Text:   "add pass ip from any to any { in or keep-state }",
+			},
+			state: ipfw.ReduceState{
+				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Options:      []ipfw.Opt{{Kind: ipfw.OptIn}},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var state ipfw.ReduceState
+			_, err := ipfw.NewParser(tc.input).Next(&state)
+			require.NotNil(t, err)
+			require.Equal(t, tc.expected, *err)
+			require.Equal(t, tc.state, state)
+		})
+	}
+
+	parser := ipfw.NewParser("add pass ip from any to any keep-state\n" +
+		"add pass ip from any to any keep-state\n")
+	for range 2 {
+		var state ipfw.ReduceState
+		_, err := parser.Next(&state)
+		require.Nil(t, err)
+		require.Equal(t, []ipfw.Opt{{Kind: ipfw.OptKeepState}}, state.Options)
+	}
+}
+
 // verifies that an error a state returns fails the line at the rejected
 // token.
 //

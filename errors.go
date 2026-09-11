@@ -57,6 +57,8 @@ const (
 	// ErrState wraps an error a State or a hook returned, see ParseError.Err.
 	ErrState
 	ErrExpectedTag
+	ErrStateOptionInGroup
+	ErrDuplicateStateOption
 )
 
 // Error returns the message of the kind.
@@ -144,6 +146,10 @@ func (m ErrorKind) Error() string {
 		return "expected `\\n` or EOF"
 	case ErrState:
 		return "state error"
+	case ErrStateOptionInGroup:
+		return "state-producing option in OR block"
+	case ErrDuplicateStateOption:
+		return "more than one state-producing option"
 	default:
 		return "unknown error kind " + strconv.Itoa(int(m))
 	}

@@ -84,9 +84,10 @@ func ParseOptions(s string, state State, hook OptionHook) (int, error) {
 // failure stay in the state.
 func parseOptions(s string, state State, hook OptionHook) (string, fail) {
 	rest := s
+	var ctx optionContext
 	var ok bool
 	for rest != "" && rest[0] != '\n' && !strings.HasPrefix(rest, "//") {
-		buf, err := parseOptionGroup(rest, state, hook)
+		buf, err := parseOptionGroup(&ctx, rest, state, hook)
 		if err.Failed() {
 			return s, err
 		}
@@ -100,6 +101,26 @@ func parseOptions(s string, state State, hook OptionHook) (string, fail) {
 // optionPlace distinguishes a top-level option from members of an or-group.
 type optionPlace uint8
 
+type optionContext struct {
+	stateOptionSeen bool
+}
+
+// Validate rejects a state-producing option in an OR group or after one
+// already accepted in the same rule.
+func (m *optionContext) Validate(kind OptKind, place optionPlace, at string) fail {
+	if kind != OptKeepState {
+		return fail{}
+	}
+	if place != topLevel {
+		return fail{Kind: ErrStateOptionInGroup, At: at}
+	}
+	if m.stateOptionSeen {
+		return fail{Kind: ErrDuplicateStateOption, At: at}
+	}
+	m.stateOptionSeen = true
+	return fail{}
+}
+
 const (
 	topLevel optionPlace = iota
 	groupFirst
@@ -108,14 +129,19 @@ const (
 
 // parseOptionGroup parses one option or a `{ a or b … }` group of them,
 // every member after the first carrying the Or flag.
-func parseOptionGroup(s string, state State, hook OptionHook) (string, fail) {
+func parseOptionGroup(
+	ctx *optionContext,
+	s string,
+	state State,
+	hook OptionHook,
+) (string, fail) {
 	g, rest := openGroup(s, trailingPosition)
 	place := topLevel
 	if g.Braced {
 		place = groupFirst
 	}
 	for {
-		buf, err := parseOption(rest, state, hook, place)
+		buf, err := parseOption(ctx, rest, state, hook, place)
 		if err.Failed() {
 			return s, err
 		}
@@ -132,12 +158,21 @@ func parseOptionGroup(s string, state State, hook OptionHook) (string, fail) {
 
 // parseOption parses one optionally negated option, the keyword matching
 // by prefix and a failure pointing at the keyword.
-func parseOption(s string, state State, hook OptionHook, place optionPlace) (string, fail) {
+func parseOption(
+	ctx *optionContext,
+	s string,
+	state State,
+	hook OptionHook,
+	place optionPlace,
+) (string, fail) {
 	rest, neg := notWS1(s)
 	var buf string
 	var err fail
 	kind, n := argumentOption(rest)
 	arg := rest[n:]
+	if err = ctx.Validate(kind, place, rest); err.Failed() {
+		return s, err
+	}
 	switch kind {
 	case OptSourcePort, OptDestinationPort:
 		buf, err = parsePortsOption(arg, state, kind, neg, place)
@@ -152,7 +187,7 @@ func parseOption(s string, state State, hook OptionHook, place optionPlace) (str
 	case OptVia:
 		buf, err = parseViaOption(arg, state, neg, place)
 	default:
-		buf, err = parseKeywordOption(rest, state, hook, neg, place)
+		buf, err = parseKeywordOption(ctx, rest, state, hook, neg, place)
 	}
 	if err.Failed() {
 		return s, err
@@ -210,6 +245,7 @@ func argumentOption(s string) (OptKind, int) {
 // parseKeywordOption parses an option without an argument, the hook
 // taking a keyword the grammar does not know.
 func parseKeywordOption(
+	ctx *optionContext,
 	s string,
 	state State,
 	hook OptionHook,
@@ -218,7 +254,7 @@ func parseKeywordOption(
 ) (string, fail) {
 	kind, rest, ok := keywordOption(s)
 	if !ok {
-		return parseCustomOption(s, state, hook, neg, place)
+		return parseCustomOption(ctx, s, state, hook, neg, place)
 	}
 	opt := Opt{Neg: neg, Or: place == groupNext, Kind: kind}
 	if err := failFrom(state.OnOption(opt), s); err.Failed() {
@@ -233,6 +269,7 @@ func parseKeywordOption(
 // The hook runs during the speculative pass over the options as well, so
 // it must be free of side effects.
 func parseCustomOption(
+	ctx *optionContext,
 	s string,
 	state State,
 	hook OptionHook,
@@ -251,6 +288,9 @@ func parseCustomOption(
 		return s, fail{Kind: ErrUnknownOption, At: s}
 	}
 	opt.Neg, opt.Or, opt.PortOr = neg, place == groupNext, false
+	if failure := ctx.Validate(opt.Kind, place, s); failure.Failed() {
+		return s, failure
+	}
 	if failure := failFrom(state.OnOption(opt), s); failure.Failed() {
 		return s, failure
 	}
