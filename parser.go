@@ -205,6 +205,7 @@ func (m *Parser) parseInstruction(s string, state State, instruction *Instructio
 		return input, err
 	}
 	if instruction.Action.Kind == ActionCheckState {
+		instruction.InlineComment, rest = parseInlineComment(rest)
 		return rest, fail{}
 	}
 	rest, ok := ws1(rest)
