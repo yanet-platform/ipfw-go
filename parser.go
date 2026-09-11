@@ -244,8 +244,8 @@ func parseLog(s string) (Log, string, fail) {
 	return Log{Enabled: true, HasAmount: true, Amount: amount}, buf, fail{}
 }
 
-// parseTag parses the optional ` tag N` after the log part, the input
-// coming back untouched when the keyword is absent.
+// parseTag parses the optional positive ` tag N` after log, leaving input
+// untouched when absent.
 func parseTag(s string) (uint32, string, fail) {
 	buf, ok := ws1Keyword(s, "tag")
 	if !ok {
@@ -254,9 +254,13 @@ func parseTag(s string) (uint32, string, fail) {
 	if buf, ok = ws1(buf); !ok {
 		return 0, s, fail{Kind: ErrExpectedWhitespace, At: buf}
 	}
-	tag, buf, kind := parseU32(buf)
+	tagInput := buf
+	tag, buf, kind := parseU32(tagInput)
 	if kind != 0 {
 		return 0, s, fail{Kind: kind, At: buf}
+	}
+	if tag == 0 {
+		return 0, s, fail{Kind: ErrExpectedTag, At: tagInput}
 	}
 	return tag, buf, fail{}
 }
@@ -551,7 +555,7 @@ type Instruction struct {
 	Action Action
 	// Log is the logging part.
 	Log Log
-	// Tag is the `tag` number, 0 when absent, so a `tag 0` reads as none.
+	// Tag is the positive `tag` number, 0 when absent.
 	Tag uint32
 	// InlineComment is the raw text after `//`, empty when absent.
 	InlineComment string

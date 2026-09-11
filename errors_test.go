@@ -148,6 +148,7 @@ func Test_ErrorKind_Error(t *testing.T) {
 			kind:    ipfw.ErrExpectedNewlineOrEOF,
 			message: "expected `\\n` or EOF",
 		},
+		{name: "expected tag", kind: ipfw.ErrExpectedTag, message: "expected positive tag number"},
 		{name: "state error", kind: ipfw.ErrState, message: "state error"},
 		{
 			name:    "unknown value renders its number",
@@ -166,7 +167,7 @@ func Test_ErrorKind_Error(t *testing.T) {
 // kinds share one, so a message identifies its kind.
 func Test_ErrorKind_MessagesAreDistinct(t *testing.T) {
 	seen := map[string]ipfw.ErrorKind{}
-	for kind := ipfw.ErrorKind(1); kind <= ipfw.ErrState; kind++ {
+	for kind := ipfw.ErrorKind(1); kind <= ipfw.ErrExpectedTag; kind++ {
 		message := kind.Error()
 		require.NotEmpty(t, message, "kind %d", kind)
 		require.NotContains(t, message, "unknown error kind", "kind %d", kind)
