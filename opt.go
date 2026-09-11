@@ -431,9 +431,6 @@ func parseVia(s string) (Via, string, fail) {
 	if !strings.ContainsAny(name, "*?[]") {
 		return Via{Kind: ViaExact, Name: name}, rest, fail{}
 	}
-	if kind := validateIfMask(name); kind != 0 {
-		return Via{}, s, fail{Kind: kind, At: s}
-	}
 	return Via{Kind: ViaMask, Name: name}, rest, fail{}
 }
 
