@@ -1819,6 +1819,17 @@ func Test_Parser_Next_Options(t *testing.T) {
 			},
 		},
 		{
+			name:  "via mask with an unclosed class",
+			input: "add pass tcp from any to any 80 via lan[0\n",
+			state: ipfw.ReduceState{
+				Protos:           tcp,
+				Sources:          anyToAny,
+				Destinations:     anyToAny,
+				DestinationPorts: []ipfw.PortMatch{portNumber(80)},
+				Options:          []ipfw.Opt{viaMask("lan[0")},
+			},
+		},
+		{
 			name:  "via table then in",
 			input: "add allow ip from any to any via table(t) in\n",
 			state: ipfw.ReduceState{

@@ -2,6 +2,7 @@ package ipfw_test
 
 import (
 	"path"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -55,6 +56,9 @@ func Test_MatchIfMask_Table(t *testing.T) {
 		{name: "escaped question mark", pattern: `t\?st`, input: "t?st", match: true},
 		{name: "escaped star", pattern: `t\*st`, input: "t*st", match: true},
 		{name: "escaped bracket", pattern: `t\[a]st`, input: "t[a]st", match: true},
+		{name: "escaped class member", pattern: `t[\]]st`, input: "t]st", match: true},
+		{name: "escaped range lower bound", pattern: `t[\a-c]st`, input: "tbst", match: true},
+		{name: "escaped range excludes hyphen", pattern: `[\c-f][`, input: "-[", match: false},
 		{name: "escaped question mark is literal", pattern: `t\?st`, input: "test", match: false},
 		{name: "escaped star is literal", pattern: `t\*st`, input: "test", match: false},
 		{name: "escaped bracket is literal", pattern: `t\[a]st`, input: "tast", match: false},
@@ -67,12 +71,19 @@ func Test_MatchIfMask_Table(t *testing.T) {
 		{name: "suffix mismatch", pattern: "*.c", input: "foo.h", match: false},
 		{name: "single byte against two", pattern: "?", input: "ab", match: false},
 		{name: "escaped question mark alone mismatch", pattern: `\?`, input: "a", match: false},
-		{name: "unclosed class never matches", pattern: "t[est", input: "test", match: false},
+		{name: "unclosed class is literal", pattern: "t[est", input: "t[est", match: true},
+		{name: "unclosed class is not skipped", pattern: "t[est", input: "test", match: false},
+		{name: "empty class is literal", pattern: "t[]st", input: "t[]st", match: true},
+		{name: "unclosed negated class is literal", pattern: "t[!est", input: "t[!est", match: true},
+		{name: "unclosed class ending in an escape is literal", pattern: `t[\`, input: `t[\`, match: true},
+		{name: "repeated malformed classes are literal", pattern: "t[[[", input: "t[[[", match: true},
+		{name: "unclosed class after a star is literal", pattern: "t*[", input: "test[", match: true},
 		{name: "repeated stars last", pattern: "te**", input: "test", match: true},
 		{name: "empty pattern and name", pattern: "", input: "", match: true},
 		{name: "empty pattern", pattern: "", input: "a", match: false},
 		{name: "star against the empty name", pattern: "*", input: "", match: true},
-		{name: "trailing escape matches nothing", pattern: `a\`, input: "a", match: false},
+		{name: "trailing escape is literal", pattern: `a\`, input: `a\`, match: true},
+		{name: "trailing escape needs a literal byte", pattern: `a\`, input: "a", match: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -105,6 +116,17 @@ func Test_MatchIfMask_NoAllocs(t *testing.T) {
 	})
 	require.True(t, matched)
 	require.Zero(t, allocs)
+}
+
+func Benchmark_MatchIfMask_MalformedClasses(b *testing.B) {
+	pattern := strings.Repeat("[", 1024)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if !ipfw.MatchIfMask(pattern, pattern) {
+			b.Fatal("pattern did not match itself")
+		}
+	}
 }
 
 func Fuzz_MatchIfMask(f *testing.F) {

@@ -1,17 +1,16 @@
 package ipfw
 
-import "strings"
-
 // MatchIfMask reports whether the interface name matches the fnmatch-style
 // pattern of a `via` mask.
 //
 // `?` is one byte, `*` any run of bytes, `[…]` a class with ranges and `!`
 // or `^` negation, and `\` makes the next byte literal. A star backtracks
 // from the last one seen only, which is enough since a later star subsumes
-// the earlier ones. An unclosed class matches nothing.
+// the earlier ones. A malformed class makes its opening bracket literal.
 func MatchIfMask(pattern, name string) bool {
 	patternIdx, nameIdx := 0, 0
 	starIdx, resumeIdx := -1, -1
+	literalBracketIdx := len(pattern)
 	for nameIdx < len(name) {
 		if patternIdx < len(pattern) {
 			switch pattern[patternIdx] {
@@ -24,14 +23,34 @@ func MatchIfMask(pattern, name string) bool {
 				patternIdx++
 				continue
 			case '[':
-				if rest, ok := rangeMatch(pattern[patternIdx+1:], name[nameIdx]); ok {
-					patternIdx = len(pattern) - len(rest)
+				if patternIdx < literalBracketIdx {
+					rest, result := rangeMatch(pattern[patternIdx+1:], name[nameIdx])
+					if result == rangeMatched {
+						patternIdx = len(pattern) - len(rest)
+						nameIdx++
+						continue
+					}
+					if result == rangeMismatch {
+						break
+					}
+					// No later class can close within a suffix that this scan exhausted.
+					literalBracketIdx = patternIdx
+				}
+				if name[nameIdx] == '[' {
+					patternIdx++
 					nameIdx++
 					continue
 				}
 			case '\\':
 				patternIdx++
-				if patternIdx < len(pattern) && pattern[patternIdx] == name[nameIdx] {
+				if patternIdx == len(pattern) {
+					if name[nameIdx] == '\\' {
+						nameIdx++
+						continue
+					}
+					break
+				}
+				if pattern[patternIdx] == name[nameIdx] {
 					patternIdx++
 					nameIdx++
 					continue
@@ -57,9 +76,17 @@ func MatchIfMask(pattern, name string) bool {
 	return patternIdx == len(pattern)
 }
 
-// rangeMatch matches one byte against the class that follows an opening
-// bracket, returning the pattern after the closing one on a match.
-func rangeMatch(pattern string, c byte) (string, bool) {
+type rangeMatchResult uint8
+
+const (
+	rangeMalformed rangeMatchResult = iota
+	rangeMismatch
+	rangeMatched
+)
+
+// rangeMatch distinguishes a malformed class from a complete mismatch.
+// The remaining pattern is returned only on a match.
+func rangeMatch(pattern string, c byte) (string, rangeMatchResult) {
 	negate := false
 	if pattern != "" && (pattern[0] == '!' || pattern[0] == '^') {
 		pattern = pattern[1:]
@@ -69,25 +96,25 @@ func rangeMatch(pattern string, c byte) (string, bool) {
 	idx := 0
 	for {
 		if idx >= len(pattern) {
-			return "", false
+			return "", rangeMalformed
 		}
 		lo := pattern[idx]
 		idx++
+		escaped := lo == '\\'
+		if escaped {
+			if idx >= len(pattern) {
+				return "", rangeMalformed
+			}
+			lo = pattern[idx]
+			idx++
+		}
 		switch {
 		// A closing bracket is literal when it is the first class member.
-		case lo == ']' && idx > 1:
+		case !escaped && lo == ']' && idx > 1:
 			if matched != negate {
-				return pattern[idx:], true
+				return pattern[idx:], rangeMatched
 			}
-			return "", false
-		case lo == '\\':
-			if idx >= len(pattern) {
-				return "", false
-			}
-			if pattern[idx] == c {
-				matched = true
-			}
-			idx++
+			return "", rangeMismatch
 		case idx < len(pattern) && pattern[idx] == '-':
 			if idx+1 < len(pattern) && pattern[idx+1] != ']' {
 				idx++
@@ -95,7 +122,7 @@ func rangeMatch(pattern string, c byte) (string, bool) {
 				idx++
 				if hi == '\\' {
 					if idx >= len(pattern) {
-						return "", false
+						return "", rangeMalformed
 					}
 					hi = pattern[idx]
 					idx++
@@ -110,29 +137,4 @@ func rangeMatch(pattern string, c byte) (string, bool) {
 			matched = true
 		}
 	}
-}
-
-// validateIfMask rejects an interface mask with an unclosed class.
-func validateIfMask(pattern string) ErrorKind {
-	idx := 0
-	for idx < len(pattern) {
-		switch pattern[idx] {
-		case '[':
-			if idx+4 <= len(pattern) && pattern[idx+1] == '!' {
-				if close := strings.IndexByte(pattern[idx+3:], ']'); close >= 0 {
-					idx += close + 4
-					continue
-				}
-			} else if idx+3 <= len(pattern) && pattern[idx+1] != '!' {
-				if close := strings.IndexByte(pattern[idx+2:], ']'); close >= 0 {
-					idx += close + 3
-					continue
-				}
-			}
-			return ErrExpectedIfMask
-		default:
-			idx++
-		}
-	}
-	return 0
 }
