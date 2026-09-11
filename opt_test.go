@@ -629,10 +629,10 @@ func Test_ParseOptions_Table(t *testing.T) {
 			},
 		},
 		{
-			name:  "via mask with a double star",
-			input: "via tun**",
-			n:     4,
-			err:   ipfw.ErrExpectedIfMask,
+			name:    "via mask with repeated stars",
+			input:   "via tun**",
+			n:       9,
+			options: []ipfw.Opt{viaMask("tun**")},
 		},
 		{
 			name:  "via mask with an unclosed class",
