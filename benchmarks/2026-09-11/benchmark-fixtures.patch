@@ -1,0 +1,218 @@
+diff --git a/parser_test.go b/parser_test.go
+index 2625c4d..176110d 100644
+--- a/parser_test.go
++++ b/parser_test.go
+@@ -2374,7 +2374,9 @@ func benchmarkNext(b *testing.B, line string) {
+ 	b.Helper()
+ 	parser := ipfw.NewParser(line)
+ 	var state ipfw.ReduceState
+-	_, _ = parser.Next(&state)
++	if _, err := parser.Next(&state); err != nil {
++		b.Fatal(err)
++	}
+ 	b.SetBytes(int64(len(line)))
+ 	b.ReportAllocs()
+ 	for b.Loop() {
+@@ -2382,6 +2384,9 @@ func benchmarkNext(b *testing.B, line string) {
+ 		state.Reset()
+ 		benchRecord, benchErr = parser.Next(&state)
+ 	}
++	if benchErr != nil {
++		b.Fatal(benchErr)
++	}
+ }
+ 
+ // fuzzSeeds are one line per syntax form plus the shapes that trip
+@@ -2628,6 +2633,12 @@ func Benchmark_Parser_Next_Reduce(b *testing.B) {
+ 	src := syntheticRuleset()
+ 	parser := ipfw.NewParser(src)
+ 	var state ipfw.ReduceState
++	for _, err := range parser.Records(&state) {
++		if err != nil {
++			b.Fatal(err)
++		}
++		state.Reset()
++	}
+ 	b.SetBytes(int64(len(src)))
+ 	b.ReportAllocs()
+ 	for b.Loop() {
+@@ -2649,6 +2660,14 @@ func Benchmark_Parser_Next_AnyToAny(b *testing.B) {
+ 	benchmarkNext(b, "add pass ip from any to any\n")
+ }
+ 
++func Benchmark_Parser_Next_CRLF(b *testing.B) {
++	benchmarkNext(b, "add pass ip from any to any\r\n")
++}
++
++func Benchmark_Parser_Next_IPv6Targets(b *testing.B) {
++	benchmarkNext(b, "add pass ip6 from 2001:db8::/32 to 2001:db8:1::/48\n")
++}
++
+ func Benchmark_Parser_Next_TenNetworks(b *testing.B) {
+ 	benchmarkNext(b, "add pass ip from { 192.0.2.0/24 or 192.0.2.16/28 or 198.51.100.0/24 or"+
+ 		" 203.0.113.0/24 or 2001:db8::/32 } to { 192.0.2.1 or 198.51.100.1 or 203.0.113.1 or"+
+@@ -2670,6 +2689,14 @@ func Benchmark_Parser_Next_Comment(b *testing.B) {
+ 	benchmarkNext(b, "# a comment line of an ordinary length\n")
+ }
+ 
++func Benchmark_Parser_Next_CommentLong(b *testing.B) {
++	benchmarkNext(b, "# "+strings.Repeat("example comment ", 256)+"\n")
++}
++
++func Benchmark_Parser_Next_InlineCommentLong(b *testing.B) {
++	benchmarkNext(b, "add pass ip from any to any // "+strings.Repeat("example comment ", 256)+"\n")
++}
++
+ func Benchmark_Parser_Next_Label(b *testing.B) {
+ 	benchmarkNext(b, ":LONG_LABEL_NAME_42\n")
+ }
+diff --git a/vm/vm_test.go b/vm/vm_test.go
+index fe70de4..a51baab 100644
+--- a/vm/vm_test.go
++++ b/vm/vm_test.go
+@@ -233,6 +233,24 @@ func Test_VM_Check_Compat(t *testing.T) {
+ 			packet:  tcp4("198.51.100.1", "192.0.2.1"),
+ 			verdict: deny,
+ 		},
++		{
++			name: "negated any source never matches",
++			rules: ruleset(`
++				add pass ip from not any to any
++				add deny ip from any to any
++			`),
++			packet:  tcp4("192.0.2.1", "203.0.113.1"),
++			verdict: deny,
++		},
++		{
++			name: "negated any destination never matches",
++			rules: ruleset(`
++				add pass ip from any to not any
++				add deny ip from any to any
++			`),
++			packet:  tcp4("192.0.2.1", "203.0.113.1"),
++			verdict: deny,
++		},
+ 		{
+ 			name: "network and negation",
+ 			rules: ruleset(`
+@@ -2704,6 +2722,120 @@ func Benchmark_VM_Check_NoRule(b *testing.B) {
+ 	benchmarkCheck(b, benchmarkRuleset(1000, ""))
+ }
+ 
++// Benchmark_VM_Check_SourceReject measures scans that reject every rule by source address.
++func Benchmark_VM_Check_SourceReject(b *testing.B) {
++	cases := []struct {
++		name   string
++		rule   string
++		packet vm.Packet
++	}{
++		{
++			name:   "IPv4",
++			rule:   "add pass tcp from 198.51.100.0/24 to any\n",
++			packet: syntheticPackets["tcp4 syn"],
++		},
++		{
++			name:   "IPv6",
++			rule:   "add pass tcp from 2001:db8:ffff::/48 to any\n",
++			packet: syntheticPackets["tcp6"],
++		},
++	}
++	for _, testCase := range cases {
++		for _, count := range []int{1, 64, 1024} {
++			b.Run(testCase.name+"/"+strconv.Itoa(count), func(b *testing.B) {
++				machine, err := vm.Build(
++					ipfw.NewParser(strings.Repeat(testCase.rule, count)),
++					vm.Config[net4, net6]{Environment: resolving},
++				)
++				require.NoError(b, err)
++				require.Equal(b, count, machine.Len())
++				require.Equal(b, deny, machine.Check(syntheticContext, testCase.packet))
++				b.ReportAllocs()
++				for b.Loop() {
++					machine.Check(syntheticContext, testCase.packet)
++				}
++			})
++		}
++	}
++}
++
++// Benchmark_VM_Check_SourceList measures late matches and negation over 64 source alternatives.
++func Benchmark_VM_Check_SourceList(b *testing.B) {
++	addresses := make([]string, 64)
++	for idx := range addresses {
++		addresses[idx] = "192.0.2." + strconv.Itoa(idx+1)
++	}
++	list := strings.Join(addresses, ",")
++	member := tcp4("192.0.2.64", "203.0.113.1")
++	outside := tcp4("198.51.100.1", "203.0.113.1")
++	cases := []struct {
++		name    string
++		targets string
++		packet  vm.Packet
++		verdict ipfw.Action
++	}{
++		{
++			name:    "OrLast",
++			targets: "{ " + strings.Join(addresses, " or ") + " }",
++			packet:  member,
++			verdict: pass,
++		},
++		{
++			name:    "ListLast",
++			targets: list,
++			packet:  member,
++			verdict: pass,
++		},
++		{
++			name:    "NegatedMember",
++			targets: "not " + list,
++			packet:  member,
++			verdict: deny,
++		},
++		{
++			name:    "NegatedOutside",
++			targets: "not " + list,
++			packet:  outside,
++			verdict: pass,
++		},
++	}
++	for _, testCase := range cases {
++		b.Run(testCase.name, func(b *testing.B) {
++			source := "add pass tcp from " + testCase.targets + " to any\n"
++			machine, err := vm.Build(
++				ipfw.NewParser(source),
++				vm.Config[net4, net6]{Environment: resolving},
++			)
++			require.NoError(b, err)
++			require.Equal(b, testCase.verdict, machine.Check(syntheticContext, testCase.packet))
++			b.ReportAllocs()
++			for b.Loop() {
++				machine.Check(syntheticContext, testCase.packet)
++			}
++		})
++	}
++}
++
++// Benchmark_VM_CheckTrace_SourceReject includes tracing every rule of a 1024-rule scan.
++func Benchmark_VM_CheckTrace_SourceReject(b *testing.B) {
++	source := strings.Repeat("add pass tcp from 198.51.100.0/24 to any\n", 1024)
++	machine, err := vm.Build(
++		ipfw.NewParser(source),
++		vm.Config[net4, net6]{Environment: resolving},
++	)
++	require.NoError(b, err)
++	packet := syntheticPackets["tcp4 syn"]
++	tracer := &recordingTracer{}
++	action, matched := machine.CheckTrace(syntheticContext, packet, tracer)
++	require.Equal(b, ipfw.Action{}, action)
++	require.False(b, matched)
++	require.Len(b, tracer.seen, 1024)
++	b.ReportAllocs()
++	for b.Loop() {
++		machine.CheckTrace(syntheticContext, packet, nopTracer{})
++	}
++}
++
+ func Benchmark_VM_Check_Jumps(b *testing.B) {
+ 	section := ruleset(`
+ 		add skipto :S%d ip from any to any

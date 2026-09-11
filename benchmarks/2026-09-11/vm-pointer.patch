@@ -1,0 +1,26 @@
+diff --git a/vm/vm.go b/vm/vm.go
+index ffccc32..3b287f1 100644
+--- a/vm/vm.go
++++ b/vm/vm.go
+@@ -1013,10 +1013,10 @@ func (m *VM[V4, V6]) matchTargets(
+ ) bool {
+ 	idx := 0
+ 	for idx < len(targets) {
+-		first := targets[idx]
++		first := &targets[idx]
+ 		hit := m.matchTarget(first, ctx, addr)
+ 		for idx++; idx < len(targets) && targets[idx].Pattern == first.Pattern; idx++ {
+-			hit = hit || m.matchTarget(targets[idx], ctx, addr)
++			hit = hit || m.matchTarget(&targets[idx], ctx, addr)
+ 		}
+ 		if hit != first.Neg {
+ 			return true
+@@ -1030,7 +1030,7 @@ func (m *VM[V4, V6]) matchTargets(
+ // me and me6 are the context's addresses of the packet's family, a
+ // missing table holds nothing.
+ func (m *VM[V4, V6]) matchTarget(
+-	target ipfw.TargetMatch[V4, V6],
++	target *ipfw.TargetMatch[V4, V6],
+ 	ctx *Context,
+ 	addr netip.Addr,
+ ) bool {

@@ -2628,6 +2628,12 @@ func Benchmark_Parser_Next_Reduce(b *testing.B) {
 	src := syntheticRuleset()
 	parser := ipfw.NewParser(src)
 	var state ipfw.ReduceState
+	for _, err := range parser.Records(&state) {
+		if err != nil {
+			b.Fatal(err)
+		}
+		state.Reset()
+	}
 	b.SetBytes(int64(len(src)))
 	b.ReportAllocs()
 	for b.Loop() {
@@ -2647,6 +2653,14 @@ func Benchmark_Parser_Next_Reduce(b *testing.B) {
 
 func Benchmark_Parser_Next_AnyToAny(b *testing.B) {
 	benchmarkNext(b, "add pass ip from any to any\n")
+}
+
+func Benchmark_Parser_Next_CRLF(b *testing.B) {
+	benchmarkNext(b, "add pass ip from any to any\r\n")
+}
+
+func Benchmark_Parser_Next_IPv6Targets(b *testing.B) {
+	benchmarkNext(b, "add pass ip6 from 2001:db8::/32 to 2001:db8:1::/48\n")
 }
 
 func Benchmark_Parser_Next_TenNetworks(b *testing.B) {

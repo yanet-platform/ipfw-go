@@ -1,0 +1,210 @@
+goos: linux
+goarch: amd64
+pkg: github.com/yanet-platform/ipfw-go
+cpu: Intel(R) Xeon(R) CPU E5-2683 v4 @ 2.10GHz
+Benchmark_Group_Braced                   	 1473667	       162.6 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Group_Lone                     	 4490012	        53.69 ns/op	       0 B/op	       0 allocs/op
+Benchmark_ParseU32_Maximum               	 8314623	        29.09 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Lex_KeywordSequence            	10154248	        23.67 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Discard            	      27	   8398562 ns/op	  80.87 MB/s	       1 B/op	       0 allocs/op
+Benchmark_Parser_Next_Reduce             	      25	   8880144 ns/op	  76.48 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_AnyToAny           	  592508	       411.4 ns/op	  68.07 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_CRLF               	  589510	       409.7 ns/op	  70.78 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_IPv6Targets        	  457477	       508.4 ns/op	 100.31 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_TenNetworks        	  162541	      1501 ns/op	 116.56 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_TenOptions         	   92815	      2592 ns/op	  70.99 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_OptionsAfterTarget 	  109484	      2199 ns/op	  74.14 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Comment            	 3616101	        66.58 ns/op	 585.76 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_CommentLong        	 1000000	       205.3 ns/op	19967.46 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_InlineCommentLong  	  345416	       713.6 ns/op	5784.40 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Label              	 3354739	        70.89 ns/op	 282.11 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/yanet-platform/ipfw-go
+cpu: Intel(R) Xeon(R) CPU E5-2683 v4 @ 2.10GHz
+Benchmark_Group_Braced                   	 1461801	       163.8 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Group_Lone                     	 4348484	        55.28 ns/op	       0 B/op	       0 allocs/op
+Benchmark_ParseU32_Maximum               	 8381158	        28.67 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Lex_KeywordSequence            	10224062	        26.34 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Discard            	      27	   8471189 ns/op	  80.17 MB/s	       1 B/op	       0 allocs/op
+Benchmark_Parser_Next_Reduce             	      26	   8834253 ns/op	  76.88 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_AnyToAny           	  579795	       405.7 ns/op	  69.02 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_CRLF               	  595765	       408.0 ns/op	  71.08 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_IPv6Targets        	  471226	       507.6 ns/op	 100.47 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_TenNetworks        	  162781	      1504 ns/op	 116.33 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_TenOptions         	   92332	      2596 ns/op	  70.86 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_OptionsAfterTarget 	  110360	      2193 ns/op	  74.32 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Comment            	 3617529	        66.33 ns/op	 587.93 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_CommentLong        	 1000000	       202.9 ns/op	20201.39 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_InlineCommentLong  	  352034	       690.7 ns/op	5976.64 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Label              	 3400936	        70.48 ns/op	 283.78 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/yanet-platform/ipfw-go
+cpu: Intel(R) Xeon(R) CPU E5-2683 v4 @ 2.10GHz
+Benchmark_Group_Braced                   	 1497171	       160.0 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Group_Lone                     	 4501988	        53.35 ns/op	       0 B/op	       0 allocs/op
+Benchmark_ParseU32_Maximum               	 8443615	        28.43 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Lex_KeywordSequence            	10031259	        23.34 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Discard            	      27	   8299035 ns/op	  81.84 MB/s	       1 B/op	       0 allocs/op
+Benchmark_Parser_Next_Reduce             	      26	   8683161 ns/op	  78.22 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_AnyToAny           	  590846	       406.1 ns/op	  68.94 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_CRLF               	  592158	       405.9 ns/op	  71.45 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_IPv6Targets        	  475222	       508.3 ns/op	 100.33 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_TenNetworks        	  162178	      1475 ns/op	 118.68 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_TenOptions         	   93456	      2566 ns/op	  71.70 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_OptionsAfterTarget 	  110132	      2181 ns/op	  74.74 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Comment            	 3603704	        66.31 ns/op	 588.16 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_CommentLong        	 1000000	       200.7 ns/op	20424.34 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_InlineCommentLong  	  351942	       683.5 ns/op	6039.80 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Label              	 3488071	        68.84 ns/op	 290.52 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/yanet-platform/ipfw-go
+cpu: Intel(R) Xeon(R) CPU E5-2683 v4 @ 2.10GHz
+Benchmark_Group_Braced                   	 1497543	       160.0 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Group_Lone                     	 4490497	        53.40 ns/op	       0 B/op	       0 allocs/op
+Benchmark_ParseU32_Maximum               	 8422251	        28.47 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Lex_KeywordSequence            	10256346	        23.45 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Discard            	      27	   8322636 ns/op	  81.60 MB/s	       1 B/op	       0 allocs/op
+Benchmark_Parser_Next_Reduce             	      26	   8740155 ns/op	  77.71 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_AnyToAny           	  593946	       406.6 ns/op	  68.87 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_CRLF               	  568831	       405.1 ns/op	  71.58 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_IPv6Targets        	  477630	       503.6 ns/op	 101.27 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_TenNetworks        	  163082	      1471 ns/op	 118.93 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_TenOptions         	   93118	      2573 ns/op	  71.52 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_OptionsAfterTarget 	  110269	      2176 ns/op	  74.91 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Comment            	 3636187	        65.94 ns/op	 591.43 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_CommentLong        	 1000000	       201.2 ns/op	20376.00 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_InlineCommentLong  	  351878	       681.0 ns/op	6061.42 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Label              	 3485488	        68.65 ns/op	 291.35 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/yanet-platform/ipfw-go
+cpu: Intel(R) Xeon(R) CPU E5-2683 v4 @ 2.10GHz
+Benchmark_Group_Braced                   	 1459668	       163.1 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Group_Lone                     	 4481404	        53.61 ns/op	       0 B/op	       0 allocs/op
+Benchmark_ParseU32_Maximum               	 8388034	        29.88 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Lex_KeywordSequence            	10071967	        23.60 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Discard            	      27	   8436175 ns/op	  80.51 MB/s	       1 B/op	       0 allocs/op
+Benchmark_Parser_Next_Reduce             	      26	   8814627 ns/op	  77.05 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_AnyToAny           	  586290	       422.1 ns/op	  66.34 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_CRLF               	  573514	       415.9 ns/op	  69.73 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_IPv6Targets        	  470296	       523.1 ns/op	  97.50 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_TenNetworks        	  162586	      1497 ns/op	 116.88 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_TenOptions         	   92844	      2604 ns/op	  70.65 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_OptionsAfterTarget 	   88558	      2296 ns/op	  71.00 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Comment            	 3551005	        66.69 ns/op	 584.78 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_CommentLong        	 1000000	       202.0 ns/op	20295.10 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_InlineCommentLong  	  351224	       684.9 ns/op	6027.36 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Label              	 3490692	        72.90 ns/op	 274.36 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/yanet-platform/ipfw-go
+cpu: Intel(R) Xeon(R) CPU E5-2683 v4 @ 2.10GHz
+Benchmark_Group_Braced                   	 1481510	       161.8 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Group_Lone                     	 4446632	        54.26 ns/op	       0 B/op	       0 allocs/op
+Benchmark_ParseU32_Maximum               	 8386401	        28.66 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Lex_KeywordSequence            	10220379	        23.95 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Discard            	      27	   8513092 ns/op	  79.78 MB/s	       1 B/op	       0 allocs/op
+Benchmark_Parser_Next_Reduce             	      26	   8812000 ns/op	  77.07 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_AnyToAny           	  588565	       408.1 ns/op	  68.61 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_CRLF               	  589052	       407.9 ns/op	  71.10 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_IPv6Targets        	  475780	       511.0 ns/op	  99.79 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_TenNetworks        	  161794	      1498 ns/op	 116.85 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_TenOptions         	   92222	      2609 ns/op	  70.52 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_OptionsAfterTarget 	  109594	      2236 ns/op	  72.91 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Comment            	 3228285	        69.74 ns/op	 559.23 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_CommentLong        	 1000000	       204.3 ns/op	20062.95 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_InlineCommentLong  	  350211	       694.2 ns/op	5946.50 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Label              	 3452522	        69.40 ns/op	 288.17 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/yanet-platform/ipfw-go
+cpu: Intel(R) Xeon(R) CPU E5-2683 v4 @ 2.10GHz
+Benchmark_Group_Braced                   	 1479696	       161.7 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Group_Lone                     	 4472559	        53.79 ns/op	       0 B/op	       0 allocs/op
+Benchmark_ParseU32_Maximum               	 8381500	        28.61 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Lex_KeywordSequence            	10212864	        23.43 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Discard            	      27	   8337332 ns/op	  81.46 MB/s	       1 B/op	       0 allocs/op
+Benchmark_Parser_Next_Reduce             	      25	   8791961 ns/op	  77.25 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_AnyToAny           	  579759	       406.8 ns/op	  68.83 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_CRLF               	  594580	       405.6 ns/op	  71.50 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_IPv6Targets        	  477110	       508.9 ns/op	 100.21 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_TenNetworks        	  159294	      1500 ns/op	 116.64 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_TenOptions         	   90686	      2588 ns/op	  71.11 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_OptionsAfterTarget 	  110266	      2183 ns/op	  74.66 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Comment            	 3624997	        66.64 ns/op	 585.24 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_CommentLong        	 1000000	       205.9 ns/op	19903.11 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_InlineCommentLong  	  349233	       689.4 ns/op	5988.03 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Label              	 3454792	        70.13 ns/op	 285.19 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/yanet-platform/ipfw-go
+cpu: Intel(R) Xeon(R) CPU E5-2683 v4 @ 2.10GHz
+Benchmark_Group_Braced                   	 1493300	       160.5 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Group_Lone                     	 4492748	        53.44 ns/op	       0 B/op	       0 allocs/op
+Benchmark_ParseU32_Maximum               	 8436104	        28.47 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Lex_KeywordSequence            	10267878	        23.33 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Discard            	      27	   8341394 ns/op	  81.42 MB/s	       1 B/op	       0 allocs/op
+Benchmark_Parser_Next_Reduce             	      26	   8740203 ns/op	  77.71 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_AnyToAny           	  594231	       405.4 ns/op	  69.06 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_CRLF               	  596492	       404.4 ns/op	  71.72 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_IPv6Targets        	  477740	       504.1 ns/op	 101.18 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_TenNetworks        	  163594	      1473 ns/op	 118.84 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_TenOptions         	   93140	      2575 ns/op	  71.45 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_OptionsAfterTarget 	  110176	      2184 ns/op	  74.65 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Comment            	 3632511	        66.03 ns/op	 590.65 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_CommentLong        	 1000000	       201.2 ns/op	20369.29 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_InlineCommentLong  	  354379	       683.1 ns/op	6042.89 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Label              	 3490124	        68.84 ns/op	 290.54 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/yanet-platform/ipfw-go
+cpu: Intel(R) Xeon(R) CPU E5-2683 v4 @ 2.10GHz
+Benchmark_Group_Braced                   	 1495652	       160.1 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Group_Lone                     	 4468345	        53.67 ns/op	       0 B/op	       0 allocs/op
+Benchmark_ParseU32_Maximum               	 8385204	        28.77 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Lex_KeywordSequence            	10236465	        23.42 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Discard            	      27	   8325372 ns/op	  81.58 MB/s	       1 B/op	       0 allocs/op
+Benchmark_Parser_Next_Reduce             	      27	   8693984 ns/op	  78.12 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_AnyToAny           	  594981	       404.7 ns/op	  69.18 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_CRLF               	  595306	       404.1 ns/op	  71.77 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_IPv6Targets        	  478440	       503.8 ns/op	 101.23 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_TenNetworks        	  163352	      1471 ns/op	 118.97 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_TenOptions         	   93525	      2567 ns/op	  71.69 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_OptionsAfterTarget 	  109999	      2177 ns/op	  74.88 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Comment            	 3637562	        65.96 ns/op	 591.30 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_CommentLong        	 1000000	       201.5 ns/op	20340.21 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_InlineCommentLong  	  350895	       682.4 ns/op	6049.66 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Label              	 3493102	        68.98 ns/op	 289.96 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/yanet-platform/ipfw-go
+cpu: Intel(R) Xeon(R) CPU E5-2683 v4 @ 2.10GHz
+Benchmark_Group_Braced                   	 1498122	       160.0 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Group_Lone                     	 4496863	        53.38 ns/op	       0 B/op	       0 allocs/op
+Benchmark_ParseU32_Maximum               	 8400504	        28.46 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Lex_KeywordSequence            	10286526	        23.28 ns/op	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Discard            	      27	   8304442 ns/op	  81.78 MB/s	       1 B/op	       0 allocs/op
+Benchmark_Parser_Next_Reduce             	      26	   8664297 ns/op	  78.39 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_AnyToAny           	  595350	       404.0 ns/op	  69.30 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_CRLF               	  519153	       404.9 ns/op	  71.61 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_IPv6Targets        	  475527	       505.0 ns/op	 100.98 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_TenNetworks        	  162570	      1474 ns/op	 118.71 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_TenOptions         	   93687	      2889 ns/op	  63.70 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_OptionsAfterTarget 	  108828	      2203 ns/op	  73.99 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Comment            	 3612750	        66.42 ns/op	 587.19 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_CommentLong        	 1000000	       203.4 ns/op	20154.24 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_InlineCommentLong  	  345846	       687.7 ns/op	6002.78 MB/s	       0 B/op	       0 allocs/op
+Benchmark_Parser_Next_Label              	 3481370	        68.87 ns/op	 290.40 MB/s	       0 B/op	       0 allocs/op
+PASS

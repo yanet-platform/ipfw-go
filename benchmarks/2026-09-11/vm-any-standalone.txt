@@ -1,0 +1,220 @@
+goos: linux
+goarch: amd64
+pkg: github.com/yanet-platform/ipfw-go/vm
+cpu: Intel(R) Xeon(R) CPU E5-2683 v4 @ 2.10GHz
+Benchmark_VM_Check_FirstRule         	 4034062	        58.91 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_LastRule          	    8338	     28860 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_NoRule            	    8360	     28736 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/1         	 3315117	        72.15 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/64        	  118603	      2016 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/1024      	    7813	     30816 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/1         	 2820972	        87.63 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/64        	  100676	      2343 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/1024      	    6554	     36640 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/OrLast           	  241315	       992.0 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/ListLast         	  265074	       912.4 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/NegatedMember    	  258978	       911.7 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/NegatedOutside   	  262838	       911.2 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_CheckTrace_SourceReject           	    6741	     35729 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_Jumps                       	   18758	     12717 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_EveryMatcher                	  353884	       678.5 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Build_Large                       	     100	   2507510 ns/op	  28.12 MB/s	 2863003 B/op	     535 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/yanet-platform/ipfw-go/vm
+cpu: Intel(R) Xeon(R) CPU E5-2683 v4 @ 2.10GHz
+Benchmark_VM_Check_FirstRule         	 4030064	        58.99 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_LastRule          	    8287	     28961 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_NoRule            	    8294	     28927 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/1         	 3285362	        72.75 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/64        	  118120	      2025 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/1024      	    7756	     30971 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/1         	 2911569	        87.24 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/64        	  100849	      2361 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/1024      	    6518	     37006 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/OrLast           	  240472	      1000 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/ListLast         	  264020	       910.8 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/NegatedMember    	  263689	       908.1 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/NegatedOutside   	  245269	       914.0 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_CheckTrace_SourceReject           	    6708	     35776 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_Jumps                       	   18708	     12810 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_EveryMatcher                	  352656	       679.3 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Build_Large                       	     100	   2514430 ns/op	  28.04 MB/s	 2863002 B/op	     535 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/yanet-platform/ipfw-go/vm
+cpu: Intel(R) Xeon(R) CPU E5-2683 v4 @ 2.10GHz
+Benchmark_VM_Check_FirstRule         	 4043677	        58.73 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_LastRule          	    8284	     29058 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_NoRule            	    8350	     29174 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/1         	 2936676	        75.39 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/64        	  119226	      2016 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/1024      	    7686	     31062 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/1         	 2857419	        84.46 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/64        	  101174	      2347 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/1024      	    6548	     36665 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/OrLast           	  242704	       988.9 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/ListLast         	  264884	       908.5 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/NegatedMember    	  262231	       903.8 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/NegatedOutside   	  261079	       906.6 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_CheckTrace_SourceReject           	    6703	     35757 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_Jumps                       	   18902	     12678 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_EveryMatcher                	  353631	       677.7 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Build_Large                       	      99	   2639523 ns/op	  26.71 MB/s	 2863002 B/op	     535 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/yanet-platform/ipfw-go/vm
+cpu: Intel(R) Xeon(R) CPU E5-2683 v4 @ 2.10GHz
+Benchmark_VM_Check_FirstRule         	 4049545	        58.69 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_LastRule          	    8342	     28770 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_NoRule            	    8258	     28897 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/1         	 3300735	        72.90 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/64        	  117634	      2019 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/1024      	    7737	     30937 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/1         	 2667896	        89.66 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/64        	  101048	      2356 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/1024      	    6522	     36783 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/OrLast           	  242251	       993.5 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/ListLast         	  264418	       916.2 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/NegatedMember    	  265723	       903.4 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/NegatedOutside   	  265286	       909.7 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_CheckTrace_SourceReject           	    6696	     35790 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_Jumps                       	   18890	     12730 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_EveryMatcher                	  341173	       694.9 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Build_Large                       	     100	   2561782 ns/op	  27.52 MB/s	 2863003 B/op	     535 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/yanet-platform/ipfw-go/vm
+cpu: Intel(R) Xeon(R) CPU E5-2683 v4 @ 2.10GHz
+Benchmark_VM_Check_FirstRule         	 3955143	        60.67 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_LastRule          	    8004	     29718 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_NoRule            	    8121	     29818 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/1         	 3152217	        78.23 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/64        	  114721	      2093 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/1024      	    7617	     32355 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/1         	 2860645	        88.58 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/64        	   99784	      2435 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/1024      	    6108	     37555 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/OrLast           	  238784	      1003 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/ListLast         	  245266	       937.2 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/NegatedMember    	  240490	       931.7 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/NegatedOutside   	  261553	       952.2 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_CheckTrace_SourceReject           	    6417	     36406 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_Jumps                       	   18502	     13148 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_EveryMatcher                	  335079	       704.6 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Build_Large                       	      96	   3148437 ns/op	  22.39 MB/s	 2863004 B/op	     535 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/yanet-platform/ipfw-go/vm
+cpu: Intel(R) Xeon(R) CPU E5-2683 v4 @ 2.10GHz
+Benchmark_VM_Check_FirstRule         	 3704228	        61.47 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_LastRule          	    8254	     29552 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_NoRule            	    8121	     29216 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/1         	 3258684	        73.11 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/64        	  109531	      2049 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/1024      	    7527	     33036 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/1         	 2804401	        90.67 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/64        	   88827	      2455 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/1024      	    6424	     39080 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/OrLast           	  218143	      1051 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/ListLast         	  250681	       983.9 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/NegatedMember    	  242916	       968.7 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/NegatedOutside   	  250398	       966.5 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_CheckTrace_SourceReject           	    6686	     36352 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_Jumps                       	   18308	     13120 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_EveryMatcher                	  354494	       715.9 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Build_Large                       	      99	   2748742 ns/op	  25.65 MB/s	 2863003 B/op	     535 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/yanet-platform/ipfw-go/vm
+cpu: Intel(R) Xeon(R) CPU E5-2683 v4 @ 2.10GHz
+Benchmark_VM_Check_FirstRule         	 4029693	        58.80 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_LastRule          	    8265	     29013 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_NoRule            	    8347	     28879 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/1         	 3304580	        72.23 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/64        	  118688	      2012 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/1024      	    7759	     30889 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/1         	 2921341	        82.16 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/64        	  101383	      2345 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/1024      	    6559	     36809 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/OrLast           	  240967	       991.1 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/ListLast         	  266086	       906.2 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/NegatedMember    	  266430	       903.7 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/NegatedOutside   	  266067	       910.9 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_CheckTrace_SourceReject           	    6690	     35906 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_Jumps                       	   18848	     12715 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_EveryMatcher                	  346702	       693.5 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Build_Large                       	      99	   2731014 ns/op	  25.81 MB/s	 2863003 B/op	     535 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/yanet-platform/ipfw-go/vm
+cpu: Intel(R) Xeon(R) CPU E5-2683 v4 @ 2.10GHz
+Benchmark_VM_Check_FirstRule         	 4027669	        58.83 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_LastRule          	    8332	     28876 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_NoRule            	    8342	     28968 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/1         	 3307501	        72.17 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/64        	  119100	      2011 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/1024      	    7707	     30802 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/1         	 2742958	        88.38 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/64        	  100812	      2345 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/1024      	    6505	     36633 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/OrLast           	  243033	       989.2 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/ListLast         	  264027	       905.0 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/NegatedMember    	  266436	       900.5 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/NegatedOutside   	  264832	       905.2 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_CheckTrace_SourceReject           	    6630	     35761 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_Jumps                       	   18572	     12908 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_EveryMatcher                	  352972	       689.2 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Build_Large                       	      98	   2810535 ns/op	  25.08 MB/s	 2863003 B/op	     535 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/yanet-platform/ipfw-go/vm
+cpu: Intel(R) Xeon(R) CPU E5-2683 v4 @ 2.10GHz
+Benchmark_VM_Check_FirstRule         	 4035970	        58.92 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_LastRule          	    8103	     28894 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_NoRule            	    8250	     28940 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/1         	 3292336	        72.71 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/64        	  119113	      2029 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/1024      	    7720	     31057 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/1         	 2645844	        89.76 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/64        	  100606	      2355 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/1024      	    6506	     36867 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/OrLast           	  242433	       989.5 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/ListLast         	  264332	       906.2 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/NegatedMember    	  265846	       903.6 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/NegatedOutside   	  264710	       906.7 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_CheckTrace_SourceReject           	    6294	     35840 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_Jumps                       	   18884	     12680 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_EveryMatcher                	  354387	       678.2 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Build_Large                       	      98	   2449768 ns/op	  28.78 MB/s	 2863003 B/op	     535 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/yanet-platform/ipfw-go/vm
+cpu: Intel(R) Xeon(R) CPU E5-2683 v4 @ 2.10GHz
+Benchmark_VM_Check_FirstRule         	 4020051	        59.13 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_LastRule          	    8226	     29382 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_NoRule            	    8047	     28975 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/1         	 3266748	        73.04 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/64        	  115718	      2034 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv4/1024      	    7755	     31243 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/1         	 2864787	        85.78 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/64        	  100665	      2354 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceReject/IPv6/1024      	    6548	     37064 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/OrLast           	  242682	       989.3 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/ListLast         	  264580	       925.4 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/NegatedMember    	  267133	       916.4 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_SourceList/NegatedOutside   	  264195	       924.0 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_CheckTrace_SourceReject           	    6697	     35878 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_Jumps                       	   18740	     12758 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Check_EveryMatcher                	  354945	       678.7 ns/op	       0 B/op	       0 allocs/op
+Benchmark_VM_Build_Large                       	     100	   2689285 ns/op	  26.22 MB/s	 2863003 B/op	     535 allocs/op
+PASS

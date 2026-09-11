@@ -1,0 +1,63 @@
+diff --git a/vm/vm.go b/vm/vm.go
+index ffccc32..f91c435 100644
+--- a/vm/vm.go
++++ b/vm/vm.go
+@@ -194,6 +194,11 @@ func (m *program[V4, V6]) Close(open rule) rule {
+ 	open.SourcePorts.End = uint32(len(m.sourcePorts))
+ 	open.DestinationPorts.End = uint32(len(m.destinationPorts))
+ 	open.Options.End = uint32(len(m.options))
++	sources := m.Sources(open.Sources)
++	open.SourceAny = len(sources) == 1 && sources[0].Kind == ipfw.TargetAny && !sources[0].Neg
++	destinations := m.Destinations(open.Destinations)
++	open.DestinationAny = len(destinations) == 1 &&
++		destinations[0].Kind == ipfw.TargetAny && !destinations[0].Neg
+ 	return open
+ }
+ 
+@@ -286,6 +291,10 @@ type rule struct {
+ 	Kind ipfw.ActionKind
+ 	// TableArg is whether a skipto takes its target from the options.
+ 	TableArg bool
++	// SourceAny is whether the source is a single unnegated any.
++	SourceAny bool
++	// DestinationAny is whether the destination is a single unnegated any.
++	DestinationAny bool
+ 	// Jump is the index of the rule a matching skipto continues at, always
+ 	// past this one: the next rule until the jump is linked.
+ 	Jump uint32
+@@ -767,10 +776,11 @@ func (m *VM[V4, V6]) matches(
+ 	if !rule.Protos.Empty() && !matchProtos(program.Protos(rule.Protos), fields.Protocol) {
+ 		return false, noTarget
+ 	}
+-	if !m.matchTargets(program.Sources(rule.Sources), ctx, fields.Source) {
++	if !rule.SourceAny && !m.matchTargets(program.Sources(rule.Sources), ctx, fields.Source) {
+ 		return false, noTarget
+ 	}
+-	if !m.matchTargets(program.Destinations(rule.Destinations), ctx, fields.Destination) {
++	if !rule.DestinationAny &&
++		!m.matchTargets(program.Destinations(rule.Destinations), ctx, fields.Destination) {
+ 		return false, noTarget
+ 	}
+ 	if !rule.SourcePorts.Empty() {
+@@ -1013,10 +1023,10 @@ func (m *VM[V4, V6]) matchTargets(
+ ) bool {
+ 	idx := 0
+ 	for idx < len(targets) {
+-		first := targets[idx]
++		first := &targets[idx]
+ 		hit := m.matchTarget(first, ctx, addr)
+ 		for idx++; idx < len(targets) && targets[idx].Pattern == first.Pattern; idx++ {
+-			hit = hit || m.matchTarget(targets[idx], ctx, addr)
++			hit = hit || m.matchTarget(&targets[idx], ctx, addr)
+ 		}
+ 		if hit != first.Neg {
+ 			return true
+@@ -1030,7 +1040,7 @@ func (m *VM[V4, V6]) matchTargets(
+ // me and me6 are the context's addresses of the packet's family, a
+ // missing table holds nothing.
+ func (m *VM[V4, V6]) matchTarget(
+-	target ipfw.TargetMatch[V4, V6],
++	target *ipfw.TargetMatch[V4, V6],
+ 	ctx *Context,
+ 	addr netip.Addr,
+ ) bool {

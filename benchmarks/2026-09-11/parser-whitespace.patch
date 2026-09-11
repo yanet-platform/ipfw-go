@@ -1,0 +1,35 @@
+diff --git a/lex.go b/lex.go
+index 4c4b509..4cf80dd 100644
+--- a/lex.go
++++ b/lex.go
+@@ -80,18 +80,24 @@ func takeWhile(s string, f func(byte) bool) (string, string) {
+ }
+ 
+ func ws0(s string) string {
+-	_, rest := takeWhile(s, isWS)
+-	return rest
++	idx := 0
++	for idx < len(s) && isWS(s[idx]) {
++		idx++
++	}
++	return s[idx:]
+ }
+ 
+ func ws1(s string) (string, bool) {
+-	taken, rest := takeWhile(s, isWS)
+-	return rest, taken != ""
++	rest := ws0(s)
++	return rest, len(rest) != len(s)
+ }
+ 
+ func skipSpace(s string) string {
+-	_, rest := takeWhile(s, isASCIISpace)
+-	return rest
++	idx := 0
++	for idx < len(s) && isASCIISpace(s[idx]) {
++		idx++
++	}
++	return s[idx:]
+ }
+ 
+ func token(s string) (string, string) {
