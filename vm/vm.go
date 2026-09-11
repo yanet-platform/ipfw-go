@@ -761,11 +761,20 @@ func (m *VM[V4, V6]) matches(
 	fields *packetFields,
 ) (bool, int) {
 	program := &m.program
-	if !rule.IPProtos.Empty() && !matchIPProtos(program.IPProtos(rule.IPProtos), fields.Version) {
-		return false, noTarget
-	}
-	if !rule.Protos.Empty() && !matchProtos(program.Protos(rule.Protos), fields.Protocol) {
-		return false, noTarget
+	hasIPProtos := !rule.IPProtos.Empty()
+	hasProtos := !rule.Protos.Empty()
+	if hasIPProtos && hasProtos {
+		if !matchIPProtos(program.IPProtos(rule.IPProtos), fields.Version) &&
+			!matchProtos(program.Protos(rule.Protos), fields.Protocol) {
+			return false, noTarget
+		}
+	} else {
+		if hasIPProtos && !matchIPProtos(program.IPProtos(rule.IPProtos), fields.Version) {
+			return false, noTarget
+		}
+		if hasProtos && !matchProtos(program.Protos(rule.Protos), fields.Protocol) {
+			return false, noTarget
+		}
 	}
 	if !m.matchTargets(program.Sources(rule.Sources), ctx, fields.Source) {
 		return false, noTarget
