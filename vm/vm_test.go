@@ -652,6 +652,55 @@ func Test_VM_Check_Ports(t *testing.T) {
 	}
 }
 
+// verifies that IP-family and transport members of one protocol group are
+// alternatives rather than independent requirements.
+func Test_VM_Check_MixedProtocolGroup(t *testing.T) {
+	src := ruleset(`
+		add pass { ip4 or tcp } from any to any
+		add deny ip from any to any
+	`)
+	machine := build(t, src, none)
+	source4 := netip.MustParseAddr("192.0.2.1")
+	destination4 := netip.MustParseAddr("192.0.2.2")
+	source6 := netip.MustParseAddr("2001:db8::1")
+	destination6 := netip.MustParseAddr("2001:db8::2")
+	cases := []struct {
+		name    string
+		packet  vm.Packet
+		verdict ipfw.Action
+	}{
+		{
+			name:    "IPv4 UDP matches family",
+			packet:  vm.NewIPv4Packet(source4, destination4).WithUDP(50000, 22),
+			verdict: pass,
+		},
+		{
+			name:    "IPv4 TCP matches both",
+			packet:  tcp4("192.0.2.1", "192.0.2.2"),
+			verdict: pass,
+		},
+		{
+			name: "IPv6 TCP matches transport",
+			packet: vm.NewIPv6Packet(source6, destination6).WithTCP(
+				ipfw.TCPSyn,
+				50000,
+				22,
+			),
+			verdict: pass,
+		},
+		{
+			name:    "IPv6 UDP matches neither",
+			packet:  vm.NewIPv6Packet(source6, destination6).WithUDP(50000, 22),
+			verdict: deny,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.verdict, machine.Check(&vm.Context{}, tc.packet))
+		})
+	}
+}
+
 // verifies that service names are resolved into ports on the way in.
 func Test_VM_Build_ServiceNames(t *testing.T) {
 	src := ruleset(`
