@@ -4,7 +4,7 @@ Guidance for AI coding agents working on `ipfw`. Facts about the code, build and
 
 ## Project
 
-`ipfw` (`github.com/yanet-platform/ipfw-go`, Go 1.24) is a **stdlib-only runtime** port of the Rust `ipfw` crate at `../ipfw`: a streaming, zero-copy parser for the FreeBSD/macOS `ipfw(8)` ruleset format plus a virtual machine that evaluates a packet against the ruleset. Package `ipfw` holds the parser, the token types, `State` and the typed layer (`Environment`, `Resolver`, `VMState`), package `vm` the VM. Tests use `testify`, `rapid` and `xnetip`. `README.md` shows the layers and the deviations from the Rust crate and from FreeBSD.
+`ipfw` (`github.com/yanet-platform/ipfw-go`, Go 1.24) is a **stdlib-only runtime** implementation of the FreeBSD/macOS `ipfw(8)` ruleset format: a streaming, zero-copy parser plus a virtual machine that evaluates a packet against the ruleset. Package `ipfw` holds the parser, the token types, `State` and the typed layer (`Environment`, `Resolver`, `VMState`), package `vm` the VM. Tests use `testify`, `rapid` and `xnetip`. `README.md` shows the layers and the documented deviations from FreeBSD.
 
 ## Layout
 
@@ -34,7 +34,7 @@ make hooks                                      # once per clone: git config cor
 - **No `unsafe`, no cgo, no reflection in runtime code.**
 - **Zero-copy, allocation-free parse and match paths.** Input is a `string`; every emitted name is a sub-slice of it. Building a VM may allocate. Hot paths carry a `testing.AllocsPerRun == 0` test.
 - **Strict parsing.** Unparseable input is a positioned `*ParseError`; never drop or guess a token.
-- **Semantics follow the Rust crate** except for the deviations listed in `README.md`. Never edit `../ipfw`.
+- **Semantics follow the public FreeBSD/macOS documentation and upstream source** except for the deviations listed in `README.md`.
 
 ## Comments and docs — without fanaticism
 
@@ -57,7 +57,7 @@ The policy is `.agents/conventions/comments.md`: a brief of 1–2 lines, then, o
 - Names: `Test_<What>_<Case>` (`Test_Parser_Next_Comment`, `Test_ParseOptions_OrGroup`), `Benchmark_<What>_<Case>`, `Fuzz_<What>_<Case>`; examples `Example<Type>_<Method>` (Go fixes that shape).
 - Each test carries a one-line `// verifies that …` brief.
 - `require` by default, `assert` for several independent checks; `(t, expected, actual)` order. Table cases have self-describing `name:`s.
-- Assert the **full** collected state (`ReduceState`/`RuleState` literal) and the exact remaining input / consumed length — the Rust tests do, and it is what catches silent token drops.
+- Assert the **full** collected state (`ReduceState`/`RuleState` literal) and the exact remaining input / consumed length; this is what catches silent token drops.
 - `rapid.Check` for properties with simple oracles; native fuzzing for the parser entry points and `MatchIfMask`; seed corpora are checked in.
 - Benchmarks and fuzz targets live in the same `_test.go` file as the unit tests of the code they exercise — no separate `*_bench_test.go` or `fuzz_test.go` files.
 - One style per unit. The parser is tested as a black box (`package ipfw_test`) through `Next` and the exported sub-parsers, unexported helpers are covered indirectly. Only the lexer (`lex_test.go`) is white-box, having no exported surface.
@@ -65,7 +65,7 @@ The policy is `.agents/conventions/comments.md`: a brief of 1–2 lines, then, o
 
 ## Session protocol (TDD, one feature per session)
 
-1. Read the Rust code the feature mirrors fresh, tests included: they are the spec.
+1. Read the relevant public FreeBSD/macOS documentation and upstream source fresh: they are the spec unless `README.md` documents a deviation.
 2. Write the feature's tests first and watch them fail (a compile error is not a failing test — add the minimal stubs).
 3. Implement until `make test` is green, then `make lint`.
 4. Commit — one commit per feature.

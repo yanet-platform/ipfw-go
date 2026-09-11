@@ -24,7 +24,7 @@ Every comment, a `//` line above a statement or a doc comment, has two parts: a 
 - Comment the why and the invariant, not the code. Delete comments that restate the line below, describe the obvious or paraphrase the function body. A type's doc never repeats what its field docs say. Unexported helpers get a comment only when they carry a non-obvious contract. Constants in a documented block need their own line only when the name does not say it all.
 - No code identifiers in prose: a comment states intent, invariants and contracts in domain terms and never names internal functions, fields, variables or locals, which restates the code and rots on every rename. Write "a failed update leaves the prior config intact", not "if update returns err, the config is unchanged". Two exceptions: a doc comment opens with its own symbol's name, and another symbol is named when the relationship to it is the contract, the `ErrorKind` a parser fails with or the `TargetKind` a token gets being part of it.
 - No comment is a substitute for a name: if the brief is "this returns the foo", rename the symbol instead.
-- No references to Rust files or line numbers in shipped code. Examples go in `Example*` test functions, not in doc comments.
+- No references to external source files or line numbers in shipped code. Examples go in `Example*` test functions, not in doc comments.
 
 ## Prose
 
