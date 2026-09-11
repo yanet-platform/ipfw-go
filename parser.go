@@ -136,7 +136,7 @@ func (m *Parser) parseLine(text string, state State) (string, fail) {
 	}
 	if !commanded {
 		if rest, ok := prefix(s, "#"); ok {
-			record.Comment, rest = takeWhile(rest, isNotNewline)
+			record.Comment, rest = takeLine(rest)
 			record.Comment = trimRightSpace(record.Comment)
 			record.Kind = RecordComment
 			s = rest
@@ -170,7 +170,7 @@ func parseLineEnd(s string) (string, bool) {
 // hookLine hands a line the grammar does not know to the command hook, the
 // record becoming the hook's and the rest starting where it stopped.
 func (m *Parser) hookLine(s string, state State) (string, fail) {
-	line, _ := takeWhile(s, isNotNewline)
+	line, _ := takeLine(s)
 	rec, n, err := m.opts.CommandHook(line, state)
 	n = min(max(n, 0), len(line))
 	if err != nil {
@@ -357,7 +357,7 @@ func parseInlineComment(s string) (string, string) {
 	if !ok {
 		return "", s
 	}
-	comment, rest := takeWhile(rest, isNotNewline)
+	comment, rest := takeLine(rest)
 	return trimRightSpace(comment), rest
 }
 
@@ -468,8 +468,12 @@ func parseTableType(s string) (TableType, string, ErrorKind) {
 	return TableTypeUnset, s, ErrExpectedTableType
 }
 
-func isNotNewline(c byte) bool {
-	return c != '\n'
+// takeLine leaves the newline for the line-ending parser.
+func takeLine(s string) (string, string) {
+	if idx := strings.IndexByte(s, '\n'); idx >= 0 {
+		return s[:idx], s[idx:]
+	}
+	return s, ""
 }
 
 func physicalLine(text string) string {
