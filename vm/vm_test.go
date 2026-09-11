@@ -234,6 +234,24 @@ func Test_VM_Check_Compat(t *testing.T) {
 			verdict: deny,
 		},
 		{
+			name: "negated any source never matches",
+			rules: ruleset(`
+				add pass ip from not any to any
+				add deny ip from any to any
+			`),
+			packet:  tcp4("192.0.2.1", "203.0.113.1"),
+			verdict: deny,
+		},
+		{
+			name: "negated any destination never matches",
+			rules: ruleset(`
+				add pass ip from any to not any
+				add deny ip from any to any
+			`),
+			packet:  tcp4("192.0.2.1", "203.0.113.1"),
+			verdict: deny,
+		},
+		{
 			name: "network and negation",
 			rules: ruleset(`
 				add deny ip from not 192.0.2.0/24 to any
