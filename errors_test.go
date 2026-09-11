@@ -23,6 +23,16 @@ func Test_ErrorKind_Error(t *testing.T) {
 			message: "expected `add`, `table`, a `:label` or a `#` comment",
 		},
 		{name: "expected command", kind: ipfw.ErrExpectedCommand, message: "expected command"},
+		{
+			name:    "state option in group",
+			kind:    ipfw.ErrStateOptionInGroup,
+			message: "state-producing option in OR block",
+		},
+		{
+			name:    "duplicate state option",
+			kind:    ipfw.ErrDuplicateStateOption,
+			message: "more than one state-producing option",
+		},
 		{name: "expected from", kind: ipfw.ErrExpectedFrom, message: "expected `from`"},
 		{name: "expected prefix", kind: ipfw.ErrExpectedPrefix, message: "unexpected token"},
 		{name: "expected action", kind: ipfw.ErrExpectedAction, message: "expected action"},
@@ -167,7 +177,7 @@ func Test_ErrorKind_Error(t *testing.T) {
 // kinds share one, so a message identifies its kind.
 func Test_ErrorKind_MessagesAreDistinct(t *testing.T) {
 	seen := map[string]ipfw.ErrorKind{}
-	for kind := ipfw.ErrorKind(1); kind <= ipfw.ErrExpectedTag; kind++ {
+	for kind := ipfw.ErrorKind(1); kind <= ipfw.ErrDuplicateStateOption; kind++ {
 		message := kind.Error()
 		require.NotEmpty(t, message, "kind %d", kind)
 		require.NotContains(t, message, "unknown error kind", "kind %d", kind)

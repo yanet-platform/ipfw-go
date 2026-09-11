@@ -446,6 +446,26 @@ func Test_ParseOptions_Table(t *testing.T) {
 			options: []ipfw.Opt{{Kind: ipfw.OptKeepState}, {Kind: ipfw.OptIn}},
 		},
 		{
+			name:    "duplicate keep-state",
+			input:   "in keep-state keep-state out",
+			n:       14,
+			err:     ipfw.ErrDuplicateStateOption,
+			options: []ipfw.Opt{{Kind: ipfw.OptIn}, {Kind: ipfw.OptKeepState}},
+		},
+		{
+			name:  "keep-state first in a group",
+			input: "{ keep-state or in }",
+			n:     2,
+			err:   ipfw.ErrStateOptionInGroup,
+		},
+		{
+			name:    "keep-state after an option in a group",
+			input:   "{ in or keep-state }",
+			n:       8,
+			err:     ipfw.ErrStateOptionInGroup,
+			options: []ipfw.Opt{{Kind: ipfw.OptIn}},
+		},
+		{
 			name:    "keep-state with an empty flow",
 			input:   "keep-state :",
 			n:       11,
@@ -768,6 +788,48 @@ func Test_ParseOptions_StateError(t *testing.T) {
 	n, err := ipfw.ParseOptions("established", state, nil)
 	require.Equal(t, 0, n)
 	require.Equal(t, ipfw.ErrExpectedOpt, err)
+}
+
+// verifies that state-producing options returned by a hook obey the same
+// placement and uniqueness rules as built-in options.
+func Test_ParseOptions_HookKeepState(t *testing.T) {
+	cases := []struct {
+		name    string
+		input   string
+		n       int
+		err     error
+		options []ipfw.Opt
+	}{
+		{
+			name:    "duplicate after built-in",
+			input:   "keep-state state-option",
+			n:       11,
+			err:     ipfw.ErrDuplicateStateOption,
+			options: []ipfw.Opt{{Kind: ipfw.OptKeepState}},
+		},
+		{
+			name:  "hook option in group",
+			input: "{ state-option or in }",
+			n:     2,
+			err:   ipfw.ErrStateOptionInGroup,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var state ipfw.ReduceState
+			n, err := ipfw.ParseOptions(tc.input, &state, stateOption)
+			require.Equal(t, tc.n, n)
+			require.Equal(t, tc.err, err)
+			require.Equal(t, tc.options, state.Options)
+		})
+	}
+}
+
+func stateOption(rest string) (ipfw.Opt, int, error) {
+	if !strings.HasPrefix(rest, "state-option") {
+		return ipfw.Opt{}, 0, nil
+	}
+	return ipfw.Opt{Kind: ipfw.OptKeepState}, len("state-option"), nil
 }
 
 // verifies that parsing an option list with an or-group into a warmed-up

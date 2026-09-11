@@ -335,7 +335,8 @@ func (m *Parser) parseBody(s string, state State) (string, fail) {
 	// falls back to ports. A token that is not a port leaves the input where
 	// the destination ended, a port the state refuses fails the line.
 	if buf, ok := ws1(rest); ok {
-		_, err = parseOptionGroup(buf, DiscardState{}, m.opts.OptionHook)
+		var ctx optionContext
+		_, err = parseOptionGroup(&ctx, buf, DiscardState{}, m.opts.OptionHook)
 		if !err.Failed() || err.Kind != ErrUnknownOption {
 			return parseOptions(buf, state, m.opts.OptionHook)
 		}
