@@ -2223,6 +2223,49 @@ func Test_VM_Check_CustomOption(t *testing.T) {
 	require.Equal(t, 41, parseErr.Column)
 }
 
+// verifies that a decided option expression does not invoke a later custom matcher.
+func Test_VM_Check_OptionShortCircuit_Custom(t *testing.T) {
+	calls := 0
+	matcher := func(ipfw.Opt, *vm.Context, vm.Packet) bool {
+		calls++
+		return false
+	}
+	cases := []struct {
+		name      string
+		option    string
+		direction vm.Direction
+		verdict   ipfw.Action
+	}{
+		{
+			name:      "successful OR term",
+			option:    "{ in or setup }",
+			direction: vm.In,
+			verdict:   pass,
+		},
+		{
+			name:      "failed AND term",
+			option:    "out setup",
+			direction: vm.In,
+			verdict:   deny,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			calls = 0
+			src := ruleset("\nadd pass ip from any to any " + tc.option +
+				"\nadd deny ip from any to any\n")
+			machine, err := vm.Build(
+				ipfw.NewParser(src, ipfw.WithOptionHook(setupHook)),
+				vm.Config[net4, net6]{Environment: resolving, OptionMatcher: matcher},
+			)
+			require.NoError(t, err)
+			packet := tcp4("192.0.2.1", "192.0.2.2")
+			require.Equal(t, tc.verdict, machine.Check(&vm.Context{Direction: tc.direction}, packet))
+			require.Zero(t, calls)
+		})
+	}
+}
+
 // verifies that a check through the custom matcher allocates nothing.
 func Test_VM_CustomOption_NoAllocs(t *testing.T) {
 	src := ruleset(`
@@ -2286,6 +2329,42 @@ func Test_VM_Check_PolicyOptions(t *testing.T) {
 			require.Equal(t, tc.out, machine.Check(&vm.Context{Direction: vm.Out}, packet))
 		})
 	}
+}
+
+type countingTableRegistry struct {
+	vm.TableRegistry[net4, net6]
+	lookupInterfaceCalls int
+}
+
+// LookupInterface records an interface lookup before delegating it.
+func (m *countingTableRegistry) LookupInterface(table, ifname string) (string, bool) {
+	m.lookupInterfaceCalls++
+	return m.TableRegistry.LookupInterface(table, ifname)
+}
+
+// LookupInterfaceCalls returns how many interface lookups were delegated.
+func (m *countingTableRegistry) LookupInterfaceCalls() int {
+	return m.lookupInterfaceCalls
+}
+
+// verifies that a successful OR member suppresses a later tablearg lookup and jump.
+func Test_VM_Check_OptionShortCircuit_TableArg(t *testing.T) {
+	tables := &countingTableRegistry{
+		TableRegistry: vm.NewDefaultTableRegistry[net4, net6](),
+	}
+	src := ruleset(`
+		table jump create type iface
+		table jump add vlan0 :ALLOW
+		add skipto tablearg ip from any to any { in or via table(jump) }
+		add deny ip from any to any
+		:ALLOW
+		add pass ip from any to any
+	`)
+	machine := build(t, src, vm.Config[net4, net6]{Tables: tables})
+	packet := tcp4("192.0.2.1", "192.0.2.2")
+	ctx := &vm.Context{Direction: vm.In, IfName: "vlan0"}
+	require.Equal(t, deny, machine.Check(ctx, packet))
+	require.Zero(t, tables.LookupInterfaceCalls())
 }
 
 // verifies that via table(NAME) matches an interface the table lists and
