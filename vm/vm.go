@@ -822,7 +822,8 @@ const noTarget = -1
 //
 // A port list is tested before its negation and outer group membership are
 // applied. A successful term skips its remaining alternatives, while a failed
-// completed term rejects the rule. The target is the first one an option yields.
+// completed term rejects the rule. The target comes from the last successful
+// table lookup that was evaluated.
 func (m *VM[V4, V6]) matchOptions(
 	options []ipfw.Opt,
 	ctx *Context,
@@ -839,7 +840,8 @@ func (m *VM[V4, V6]) matchOptions(
 			return false, noTarget
 		}
 		raw, found := m.matchOption(opt, ctx, pkt, fields)
-		if target == noTarget {
+		if found != noTarget ||
+			(raw && opt.Kind == ipfw.OptVia && opt.Via.Kind == ipfw.ViaTable) {
 			target = found
 		}
 		portList := opt.Kind == ipfw.OptSourcePort || opt.Kind == ipfw.OptDestinationPort
@@ -852,10 +854,7 @@ func (m *VM[V4, V6]) matchOptions(
 			if raw {
 				continue
 			}
-			raw, found = m.matchOption(next, ctx, pkt, fields)
-			if target == noTarget {
-				target = found
-			}
+			raw, _ = m.matchOption(next, ctx, pkt, fields)
 		}
 		hit := raw != opt.Neg
 		if opt.Or {
