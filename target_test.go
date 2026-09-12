@@ -13,8 +13,8 @@ import (
 //
 // A token runs up to whitespace, a closing brace or a comma. The keywords
 // `any`, `me` and `me6`, IPv4 and IPv6 network text, hostnames and
-// `table(NAME)` are the known shapes, any other token is custom and only an
-// empty one is an error.
+// `table(NAME)` are the known shapes. Any other token is custom, while an
+// empty token or table name is an error.
 func Test_ParseTargets_Table(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -377,10 +377,8 @@ func Test_ParseTargets_Table(t *testing.T) {
 		{
 			name:  "table with an empty name",
 			input: "table() to any",
-			n:     7,
-			state: ipfw.ReduceState{
-				Sources: []ipfw.Target{{Kind: ipfw.TargetTable, Text: ""}},
-			},
+			n:     0,
+			err:   ipfw.ErrExpectedTableName,
 		},
 		{
 			name:  "negated table",

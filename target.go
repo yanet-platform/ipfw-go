@@ -149,8 +149,8 @@ func isTargetByte(c byte) bool {
 	return !isASCIISpace(c) && c != '}' && c != ','
 }
 
-// classifyTarget tells the kind of a target from its shape without parsing
-// it, an empty token being the only error.
+// classifyTarget tells the kind of a target from its shape without parsing it.
+// Empty tokens and empty table names are errors.
 func classifyTarget(token string) (Target, ErrorKind) {
 	if token == "" {
 		return Target{}, ErrExpectedTarget
@@ -164,6 +164,9 @@ func classifyTarget(token string) (Target, ErrorKind) {
 		return Target{Kind: TargetMe}, 0
 	}
 	if name, ok := tableName(token); ok {
+		if name == "" {
+			return Target{}, ErrExpectedTableName
+		}
 		return Target{Kind: TargetTable, Text: name}, 0
 	}
 	if isNetwork6Text(token) {
