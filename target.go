@@ -87,6 +87,7 @@ func parseTargetElement(
 	if kind != 0 {
 		return s, fail{Kind: kind, At: rest}
 	}
+	family := target.Kind
 	target.Neg, target.Pattern = neg, pattern
 	if err := failFrom(emitTarget(state, side, target), rest); err.Failed() {
 		return s, err
@@ -106,6 +107,10 @@ func parseTargetElement(
 		token, afterTarget = scanTargetToken(rest)
 		target, kind = classifyTarget(token)
 		if kind != 0 || !isAddressListTarget(target) {
+			return s, fail{Kind: ErrExpectedTarget, At: rest}
+		}
+		if family == TargetNetwork4 && target.Kind == TargetNetwork6 ||
+			family == TargetNetwork6 && target.Kind == TargetNetwork4 {
 			return s, fail{Kind: ErrExpectedTarget, At: rest}
 		}
 		target.Neg, target.Pattern = neg, pattern

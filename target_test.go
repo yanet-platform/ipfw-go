@@ -165,6 +165,26 @@ func Test_ParseTargets_Table(t *testing.T) {
 			},
 		},
 		{
+			name:  "IPv4 address list rejects IPv6",
+			input: "192.0.2.1,2001:db8::1 to any",
+			n:     10,
+			err:   ipfw.ErrExpectedTarget,
+			state: ipfw.ReduceState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"}},
+			},
+		},
+		{
+			name:  "negated IPv4 address list rejects IPv6",
+			input: "not 192.0.2.1,2001:db8::1 to any",
+			n:     14,
+			err:   ipfw.ErrExpectedTarget,
+			state: ipfw.ReduceState{
+				Sources: []ipfw.Target{
+					{Neg: true, Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"},
+				},
+			},
+		},
+		{
 			name:  "IPv4 network with a suffix is custom",
 			input: "192.0.2.0/24abc to any",
 			n:     15,
@@ -249,6 +269,26 @@ func Test_ParseTargets_Table(t *testing.T) {
 				Sources: []ipfw.Target{
 					{Kind: ipfw.TargetNetwork6, Text: "2001:db8::1"},
 					{Kind: ipfw.TargetNetwork6, Text: "2001:db8::2"},
+				},
+			},
+		},
+		{
+			name:  "IPv6 address list rejects IPv4",
+			input: "2001:db8::1,192.0.2.1 to any",
+			n:     12,
+			err:   ipfw.ErrExpectedTarget,
+			state: ipfw.ReduceState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetNetwork6, Text: "2001:db8::1"}},
+			},
+		},
+		{
+			name:  "negated IPv6 address list rejects IPv4",
+			input: "not 2001:db8::1,192.0.2.1 to any",
+			n:     16,
+			err:   ipfw.ErrExpectedTarget,
+			state: ipfw.ReduceState{
+				Sources: []ipfw.Target{
+					{Neg: true, Kind: ipfw.TargetNetwork6, Text: "2001:db8::1"},
 				},
 			},
 		},
@@ -477,6 +517,15 @@ func Test_ParseTargets_Table(t *testing.T) {
 				{Kind: ipfw.TargetHostname, Text: "host.example.com"},
 				{Pattern: 1, Kind: ipfw.TargetCustom, Text: "_X_"},
 				{Pattern: 2, Kind: ipfw.TargetTable, Text: "t"},
+			}},
+		},
+		{
+			name:  "group mixes address families",
+			input: "{ 192.0.2.1 or 2001:db8::1 } x",
+			n:     28,
+			state: ipfw.ReduceState{Sources: []ipfw.Target{
+				{Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"},
+				{Pattern: 1, Kind: ipfw.TargetNetwork6, Text: "2001:db8::1"},
 			}},
 		},
 		{
