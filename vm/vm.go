@@ -821,8 +821,8 @@ const noTarget = -1
 // matchOptions folds the options left to right after combining each port list.
 //
 // A port list is tested before its negation and outer group membership are
-// applied. An option starting a term must find the previous term true, one
-// marked Or extends the term. The target is the first one an option yields.
+// applied. A successful term skips its remaining alternatives, while a failed
+// completed term rejects the rule. The target is the first one an option yields.
 func (m *VM[V4, V6]) matchOptions(
 	options []ipfw.Opt,
 	ctx *Context,
@@ -832,6 +832,12 @@ func (m *VM[V4, V6]) matchOptions(
 	term, target := true, noTarget
 	for idx := 0; idx < len(options); idx++ {
 		opt := &options[idx]
+		if opt.Or && term {
+			continue
+		}
+		if !opt.Or && !term {
+			return false, noTarget
+		}
 		raw, found := m.matchOption(opt, ctx, pkt, fields)
 		if target == noTarget {
 			target = found
@@ -855,9 +861,6 @@ func (m *VM[V4, V6]) matchOptions(
 		if opt.Or {
 			term = term || hit
 			continue
-		}
-		if !term {
-			return false, noTarget
 		}
 		term = hit
 	}
