@@ -83,9 +83,9 @@ func parseTargetElement(
 ) (string, fail) {
 	rest, neg := notWS1(s)
 	token, afterTarget := scanTargetToken(rest)
-	target, kind := classifyTarget(token)
+	target, kind, errorOffset := classifyTarget(token)
 	if kind != 0 {
-		return s, fail{Kind: kind, At: rest}
+		return s, fail{Kind: kind, At: rest[errorOffset:]}
 	}
 	family := target.Kind
 	target.Neg, target.Pattern = neg, pattern
@@ -105,9 +105,9 @@ func parseTargetElement(
 			return rest, fail{}
 		}
 		token, afterTarget = scanTargetToken(rest)
-		target, kind = classifyTarget(token)
+		target, kind, errorOffset = classifyTarget(token)
 		if kind != 0 || !isAddressListTarget(target) {
-			return s, fail{Kind: ErrExpectedTarget, At: rest}
+			return s, fail{Kind: ErrExpectedTarget, At: rest[errorOffset:]}
 		}
 		if family == TargetNetwork4 && target.Kind == TargetNetwork6 ||
 			family == TargetNetwork6 && target.Kind == TargetNetwork4 {
@@ -155,48 +155,56 @@ func isTargetByte(c byte) bool {
 }
 
 // classifyTarget tells the kind of a target from its shape without parsing it.
-// Empty tokens and empty table names are errors.
-func classifyTarget(token string) (Target, ErrorKind) {
+// Failures include their byte offset within the token.
+func classifyTarget(token string) (Target, ErrorKind, int) {
 	if token == "" {
-		return Target{}, ErrExpectedTarget
+		return Target{}, ErrExpectedTarget, 0
 	}
 	switch token {
 	case "any":
-		return Target{Kind: TargetAny}, 0
+		return Target{Kind: TargetAny}, 0, 0
 	case "me6":
-		return Target{Kind: TargetMe6}, 0
+		return Target{Kind: TargetMe6}, 0, 0
 	case "me":
-		return Target{Kind: TargetMe}, 0
+		return Target{Kind: TargetMe}, 0, 0
 	}
-	if name, ok := tableName(token); ok {
+	if name, end, ok := tableName(token); ok {
 		if name == "" {
-			return Target{}, ErrExpectedTableName
+			return Target{}, ErrExpectedTableName, 0
 		}
-		return Target{Kind: TargetTable, Text: name}, 0
+		if end != len(token) {
+			return Target{}, ErrExpectedTarget, end
+		}
+		return Target{Kind: TargetTable, Text: name}, 0, 0
 	}
 	if isNetwork6Text(token) {
-		return Target{Kind: TargetNetwork6, Text: token}, 0
+		return Target{Kind: TargetNetwork6, Text: token}, 0, 0
 	}
 	if isNetwork4Text(token) {
-		return Target{Kind: TargetNetwork4, Text: token}, 0
+		return Target{Kind: TargetNetwork4, Text: token}, 0, 0
 	}
 	if token[0] == '`' {
-		return classifyQuotedHostname(token)
+		target, kind := classifyQuotedHostname(token)
+		return target, kind, 0
 	}
 	if isHostnameText(token) {
-		return Target{Kind: TargetHostname, Text: token}, 0
+		return Target{Kind: TargetHostname, Text: token}, 0, 0
 	}
-	return Target{Kind: TargetCustom, Text: token}, 0
+	return Target{Kind: TargetCustom, Text: token}, 0, 0
 }
 
-// tableName returns the name inside a `table(NAME)` token, an empty name
-// included, and false for any other token.
-func tableName(token string) (string, bool) {
+// tableName returns the name before the first closing parenthesis and its end.
+// An empty name is included, while an unclosed token is not a table reference.
+func tableName(token string) (string, int, bool) {
 	inside, ok := prefix(token, "table(")
-	if !ok || !strings.HasSuffix(inside, ")") {
-		return "", false
+	if !ok {
+		return "", 0, false
 	}
-	return inside[:len(inside)-1], true
+	closing := strings.IndexByte(inside, ')')
+	if closing < 0 {
+		return "", 0, false
+	}
+	return inside[:closing], len("table(") + closing + 1, true
 }
 
 // classifyQuotedHostname strips the backtick and the closing quote of a
