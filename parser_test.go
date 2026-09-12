@@ -605,6 +605,26 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 			},
 		},
 		{
+			name:  "IPv4 source list contains IPv6",
+			input: "add pass ip from 192.0.2.1,2001:db8::1 to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedTarget,
+				Line:   1,
+				Column: 27,
+				Text:   "add pass ip from 192.0.2.1,2001:db8::1 to any",
+			},
+		},
+		{
+			name:  "IPv6 destination list contains IPv4",
+			input: "add pass ip from any to 2001:db8::1,192.0.2.1",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedTarget,
+				Line:   1,
+				Column: 36,
+				Text:   "add pass ip from any to 2001:db8::1,192.0.2.1",
+			},
+		},
+		{
 			name:  "nothing after to",
 			input: "add allow ip from any to\n",
 			expected: ipfw.ParseError{
