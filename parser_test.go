@@ -535,6 +535,26 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 			},
 		},
 		{
+			name:  "target negation before a closing brace",
+			input: "add pass ip from { not} to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedTarget,
+				Line:   1,
+				Column: 22,
+				Text:   "add pass ip from { not} to any",
+			},
+		},
+		{
+			name:  "target negation after a group alternative",
+			input: "add pass ip from { any or not} to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedTarget,
+				Line:   1,
+				Column: 29,
+				Text:   "add pass ip from { any or not} to any",
+			},
+		},
+		{
 			name:  "target group left open",
 			input: "add pass ip from { any",
 			expected: ipfw.ParseError{

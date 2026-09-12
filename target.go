@@ -81,7 +81,7 @@ func parseTargetElement(
 	side bodySide,
 	pattern uint16,
 ) (string, fail) {
-	rest, neg := notWS1(s)
+	rest, neg := targetNot(s)
 	token, afterTarget := scanTargetToken(rest)
 	target, kind, errorOffset := classifyTarget(token)
 	if kind != 0 {
@@ -118,6 +118,19 @@ func parseTargetElement(
 			return s, err
 		}
 	}
+}
+
+// A `not` ending a target alternative starts negation even without an operand,
+// so a dangling operator fails instead of becoming a custom target.
+func targetNot(s string) (string, bool) {
+	rest, ok := notPrefix(s)
+	if !ok || rest != "" && rest[0] != '}' && !isASCIISpace(rest[0]) {
+		return s, false
+	}
+	if afterSpace, ok := ws1(rest); ok {
+		return afterSpace, true
+	}
+	return rest, true
 }
 
 // isAddressListTarget reports whether the target can be an address-list member.

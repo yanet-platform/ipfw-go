@@ -525,6 +525,37 @@ func Test_ParseTargets_Table(t *testing.T) {
 				Sources: []ipfw.Target{{Neg: true, Kind: ipfw.TargetCustom, Text: "foo"}},
 			},
 		},
+		{
+			name:  "not is a dangling negation",
+			input: "not",
+			n:     3,
+			err:   ipfw.ErrExpectedTarget,
+		},
+		{
+			name:  "not before a newline is a dangling negation",
+			input: "not\n",
+			n:     3,
+			err:   ipfw.ErrExpectedTarget,
+		},
+		{
+			name:  "not can be a negated custom target",
+			input: "not not x",
+			n:     7,
+			state: ipfw.ReduceState{
+				Sources: []ipfw.Target{{Neg: true, Kind: ipfw.TargetCustom, Text: "not"}},
+			},
+		},
+		{
+			name:  "not before a comma is a custom target",
+			input: "not,foo x",
+			n:     7,
+			state: ipfw.ReduceState{
+				Sources: []ipfw.Target{
+					{Kind: ipfw.TargetCustom, Text: "not"},
+					{Kind: ipfw.TargetCustom, Text: "foo"},
+				},
+			},
+		},
 		{name: "empty input", input: "", n: 0, err: ipfw.ErrExpectedTarget},
 		{name: "empty group", input: "{ } x", n: 2, err: ipfw.ErrExpectedTarget},
 		{name: "closing brace alone", input: "} x", n: 0, err: ipfw.ErrExpectedTarget},
@@ -582,6 +613,19 @@ func Test_ParseTargets_Table(t *testing.T) {
 			state: ipfw.ReduceState{
 				Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "notany"}},
 			},
+		},
+		{
+			name:  "not before a closing brace",
+			input: "{ not}",
+			n:     5,
+			err:   ipfw.ErrExpectedTarget,
+		},
+		{
+			name:  "not after a group alternative",
+			input: "{ any or not}",
+			n:     12,
+			err:   ipfw.ErrExpectedTarget,
+			state: ipfw.ReduceState{Sources: []ipfw.Target{{Kind: ipfw.TargetAny}}},
 		},
 		{
 			name:  "missing or keeps the first element",
