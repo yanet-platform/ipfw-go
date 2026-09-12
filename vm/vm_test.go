@@ -1290,8 +1290,8 @@ func Test_VM_Check_TCPFlags(t *testing.T) {
 	}
 }
 
-// verifies that icmptypes and icmp6types match the type of an ICMP packet
-// of their family when it is in the set, and nothing else.
+// verifies that ICMP type options match reported types, with icmp6types
+// additionally restricted to IPv6 packets.
 func Test_VM_Check_ICMPTypes(t *testing.T) {
 	icmp := func(ty uint8) vm.Packet {
 		return vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")).WithICMP(ty, 0)
@@ -1299,6 +1299,16 @@ func Test_VM_Check_ICMPTypes(t *testing.T) {
 	icmp6 := func(ty uint8) vm.Packet {
 		return vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8::2")).WithICMP6(ty, 0)
 	}
+	icmp6OverIPv4 := vm.NewIPv4Packet(
+		netip.MustParseAddr("192.0.2.1"),
+		netip.MustParseAddr("192.0.2.2"),
+	)
+	icmp6OverIPv4[9], icmp6OverIPv4[20] = 58, 128
+	icmpOverIPv6 := vm.NewIPv6Packet(
+		netip.MustParseAddr("2001:db8::1"),
+		netip.MustParseAddr("2001:db8::2"),
+	)
+	icmpOverIPv6[6], icmpOverIPv6[40] = 1, 8
 	cases := []struct {
 		name    string
 		rules   string
@@ -1340,6 +1350,15 @@ func Test_VM_Check_ICMPTypes(t *testing.T) {
 			`),
 			packet:  icmp6(8),
 			verdict: deny,
+		},
+		{
+			name: "icmptypes against IPv6 protocol one",
+			rules: ruleset(`
+				add allow ip from any to any icmptypes 8
+				add deny ip from any to any
+			`),
+			packet:  icmpOverIPv6,
+			verdict: pass,
 		},
 		{
 			name: "not icmptypes, type in the set",
@@ -1384,6 +1403,15 @@ func Test_VM_Check_ICMPTypes(t *testing.T) {
 				add deny ip from any to any
 			`),
 			packet:  icmp(128),
+			verdict: deny,
+		},
+		{
+			name: "icmp6types against IPv4 protocol 58",
+			rules: ruleset(`
+				add allow ip from any to any icmp6types 128
+				add deny ip from any to any
+			`),
+			packet:  icmp6OverIPv4,
 			verdict: deny,
 		},
 	}

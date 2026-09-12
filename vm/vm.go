@@ -871,8 +871,8 @@ func (m *VM[V4, V6]) matchOptions(
 // its set and clear requirements, src-port and dst-port a packet whose port
 // is in the range, proto one of the protocol number, in and out the direction
 // of the check, via the context's interface by name, by mask or through a
-// table, frag a non-first fragment, icmptypes and icmp6types an ICMP packet
-// of the family with a type in the set.
+// table, frag a non-first fragment, icmptypes a packet reporting an ICMP type
+// in the set, and icmp6types an IPv6 packet reporting an ICMPv6 type in the set.
 // The options the VM does not emulate follow matchPolicy, a custom one
 // the configured matcher, which sees the packet itself.
 func (m *VM[V4, V6]) matchOption(
@@ -916,7 +916,8 @@ func (m *VM[V4, V6]) matchOption(
 		return fields.HasICMPType && opt.Types.Has(fields.ICMPType), noTarget
 	case ipfw.OptICMP6Types:
 		fields.ReadICMP(pkt)
-		return fields.HasICMP6Type && opt.Types.Has(fields.ICMP6Type), noTarget
+		return fields.Version == IPv6 && fields.HasICMP6Type &&
+			opt.Types.Has(fields.ICMP6Type), noTarget
 	}
 	return false, noTarget
 }
