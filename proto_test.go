@@ -24,8 +24,8 @@ func ipProtos(matches ...ipfw.ProtoIPMatch) ipfw.ReduceState {
 // verifies that the protocol parser feeds the state, reports the consumed
 // length, and positions a failure at the element start.
 //
-// A protocol is a number only when it is all digits and fits a byte, a
-// name otherwise, an overflowing number included.
+// A protocol is a number only when it is all digits, positive and fits a
+// byte. Zero and overflowing numbers are names.
 func Test_ParseProtocols_Table(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -39,6 +39,12 @@ func Test_ParseProtocols_Table(t *testing.T) {
 			input: "8 x",
 			n:     1,
 			state: protos(ipfw.ProtoMatch{Proto: ipfw.Proto{Number: 8}}),
+		},
+		{
+			name:  "zero is a name",
+			input: "0 x",
+			n:     1,
+			state: protos(ipfw.ProtoMatch{Proto: ipfw.Proto{Name: "0"}}),
 		},
 		{
 			name:  "name",
@@ -312,10 +318,10 @@ func Test_ParseProtocols_IPKeywords(t *testing.T) {
 	}
 }
 
-// verifies that every byte value formatted in decimal parses as a number.
+// verifies that every positive byte value formatted in decimal parses as a number.
 func Test_ParseProtocols_NumberRoundTrip(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		number := rapid.Uint8().Draw(t, "number")
+		number := uint8(rapid.IntRange(1, 255).Draw(t, "number"))
 		text := strconv.FormatUint(uint64(number), 10)
 		var state ipfw.ReduceState
 		n, err := ipfw.ParseProtocols(text+" x", &state)

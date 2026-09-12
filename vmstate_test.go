@@ -433,6 +433,12 @@ func Test_Resolver_Errors(t *testing.T) {
 			expected:  ipfw.ParseError{Kind: ipfw.ErrUnresolvedProto, Line: 1, Column: 10, Text: "add allow gre from any to any"},
 		},
 		{
+			name:      "protocol zero in body",
+			input:     "add allow 0 from any to any\n",
+			resolvers: everything,
+			expected:  ipfw.ParseError{Kind: ipfw.ErrUnresolvedProto, Line: 1, Column: 10, Text: "add allow 0 from any to any"},
+		},
+		{
 			name:      "service name without a resolver",
 			input:     "add allow ip from any ssh to any\n",
 			resolvers: networksOnly,
@@ -455,6 +461,12 @@ func Test_Resolver_Errors(t *testing.T) {
 			input:     "add allow ip from any to any proto gre\n",
 			resolvers: everything,
 			expected:  ipfw.ParseError{Kind: ipfw.ErrUnresolvedProto, Line: 1, Column: 35, Text: "add allow ip from any to any proto gre"},
+		},
+		{
+			name:      "protocol zero in an option",
+			input:     "add allow ip from any to any proto 0\n",
+			resolvers: everything,
+			expected:  ipfw.ParseError{Kind: ipfw.ErrUnresolvedProto, Line: 1, Column: 35, Text: "add allow ip from any to any proto 0"},
 		},
 		{
 			name:      "hostname without a resolver",

@@ -416,6 +416,12 @@ func Test_ParseOptions_Table(t *testing.T) {
 			options: []ipfw.Opt{{Kind: ipfw.OptProto, Proto: ipfw.Proto{Number: 6}}},
 		},
 		{
+			name:    "proto zero is a name",
+			input:   "proto 0",
+			n:       7,
+			options: []ipfw.Opt{{Kind: ipfw.OptProto, Proto: ipfw.Proto{Name: "0"}}},
+		},
+		{
 			name:  "proto without whitespace",
 			input: "proto",
 			n:     5,

@@ -115,16 +115,16 @@ func emitProto(state State, neg bool, proto Proto) error {
 }
 
 // parseProto reads a `[A-Za-z0-9-]+` token, a number only when every byte is
-// a digit and the value fits a byte.
+// a digit and the value is positive and fits a byte.
 //
-// An overflowing number is a name like any other, since custom protocols may
-// be named by digits.
+// Zero and overflowing numbers are names like any other, since custom
+// protocols may be named by digits.
 func parseProto(s string) (Proto, string, ErrorKind) {
 	name, rest := takeWhile(s, isProtoByte)
 	if name == "" {
 		return Proto{}, s, ErrExpectedProto
 	}
-	if number, afterNumber, kind := parseU8(name); kind == 0 && afterNumber == "" {
+	if number, afterNumber, kind := parseU8(name); kind == 0 && afterNumber == "" && number > 0 {
 		return Proto{Number: number}, rest, 0
 	}
 	return Proto{Name: name}, rest, 0

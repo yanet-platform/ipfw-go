@@ -269,6 +269,20 @@ func Test_VM_Check_Compat(t *testing.T) {
 	}
 }
 
+// verifies that `ip` has no transport predicate, including for protocol zero.
+func Test_VM_Check_IPMatchesProtocolZero(t *testing.T) {
+	src := ruleset(`
+		add pass ip from any to any
+		add deny ip from any to any
+	`)
+	machine := build(t, src, none)
+	packet := vm.NewIPv4Packet(
+		netip.MustParseAddr("192.0.2.1"),
+		netip.MustParseAddr("192.0.2.2"),
+	)
+	require.Equal(t, pass, machine.Check(&vm.Context{}, packet))
+}
+
 // verifies that nothing matching yields the default verdict, deny unless
 // configured, and that CheckTrace reports no termination then.
 func Test_VM_Check_DefaultVerdict(t *testing.T) {
