@@ -94,7 +94,7 @@ func parseProtocols(s string, state State) (string, fail) {
 // The whole token decides between an IP version keyword and a transport
 // protocol, which is how `ip` and `ipencap` are told apart.
 func parseProtocolElement(s string, state State) (string, fail) {
-	rest, neg := notWS1(s)
+	rest, neg := protocolNot(s)
 	proto, rest, kind := parseProto(rest)
 	if kind != 0 {
 		return s, fail{Kind: ErrExpectedEitherIPOrProto, At: s}
@@ -103,6 +103,19 @@ func parseProtocolElement(s string, state State) (string, fail) {
 		return s, err
 	}
 	return rest, fail{}
+}
+
+// A whole `not` token starts negation even without an operand, so a dangling
+// operator fails instead of becoming a custom protocol.
+func protocolNot(s string) (string, bool) {
+	rest, ok := notPrefix(s)
+	if !ok || rest != "" && isProtoByte(rest[0]) {
+		return s, false
+	}
+	if afterSpace, ok := ws1(rest); ok {
+		return afterSpace, true
+	}
+	return rest, true
 }
 
 // emitProto hands the protocol to the callback of its kind, an IP version

@@ -136,8 +136,20 @@ func keywordWS1(s, keyword string) (string, bool) {
 	return rest, true
 }
 
+func notPrefix(s string) (string, bool) {
+	return prefix(s, "not")
+}
+
 func notWS1(s string) (string, bool) {
-	return keywordWS1(s, "not")
+	rest, ok := notPrefix(s)
+	if !ok {
+		return s, false
+	}
+	rest, ok = ws1(rest)
+	if !ok {
+		return s, false
+	}
+	return rest, true
 }
 
 // ws1Keyword consumes whitespace followed by the keyword and leaves the

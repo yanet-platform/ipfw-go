@@ -515,6 +515,26 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 			},
 		},
 		{
+			name:  "protocol negation before a closing brace",
+			input: "add pass { not} from any to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedEitherIPOrProto,
+				Line:   1,
+				Column: 11,
+				Text:   "add pass { not} from any to any",
+			},
+		},
+		{
+			name:  "protocol negation after a group alternative",
+			input: "add pass { tcp or not} from any to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedEitherIPOrProto,
+				Line:   1,
+				Column: 18,
+				Text:   "add pass { tcp or not} from any to any",
+			},
+		},
+		{
 			name:  "target group left open",
 			input: "add pass ip from { any",
 			expected: ipfw.ParseError{

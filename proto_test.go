@@ -101,6 +101,24 @@ func Test_ParseProtocols_Table(t *testing.T) {
 			state: protos(ipfw.ProtoMatch{Proto: ipfw.Proto{Name: "nottcp"}}),
 		},
 		{
+			name:  "not prefix before a dash is a name",
+			input: "not-tcp x",
+			n:     7,
+			state: protos(ipfw.ProtoMatch{Proto: ipfw.Proto{Name: "not-tcp"}}),
+		},
+		{
+			name:  "not is not a protocol name",
+			input: "not",
+			n:     0,
+			err:   ipfw.ErrExpectedEitherIPOrProto,
+		},
+		{
+			name:  "not can be a negated custom protocol",
+			input: "not not x",
+			n:     7,
+			state: protos(ipfw.ProtoMatch{Neg: true, Proto: ipfw.Proto{Name: "not"}}),
+		},
+		{
 			name:  "negated number",
 			input: "not 17 x",
 			n:     6,
@@ -163,6 +181,25 @@ func Test_ParseProtocols_Table(t *testing.T) {
 				ipfw.ProtoMatch{Proto: ipfw.Proto{Name: "tcp"}},
 				ipfw.ProtoMatch{Proto: ipfw.Proto{Name: "udp"}},
 			),
+		},
+		{
+			name:  "tight group",
+			input: "{tcp} x",
+			n:     5,
+			state: protos(ipfw.ProtoMatch{Proto: ipfw.Proto{Name: "tcp"}}),
+		},
+		{
+			name:  "not before a closing brace",
+			input: "{ not}",
+			n:     2,
+			err:   ipfw.ErrExpectedEitherIPOrProto,
+		},
+		{
+			name:  "not after a group alternative",
+			input: "{ tcp or not}",
+			n:     9,
+			err:   ipfw.ErrExpectedEitherIPOrProto,
+			state: protos(ipfw.ProtoMatch{Proto: ipfw.Proto{Name: "tcp"}}),
 		},
 		{
 			name:  "group across a newline",
