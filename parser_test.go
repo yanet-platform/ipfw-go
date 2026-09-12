@@ -595,6 +595,26 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 			},
 		},
 		{
+			name:  "text after source table target",
+			input: "add pass ip from table(a)b) to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedTarget,
+				Line:   1,
+				Column: 25,
+				Text:   "add pass ip from table(a)b) to any",
+			},
+		},
+		{
+			name:  "text after destination table target",
+			input: "add pass ip from any to table(a)b)",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedTarget,
+				Line:   1,
+				Column: 32,
+				Text:   "add pass ip from any to table(a)b)",
+			},
+		},
+		{
 			name:  "table name cut at a space breaks the body",
 			input: "add allow ip from table(a b) to any",
 			expected: ipfw.ParseError{

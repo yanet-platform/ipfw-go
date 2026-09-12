@@ -421,6 +421,12 @@ func Test_ParseTargets_Table(t *testing.T) {
 			err:   ipfw.ErrExpectedTableName,
 		},
 		{
+			name:  "table with text after the closing parenthesis",
+			input: "table(a)b) to any",
+			n:     8,
+			err:   ipfw.ErrExpectedTarget,
+		},
+		{
 			name:  "negated table",
 			input: "not table(t) x",
 			n:     12,
