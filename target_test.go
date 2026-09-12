@@ -13,8 +13,9 @@ import (
 //
 // A token runs up to whitespace, a closing brace or a comma. The keywords
 // `any`, `me` and `me6`, IPv4 and IPv6 network text, hostnames and
-// `table(NAME)` are the known shapes. Any other token is custom, while an
-// empty token or table name is an error.
+// `table(NAME)` are the known shapes. Any other non-structural token is custom,
+// while an empty token, an empty table name or a nested opening brace is an
+// error.
 func Test_ParseTargets_Table(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -471,6 +472,18 @@ func Test_ParseTargets_Table(t *testing.T) {
 			input: "{ any } x",
 			n:     7,
 			state: ipfw.ReduceState{Sources: []ipfw.Target{{Kind: ipfw.TargetAny}}},
+		},
+		{
+			name:  "tight braced single",
+			input: "{any} x",
+			n:     5,
+			state: ipfw.ReduceState{Sources: []ipfw.Target{{Kind: ipfw.TargetAny}}},
+		},
+		{
+			name:  "nested group",
+			input: "{ {foo } to any",
+			n:     2,
+			err:   ipfw.ErrExpectedTarget,
 		},
 		{
 			name:  "macro name is custom",
