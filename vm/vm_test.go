@@ -2367,6 +2367,67 @@ func Test_VM_Check_OptionShortCircuit_TableArg(t *testing.T) {
 	require.Zero(t, tables.LookupInterfaceCalls())
 }
 
+// verifies that tablearg uses the last successful lookup that was actually evaluated.
+func Test_VM_Check_TableArgLastLookup(t *testing.T) {
+	cases := []struct {
+		name        string
+		options     string
+		secondValue string
+		first       string
+		second      string
+		verdict     ipfw.Action
+	}{
+		{
+			name:        "second hit replaces negated first hit",
+			options:     "{ not via table(first) or via table(second) }",
+			secondValue: ":SECOND",
+			first:       "deny",
+			second:      "pass",
+			verdict:     pass,
+		},
+		{
+			name:        "miss preserves first hit",
+			options:     "{ not via table(first) or not via table(missing) }",
+			secondValue: ":SECOND",
+			first:       "pass",
+			second:      "deny",
+			verdict:     pass,
+		},
+		{
+			name:        "skipped second hit preserves first hit",
+			options:     "{ via table(first) or via table(second) }",
+			secondValue: ":SECOND",
+			first:       "pass",
+			second:      "deny",
+			verdict:     pass,
+		},
+		{
+			name:        "unresolved second hit clears first hit",
+			options:     "{ not via table(first) or via table(second) }",
+			secondValue: ":MISSING",
+			first:       "pass",
+			second:      "deny",
+			verdict:     deny,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := ruleset("\ntable first create type iface\n" +
+				"table second create type iface\n" +
+				"table first add vlan0 :FIRST\n" +
+				"table second add vlan0 " + tc.secondValue + "\n" +
+				"add skipto tablearg ip from any to any " + tc.options + "\n" +
+				"add deny ip from any to any\n" +
+				":FIRST\nadd " + tc.first + " ip from any to any\n" +
+				":SECOND\nadd " + tc.second + " ip from any to any\n")
+			machine := build(t, src, none)
+			packet := tcp4("192.0.2.1", "192.0.2.2")
+			ctx := &vm.Context{IfName: "vlan0"}
+			require.Equal(t, tc.verdict, machine.Check(ctx, packet))
+		})
+	}
+}
+
 // verifies that via table(NAME) matches an interface the table lists and
 // that skipto tablearg then continues at the label the entry's value names.
 //
