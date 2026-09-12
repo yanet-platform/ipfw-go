@@ -525,6 +525,16 @@ func Test_Parser_Next_BodyProtocol(t *testing.T) {
 			},
 		},
 		{
+			name:  "nested source target group",
+			input: "add pass ip from { {foo } to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedTarget,
+				Line:   1,
+				Column: 19,
+				Text:   "add pass ip from { {foo } to any",
+			},
+		},
+		{
 			name:  "to missing after the source port",
 			input: "add allow tcp from any 22 80 to any",
 			expected: ipfw.ParseError{

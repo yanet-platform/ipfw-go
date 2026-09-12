@@ -160,6 +160,9 @@ func classifyTarget(token string) (Target, ErrorKind, int) {
 	if token == "" {
 		return Target{}, ErrExpectedTarget, 0
 	}
+	if token[0] == '{' {
+		return Target{}, ErrExpectedTarget, 0
+	}
 	switch token {
 	case "any":
 		return Target{Kind: TargetAny}, 0, 0
