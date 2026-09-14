@@ -35,8 +35,8 @@ const (
 	// TableKeyHostname is a name of hostname shape, letters and digits
 	// around a dot, which an interface table takes as an interface name.
 	TableKeyHostname
-	// TableKeyName is any other key, an interface name, a macro or a
-	// hostname with a prefix length among them.
+	// TableKeyName is any other key, including an interface name or a
+	// hostname with a prefix length.
 	TableKeyName
 )
 

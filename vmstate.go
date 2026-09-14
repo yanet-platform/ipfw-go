@@ -70,9 +70,8 @@ type TargetResolver[V4, V6 any] interface {
 	//
 	// An error rejects the target, an ErrorKind keeping its kind. The
 	// slices belong to the resolver and are read before its next call. A
-	// custom target's text is the token as written, a hostname with a
-	// prefix length or a macro among them, whether from a rule or from the
-	// key of an address table.
+	// custom target's text is the token as written, whether from a rule
+	// or from the key of an address table.
 	ResolveTarget(target Target) ([]V4, []V6, error)
 }
 
@@ -153,7 +152,7 @@ type Environment[V4, V6 any] struct {
 // Resolver is the State that resolves every name of a rule body and hands
 // the typed tokens to a VMState.
 //
-// It makes one call per token, a hostname or macro giving one call per
+// It makes one call per token, a hostname or custom target giving one call per
 // network it stands for.
 type Resolver[V4, V6 any] struct {
 	sink        VMState[V4, V6]
