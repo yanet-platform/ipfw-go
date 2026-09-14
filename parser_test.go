@@ -2965,8 +2965,185 @@ func Test_Parser_Next_Options(t *testing.T) {
 		name    string
 		input   string
 		comment string
+		err     *ipfw.ParseError
 		state   ipfw.ReduceState
 	}{
+		{
+			name:  "estab alias immediately after destination",
+			input: "add allow tcp from any to any estab\n",
+			state: ipfw.ReduceState{
+				Protos:       tcp,
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      []ipfw.Opt{established},
+			},
+		},
+		{
+			name:  "fragment alias immediately after destination",
+			input: "add allow ip from any to any fragment\n",
+			state: ipfw.ReduceState{
+				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      []ipfw.Opt{{Kind: ipfw.OptFrag}},
+			},
+		},
+		{
+			name:  "tcpflgs alias immediately after destination",
+			input: "add allow tcp from any to any tcpflgs syn,!ack\n",
+			state: ipfw.ReduceState{
+				Protos:       tcp,
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      []ipfw.Opt{tcpFlags(ipfw.TCPSyn, ipfw.TCPAck)},
+			},
+		},
+		{
+			name:  "icmp6type alias immediately after destination",
+			input: "add allow ip from any to any icmp6type 128,129\n",
+			state: ipfw.ReduceState{
+				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      []ipfw.Opt{icmp6Types(128, 129)},
+			},
+		},
+		{
+			name:  "destination port then aliases",
+			input: "add allow ip from any to any 80 estab fragment tcpflgs syn,!ack icmp6type 128,129\n",
+			state: ipfw.ReduceState{
+				IPProtos:         []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:          anyToAny,
+				Destinations:     anyToAny,
+				DestinationPorts: []ipfw.PortMatch{portNumber(80)},
+				Options: []ipfw.Opt{
+					established,
+					{Kind: ipfw.OptFrag},
+					tcpFlags(ipfw.TCPSyn, ipfw.TCPAck),
+					icmp6Types(128, 129),
+				},
+			},
+		},
+		{
+			name: "aliases preserve lists negation grouping and the following option",
+			input: "add allow ip from any to any { not estab or fragment } " +
+				"not tcpflgs syn, !ack { in or not icmp6type 128, 129 } out\n",
+			state: ipfw.ReduceState{
+				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options: []ipfw.Opt{
+					notOpt(established),
+					{Or: true, Kind: ipfw.OptFrag},
+					notOpt(tcpFlags(ipfw.TCPSyn, ipfw.TCPAck)),
+					{Kind: ipfw.OptIn},
+					orOpt(notOpt(icmp6Types(128, 129))),
+					{Kind: ipfw.OptOut},
+				},
+			},
+		},
+		{
+			name:    "alias before a comment at EOF",
+			input:   "add allow tcp from any to any estab // alias spelling",
+			comment: " alias spelling",
+			state: ipfw.ReduceState{
+				Protos:       tcp,
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      []ipfw.Opt{established},
+			},
+		},
+		{
+			name:  "tcpflgs alias without an argument",
+			input: "add allow tcp from any to any tcpflgs\n",
+			err: &ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 37,
+				Text:   "add allow tcp from any to any tcpflgs",
+			},
+			state: ipfw.ReduceState{
+				Protos:       tcp,
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+			},
+		},
+		{
+			name:  "tcpflgs alias with an invalid later flag",
+			input: "add allow tcp from any to any tcpflgs syn,!bogus\n",
+			err: &ipfw.ParseError{
+				Kind:   ipfw.ErrUnknownTCPFlag,
+				Line:   1,
+				Column: 43,
+				Text:   "add allow tcp from any to any tcpflgs syn,!bogus",
+			},
+			state: ipfw.ReduceState{
+				Protos:       tcp,
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+			},
+		},
+		{
+			name:  "icmp6type alias without an argument",
+			input: "add allow ip from any to any icmp6type\n",
+			err: &ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 38,
+				Text:   "add allow ip from any to any icmp6type",
+			},
+			state: ipfw.ReduceState{
+				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+			},
+		},
+		{
+			name:  "icmp6type alias with a nonnumeric type",
+			input: "add allow ip from any to any icmp6type bogus\n",
+			err: &ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedU8,
+				Line:   1,
+				Column: 39,
+				Text:   "add allow ip from any to any icmp6type bogus",
+			},
+			state: ipfw.ReduceState{
+				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+			},
+		},
+		{
+			name:  "icmp6type alias with an invalid later item",
+			input: "add allow ip from any to any icmp6type 128,202\n",
+			err: &ipfw.ParseError{
+				Kind:   ipfw.ErrUnknownICMP6Type,
+				Line:   1,
+				Column: 43,
+				Text:   "add allow ip from any to any icmp6type 128,202",
+			},
+			state: ipfw.ReduceState{
+				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+			},
+		},
+		{
+			name:  "fragment alias suffix remains trailing content",
+			input: "add allow ip from any to any fragmentx\n",
+			err: &ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedNewlineOrEOF,
+				Line:   1,
+				Column: 37,
+				Text:   "add allow ip from any to any fragmentx",
+			},
+			state: ipfw.ReduceState{
+				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      []ipfw.Opt{{Kind: ipfw.OptFrag}},
+			},
+		},
 		{
 			name:  "established",
 			input: "add allow tcp from any to any established\n",
@@ -3353,16 +3530,20 @@ func Test_Parser_Next_Options(t *testing.T) {
 			parser := ipfw.NewParser(tc.input)
 			var state ipfw.ReduceState
 			rec, err := parser.Next(&state)
-			require.Nil(t, err)
-			require.Equal(t, ipfw.Record{
-				Line: 1,
-				Text: strings.TrimSuffix(tc.input, "\n"),
-				Kind: ipfw.RecordInstruction,
-				Instruction: ipfw.Instruction{
-					Action:        ipfw.Action{Kind: ipfw.ActionPass},
-					InlineComment: tc.comment,
-				},
-			}, *rec)
+			require.Equal(t, tc.err, err)
+			if err == nil {
+				require.Equal(t, ipfw.Record{
+					Line: 1,
+					Text: strings.TrimSuffix(tc.input, "\n"),
+					Kind: ipfw.RecordInstruction,
+					Instruction: ipfw.Instruction{
+						Action:        ipfw.Action{Kind: ipfw.ActionPass},
+						InlineComment: tc.comment,
+					},
+				}, *rec)
+			} else {
+				require.Nil(t, rec)
+			}
 			require.Equal(t, tc.state, state)
 			next(t, parser, eof)
 		})
@@ -3708,7 +3889,11 @@ func Test_Parser_Next_OptionsNoAllocs(t *testing.T) {
 	src := "add pass tcp from any to any 22 established\n" +
 		"add pass tcp from any to any established\n" +
 		"add pass icmp from any to any icmptypes 0,7,31 in\n" +
-		"add pass ip from any to any not icmp6types 0,5,150,201 in\n"
+		"add pass ip from any to any not icmp6types 0,5,150,201 in\n" +
+		"add pass tcp from any to any estab\n" +
+		"add pass ip from any to any fragment\n" +
+		"add pass tcp from any to any tcpflgs syn,!ack\n" +
+		"add pass ip from any to any not icmp6type 128,129 in\n"
 	parser := ipfw.NewParser(src)
 	var state ipfw.ReduceState
 	for _, err := range parser.Records(&state) {
@@ -4106,6 +4291,14 @@ var fuzzSeeds = []string{
 	"add deny ip from any to any not dst-port 22,80 tcpflags syn,!ack icmptypes 0,8\n",
 	"add pass ip from any to any proto tcp via table(t,:L) antispoof frag diverted // c\n",
 	"add allow udp from any src-port 1,2-3,ftp\\-data to any icmp6types 135\n",
+	"add pass tcp from any to any estab\n",
+	"add pass ip from any to any fragment\n",
+	"add pass tcp from any to any tcpflgs syn,!ack\n",
+	"add pass ip from any to any icmp6type 128,129\n",
+	"add pass tcp from any to any tcpflgs\n",
+	"add pass tcp from any to any tcpflgs syn,!bogus\n",
+	"add pass ip from any to any icmp6type\n",
+	"add pass ip from any to any icmp6type 128,202\n",
 	"table _T_ create type iface\n",
 	"table _T_ add 192.0.2.0/24 :L\n",
 	"table _T_ add vlan7\n",

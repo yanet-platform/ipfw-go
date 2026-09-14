@@ -836,10 +836,25 @@ func Test_OptionHook_Precedence(t *testing.T) {
 		calls++
 		return customOptions(rest)
 	}
-	_, err := ipfw.NewParser("add allow tcp from any to any in established\n", ipfw.WithOptionHook(counting)).
-		Next(ipfw.DiscardState{})
+	input := "add allow tcp from any to any " +
+		"in established estab fragment tcpflgs syn,!ack icmp6type 128,129\n"
+	var state ipfw.ReduceState
+	_, err := ipfw.NewParser(input, ipfw.WithOptionHook(counting)).Next(&state)
 	require.Nil(t, err)
 	require.Equal(t, 0, calls)
+	require.Equal(t, ipfw.ReduceState{
+		Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+		Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+		Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+		Options: []ipfw.Opt{
+			{Kind: ipfw.OptIn},
+			{Kind: ipfw.OptEstablished},
+			{Kind: ipfw.OptEstablished},
+			{Kind: ipfw.OptFrag},
+			tcpFlags(ipfw.TCPSyn, ipfw.TCPAck),
+			icmp6Types(128, 129),
+		},
+	}, state)
 
 	_, err = ipfw.NewParser("add allow tcp from any to any setup\n", ipfw.WithOptionHook(counting)).
 		Next(ipfw.DiscardState{})
