@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"pgregory.net/rapid"
 
 	"github.com/yanet-platform/ipfw-go"
 )
@@ -3999,6 +4000,94 @@ func benchmarkNext(b *testing.B, line string, options ...ipfw.ParserOption) {
 		b.Fatal(benchErr)
 	}
 }
+
+// verifies that no exported sub-parser reads past the end of a physical line.
+//
+// The Parser bounds each line itself, so this is the invariant that lets a
+// hook hand a sub-parser the line it was given without trimming it first.
+// Groups are drawn whole because only a well-formed one reaches the code
+// that skips whitespace between elements.
+func Test_SubParsers_LineBounded(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		input := drawGroup(t)
+		if rapid.Bool().Draw(t, "soup") {
+			var builder strings.Builder
+			for range rapid.IntRange(0, 12).Draw(t, "pieces") {
+				builder.WriteString(rapid.SampledFrom(lineBoundedPieces).Draw(t, "piece"))
+			}
+			input = builder.String()
+		}
+		for _, sub := range lineBoundedSubParsers {
+			n, _ := sub.parse(input, ipfw.DiscardState{})
+			require.NotContains(t, input[:n], "\n",
+				"%s read past the end of the line in %q", sub.name, input)
+		}
+	})
+}
+
+// drawGroup builds a brace group whose whitespace runs may hold a newline.
+func drawGroup(t *rapid.T) string {
+	space := func(label string) string {
+		return rapid.SampledFrom(lineBoundedSpaces).Draw(t, label)
+	}
+	element := func(label string) string {
+		return rapid.SampledFrom(lineBoundedElements).Draw(t, label)
+	}
+	var builder strings.Builder
+	builder.WriteString("{")
+	builder.WriteString(space("open"))
+	builder.WriteString(element("first"))
+	for range rapid.IntRange(0, 3).Draw(t, "more") {
+		builder.WriteString(space("before"))
+		builder.WriteString(rapid.SampledFrom([]string{"or", "o", "|"}).Draw(t, "separator"))
+		builder.WriteString(space("after"))
+		builder.WriteString(element("next"))
+	}
+	builder.WriteString(space("close"))
+	builder.WriteString("}")
+	builder.WriteString(rapid.SampledFrom(lineBoundedSuffixes).Draw(t, "suffix"))
+	return builder.String()
+}
+
+// lineBoundedSubParsers are the exported body parsers the line invariant covers.
+var lineBoundedSubParsers = []struct {
+	name  string
+	parse func(string, ipfw.State) (int, error)
+}{
+	{name: "protocols", parse: ipfw.ParseProtocols},
+	{name: "source targets", parse: ipfw.ParseSourceTargets},
+	{name: "destination targets", parse: ipfw.ParseDestinationTargets},
+	{name: "source ports", parse: ipfw.ParseSourcePorts},
+	{name: "destination ports", parse: ipfw.ParseDestinationPorts},
+	{
+		name: "options",
+		parse: func(s string, state ipfw.State) (int, error) {
+			return ipfw.ParseOptions(s, state, nil)
+		},
+	},
+}
+
+var (
+	// lineBoundedSpaces are the whitespace runs drawn between group parts.
+	lineBoundedSpaces = []string{"", " ", "\t", "\n", " \n", "\r\n", " \t", "\n\t"}
+	// lineBoundedElements are what a drawn group holds.
+	lineBoundedElements = []string{
+		"tcp", "udp", "any", "me", "22", "80,443", "192.0.2.0/24", "2001:db8::/32",
+		"table(_T_)", "in", "out", "established", "not tcp", "src-port 22",
+	}
+	// lineBoundedSuffixes follow a drawn group.
+	lineBoundedSuffixes = []string{"", " x", " to any", "\n", " in\nout"}
+	// lineBoundedPieces are drawn into a free-form input, the newlines among
+	// them being what the property is about.
+	lineBoundedPieces = []string{
+		"tcp", "udp", "ip", "any", "me", "22", "80,443", "1-65535",
+		"192.0.2.0/24", "2001:db8::/32", "table(_T_)", "`host.example.com'",
+		"{", "}", "or", " or ", " o ", " | ", ",", " ", "\t", "\n", "\r\n",
+		"not ", "in", "out", "established", "frag", "via vlan1", "via table(_T_,v)",
+		"src-port 22", "dst-port 8080,8443", "proto tcp", "tcpflags syn,!ack",
+		"icmptypes 0,8", "keep-state :flow", "//", "#", "x",
+	}
+)
 
 // fuzzSeeds are one line per syntax form plus the shapes that trip
 // parsers.

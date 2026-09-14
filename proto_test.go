@@ -202,13 +202,11 @@ func Test_ParseProtocols_Table(t *testing.T) {
 			state: protos(ipfw.ProtoMatch{Proto: ipfw.Proto{Name: "tcp"}}),
 		},
 		{
-			name:  "group across a newline",
+			name:  "group ending at the line end",
 			input: "{ tcp or\nudp } x",
-			n:     14,
-			state: protos(
-				ipfw.ProtoMatch{Proto: ipfw.Proto{Name: "tcp"}},
-				ipfw.ProtoMatch{Proto: ipfw.Proto{Name: "udp"}},
-			),
+			n:     8,
+			err:   ipfw.ErrExpectedEitherIPOrProto,
+			state: protos(ipfw.ProtoMatch{Proto: ipfw.Proto{Name: "tcp"}}),
 		},
 		{
 			name:  "group with the deprecated separator",

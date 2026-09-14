@@ -253,7 +253,7 @@ func Test_OpenGroup_Table(t *testing.T) {
 			braced:   true,
 			rest:     "a or b }",
 		},
-		{name: "newline after the brace", input: "{\n\ta }", braced: true, rest: "a }"},
+		{name: "newline ends the group line", input: "{\n\ta }", braced: true, rest: "\n\ta }"},
 		{name: "brace at end of input", input: "{", braced: true, rest: ""},
 		{name: "lone element", input: "a rest", braced: false, rest: "a rest"},
 		{
@@ -280,8 +280,8 @@ func Test_OpenGroup_Table(t *testing.T) {
 // A separator is a whole token: one glued to what follows, `orudp` or `or}`
 // say, is none. Protocol and address groups take `or` with the deprecated
 // `o`, option groups `or` and the pipe. The spaces after a separator are
-// skipped and the failure points at the first non-space byte, the input
-// coming back unchanged.
+// skipped up to the end of the line and the failure points at the first
+// non-space byte, the input coming back unchanged.
 func Test_Group_Next_Table(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -296,11 +296,12 @@ func Test_Group_Next_Table(t *testing.T) {
 		{name: "or then space", braced: true, input: " or b }", rest: "b }", more: true},
 		{name: "tight or", braced: true, input: "or b}", rest: "b}", more: true},
 		{
-			name:   "newlines around or",
+			name:   "or behind a newline",
 			braced: true,
 			input:  "\nor\n\tb }",
-			rest:   "b }",
-			more:   true,
+			rest:   "\nor\n\tb }",
+			kind:   ErrExpectedOr,
+			at:     "\nor\n\tb }",
 		},
 		{name: "or at end of input", braced: true, input: " or", rest: "", more: true},
 		{name: "deprecated o then space", braced: true, input: " o b }", rest: "b }", more: true},
@@ -315,11 +316,12 @@ func Test_Group_Next_Table(t *testing.T) {
 		{name: "closing brace", braced: true, input: " } rest", rest: " rest", more: false},
 		{name: "tight closing brace", braced: true, input: "}", rest: "", more: false},
 		{
-			name:   "closing brace after a newline",
+			name:   "closing brace behind a newline",
 			braced: true,
 			input:  "\n}",
-			rest:   "",
-			more:   false,
+			rest:   "\n}",
+			kind:   ErrExpectedOr,
+			at:     "\n}",
 		},
 		{
 			name:   "separator glued to an element",
@@ -388,12 +390,12 @@ func Test_Group_Next_Table(t *testing.T) {
 			at:     "",
 		},
 		{
-			name:   "spaces then end of input",
+			name:   "spaces then end of line",
 			braced: true,
 			input:  " \n",
 			rest:   " \n",
 			kind:   ErrExpectedOr,
-			at:     "",
+			at:     "\n",
 		},
 		{name: "lone element", braced: false, input: " rest", rest: " rest", more: false},
 		{
@@ -426,9 +428,9 @@ func Test_Group_Next_Table(t *testing.T) {
 // verifies that a group driven the way the parsers drive theirs sees each
 // element once and on failure returns the whole input, pointing at the fault.
 //
-// Any ASCII whitespace inside the braces is skipped. The element here is a
-// run of letters, and an empty run is the element error whose propagation
-// the last cases check.
+// Whitespace inside the braces is skipped up to the end of the line. The
+// element here is a run of letters, and an empty run is the element error
+// whose propagation the last cases check.
 func Test_Group_Loop_Table(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -460,8 +462,10 @@ func Test_Group_Loop_Table(t *testing.T) {
 		{
 			name:     "newline inside the group",
 			input:    "{ a or\nb }",
-			elements: []string{"a", "b"},
-			rest:     "",
+			elements: []string{"a"},
+			kind:     ErrExpectedToken,
+			at:       "\nb }",
+			rest:     "{ a or\nb }",
 		},
 		{
 			name:     "missing separator",

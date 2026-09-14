@@ -76,6 +76,8 @@ for {
 
 Every token keeps its text: a network is `Target{Kind: TargetNetwork4, Text: "192.0.2.0/24"}`, a service is `Port{Name: "ssh"}`. See `ExampleParser_Next`.
 
+A line is the unit of the format, as in FreeBSD file input. No token crosses a newline: a brace group, an address list and an option list all end where their line does, and a group left open is an error rather than a continuation onto the next line. The exported sub-parsers hold to the same rule, so a command hook can pass one the line it was handed without trimming it first.
+
 The first `#` on a physical line starts a comment before the command is parsed, as in FreeBSD file
 input. It may stand alone or follow a rule, table command or label, even without separating
 whitespace.
