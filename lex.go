@@ -102,9 +102,18 @@ func ws1(s string) (string, bool) {
 	return rest, taken != ""
 }
 
+// skipSpace consumes whitespace up to the end of the line.
+//
+// No token in the grammar crosses a newline, the ruleset format being
+// written one command per line. Stopping here is what keeps a group from
+// continuing on the following line.
 func skipSpace(s string) string {
-	_, rest := takeWhile(s, isASCIISpace)
+	_, rest := takeWhile(s, isLineSpace)
 	return rest
+}
+
+func isLineSpace(c byte) bool {
+	return c != '\n' && isASCIISpace(c)
 }
 
 func skipCommaSpace(s string) string {
@@ -233,7 +242,8 @@ const (
 )
 
 // openGroup records the grammar position and consumes an opening brace with
-// its following spaces, leaving a lone element untouched.
+// the spaces after it up to the end of the line, leaving a lone element
+// untouched.
 func openGroup(s string, position groupPosition) (group, string) {
 	rest, ok := prefix(s, "{")
 	if !ok {
@@ -247,7 +257,9 @@ func openGroup(s string, position groupPosition) (group, string) {
 // Inside braces only a complete separator token continues the list, so
 // `orudp` and `or}` are not separators. Anything other than a separator or
 // `}` is ErrExpectedOr at the first non-space byte, the input being returned
-// unchanged. A lone element ends the list with the input untouched.
+// unchanged. A newline is such a byte, so a group left open at the end of a
+// line fails there instead of continuing. A lone element ends the list with
+// the input untouched.
 func (m group) Next(s string) (string, bool, fail) {
 	if !m.Braced {
 		return s, false, fail{}
