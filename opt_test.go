@@ -497,10 +497,23 @@ func Test_ParseOptions_Table(t *testing.T) {
 			options: []ipfw.Opt{icmpTypes(0, 8)},
 		},
 		{
-			name:  "unknown icmp type",
-			input: "icmptypes 7",
+			name:    "icmptypes numeric range followed by an option",
+			input:   "icmptypes 0,7,31 in",
+			n:       19,
+			options: []ipfw.Opt{icmpTypes(0, 7, 31), {Kind: ipfw.OptIn}},
+		},
+		{
+			name:  "icmptypes at the uint8 maximum",
+			input: "icmptypes 255",
 			n:     10,
 			err:   ipfw.ErrUnknownICMPType,
+		},
+		{
+			name:    "icmptypes invalid later item preserves only the preceding option",
+			input:   "in icmptypes 7, 32 out",
+			n:       16,
+			err:     ipfw.ErrUnknownICMPType,
+			options: []ipfw.Opt{{Kind: ipfw.OptIn}},
 		},
 		{
 			name:    "icmptypes with a trailing comma",
@@ -533,22 +546,42 @@ func Test_ParseOptions_Table(t *testing.T) {
 			options: []ipfw.Opt{icmp6Types(128, 135)},
 		},
 		{
-			name:    "icmp6types at the bounds",
+			name:    "icmp6types assigned values",
 			input:   "icmp6types 1,4,149,151,161",
 			n:       26,
 			options: []ipfw.Opt{icmp6Types(1, 4, 149, 151, 161)},
 		},
 		{
-			name:  "unknown icmp6 type in the gap",
-			input: "icmp6types 150",
+			name:    "icmp6types in the former gap",
+			input:   "icmp6types 150",
+			n:       14,
+			options: []ipfw.Opt{icmp6Types(150)},
+		},
+		{
+			name:    "icmp6types numeric range followed by an option",
+			input:   "icmp6types 0,5,150,201 in",
+			n:       25,
+			options: []ipfw.Opt{icmp6Types(0, 5, 150, 201), {Kind: ipfw.OptIn}},
+		},
+		{
+			name:  "icmp6types at the uint8 maximum",
+			input: "icmp6types 255",
 			n:     11,
 			err:   ipfw.ErrUnknownICMP6Type,
 		},
 		{
-			name:  "unknown icmp6 type below the range",
-			input: "icmp6types 5",
-			n:     11,
-			err:   ipfw.ErrUnknownICMP6Type,
+			name:    "icmp6types invalid later item preserves only the preceding option",
+			input:   "in icmp6types 150, 202 out",
+			n:       19,
+			err:     ipfw.ErrUnknownICMP6Type,
+			options: []ipfw.Opt{{Kind: ipfw.OptIn}},
+		},
+		{
+			name:    "icmp6types later overflow preserves only the preceding option",
+			input:   "in icmp6types 201, 256 out",
+			n:       19,
+			err:     ipfw.ErrExpectedU8,
+			options: []ipfw.Opt{{Kind: ipfw.OptIn}},
 		},
 		{
 			name:    "tcpflags single",
@@ -875,6 +908,11 @@ func zzOption(rest string) (ipfw.Opt, int, error) {
 func Fuzz_ParseOptions(f *testing.F) {
 	f.Add("established in { not out or zz 1 } dst-port 22,80 via table(t,:L)")
 	f.Add("tcpflags syn,!ack icmptypes 0,8 keep-state :f proto 6 zz")
+	f.Add("{ not icmptypes 0,7,31 or icmp6types 0,5,150,201 } in")
+	f.Add("in icmptypes 7,32")
+	f.Add("in icmp6types 201,202")
+	f.Add("icmptypes 256")
+	f.Add("icmp6types 256")
 	f.Add("{ in")
 	f.Add("not ")
 	f.Add("zz x // c")

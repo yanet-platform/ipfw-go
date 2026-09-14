@@ -1354,19 +1354,19 @@ func Test_VM_Check_ICMPTypes(t *testing.T) {
 		{
 			name: "icmptypes, type in the set",
 			rules: ruleset(`
-				add allow icmp from any to { 192.0.2.0/24 } icmptypes 0,8,3,11,12
+				add allow icmp from any to { 192.0.2.0/24 } icmptypes 0,7,31
 				add deny ip from any to any
 			`),
-			packet:  icmp(8),
+			packet:  icmp(31),
 			verdict: pass,
 		},
 		{
 			name: "icmptypes, type outside the set",
 			rules: ruleset(`
-				add allow icmp from any to { 192.0.2.0/24 } icmptypes 0,8,3,11,12
+				add allow icmp from any to { 192.0.2.0/24 } icmptypes 0,7,31
 				add deny ip from any to any
 			`),
-			packet:  icmp(1),
+			packet:  icmp(8),
 			verdict: deny,
 		},
 		{
@@ -1399,34 +1399,34 @@ func Test_VM_Check_ICMPTypes(t *testing.T) {
 		{
 			name: "not icmptypes, type in the set",
 			rules: ruleset(`
-				add allow ip from any to any not icmptypes 8
+				add allow ip from any to any not icmptypes 7,31
 				add deny ip from any to any
 			`),
-			packet:  icmp(8),
+			packet:  icmp(7),
 			verdict: deny,
 		},
 		{
 			name: "not icmptypes, type outside the set",
 			rules: ruleset(`
-				add allow ip from any to any not icmptypes 8
+				add allow ip from any to any not icmptypes 7,31
 				add deny ip from any to any
 			`),
-			packet:  icmp(0),
+			packet:  icmp(30),
 			verdict: pass,
 		},
 		{
 			name: "icmp6types, type in the set",
 			rules: ruleset(`
-				add allow ip from any to { 2001:db8::/32 } icmp6types 1,2,3,4,128,129,133,134,135,136
+				add allow ip from any to { 2001:db8::/32 } icmp6types 0,5,135,150,201
 				add deny ip from any to any
 			`),
-			packet:  icmp6(135),
+			packet:  icmp6(201),
 			verdict: pass,
 		},
 		{
 			name: "icmp6types, type outside the set",
 			rules: ruleset(`
-				add allow ip from any to { 2001:db8::/32 } icmp6types 1,2,3,4,128,129,133,134,135,136
+				add allow ip from any to { 2001:db8::/32 } icmp6types 0,5,135,150,201
 				add deny ip from any to any
 			`),
 			packet:  icmp6(130),
@@ -2897,8 +2897,8 @@ var everyMatcher = ruleset(`
 	table i create type iface
 	table i add vlan1234 :SECTION
 	add deny udp from 198.51.100.0/24 to table(t) 53
-	add count ip from any to any icmptypes 0,8
-	add count ip from any to any icmp6types 128,129
+	add count ip from any to any icmptypes 0,7,8,31
+	add count ip from any to any icmp6types 0,5,128,129,150,201
 	add deny tcp from any 1-1023 to me6 not established
 	add deny ip from host.example.com to custom:first frag
 	add count tcp from any to any tcpflags syn,!ack dst-port 8080,8443
@@ -2938,6 +2938,15 @@ var syntheticPackets = map[string]vm.Packet{
 	"fragment4": vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.5"), netip.MustParseAddr("203.0.113.5")).WithFragmentOffset(100),
 	"tcp6":      vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::5"), netip.MustParseAddr("2001:db8:1::5")).WithTCP(ipfw.TCPSyn|ipfw.TCPAck, 40000, 80),
 	"icmp6":     vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8::2")).WithICMP6(128, 0),
+
+	"icmp4 numeric upper bound": vm.NewIPv4Packet(
+		netip.MustParseAddr("203.0.113.9"),
+		netip.MustParseAddr("192.0.2.1"),
+	).WithICMP(31, 0),
+	"icmp6 numeric upper bound": vm.NewIPv6Packet(
+		netip.MustParseAddr("2001:db8::1"),
+		netip.MustParseAddr("2001:db8::2"),
+	).WithICMP6(201, 0),
 }
 
 // verifies that a check touching every matcher, traced or not, allocates

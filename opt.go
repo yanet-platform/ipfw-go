@@ -300,7 +300,8 @@ func parseCustomOption(
 // parseTypesOption parses the comma list of type numbers after `icmptypes`
 // or `icmp6types` into one option holding them as a set.
 //
-// A number outside the known types of the kind is an error at that number.
+// A number outside the option's numeric range is an error at that number.
+// The limits follow ipfw(8) and include unassigned types.
 func parseTypesOption(s string, state State, kind OptKind, neg bool, place optionPlace) (string, fail) {
 	rest, ok := ws1(s)
 	if !ok {
@@ -313,7 +314,7 @@ func parseTypesOption(s string, state State, kind OptKind, neg bool, place optio
 		if numberKind != 0 {
 			return s, fail{Kind: numberKind, At: buf}
 		}
-		if !knownType(kind, ty) {
+		if !icmpTypeInRange(kind, ty) {
 			return s, fail{Kind: unknownTypeKind(kind), At: buf}
 		}
 		types.Add(ty)
@@ -332,17 +333,12 @@ func parseTypesOption(s string, state State, kind OptKind, neg bool, place optio
 	return buf, fail{}
 }
 
-// knownType reports whether ty is a type number ipfw(8) accepts for the
-// option kind.
-func knownType(kind OptKind, ty uint8) bool {
+func icmpTypeInRange(kind OptKind, number uint8) bool {
 	switch kind {
 	case OptICMPTypes:
-		switch ty {
-		case 0, 3, 4, 5, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18:
-			return true
-		}
+		return number <= 31
 	case OptICMP6Types:
-		return ty >= 1 && ty <= 4 || ty >= 128 && ty <= 149 || ty >= 151 && ty <= 161
+		return number <= 201
 	}
 	return false
 }
