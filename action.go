@@ -88,53 +88,6 @@ func (m SkipTo) String() string {
 	}
 }
 
-// The keyword-only actions in the order they are tried, the most frequent
-// spellings first.
-var actionKeywords = [...]struct {
-	keyword string
-	kind    ActionKind
-}{
-	{"allow", ActionPass},
-	{"pass", ActionPass},
-	{"accept", ActionPass},
-	{"permit", ActionPass},
-	{"deny", ActionDeny},
-	{"drop", ActionDeny},
-	{"count", ActionCount},
-}
-
-// parseAction recognizes the action keyword by prefix, writing into action,
-// which may be partially written when it fails.
-func parseAction(s string, action *Action) (string, fail) {
-	for _, entry := range actionKeywords {
-		if rest, ok := prefix(s, entry.keyword); ok {
-			action.Kind = entry.kind
-			return rest, fail{}
-		}
-	}
-	if rest, ok := prefix(s, "check-state"); ok {
-		action.Kind = ActionCheckState
-		if flow, afterFlow, found := parseFlowName(rest); found {
-			action.Flow, rest = flow, afterFlow
-		}
-		return rest, fail{}
-	}
-	if rest, ok := prefix(s, "skipto"); ok {
-		rest, ok = ws1(rest)
-		if !ok {
-			return s, fail{Kind: ErrExpectedWhitespace, At: rest}
-		}
-		var err fail
-		action.SkipTo, rest, err = parseSkipTo(rest)
-		if err.Failed() {
-			return s, err
-		}
-		action.Kind = ActionSkipTo
-		return rest, fail{}
-	}
-	return s, fail{Kind: ErrExpectedAction, At: s}
-}
-
 // parseFlowName reads the optional ` :flow` of check-state, reporting
 // whether it was there.
 func parseFlowName(s string) (string, string, bool) {
@@ -151,26 +104,4 @@ func parseFlowName(s string) (string, string, bool) {
 		return "", s, false
 	}
 	return flow, rest, true
-}
-
-// parseSkipTo reads a `:label`, a rule number or `tablearg`.
-func parseSkipTo(s string) (SkipTo, string, fail) {
-	if rest, ok := prefix(s, ":"); ok {
-		var label string
-		label, rest = token(rest)
-		if label == "" {
-			return SkipTo{}, s, fail{Kind: ErrExpectedToken, At: rest}
-		}
-		return SkipTo{Kind: SkipToLabel, Label: label}, rest, fail{}
-	}
-	if number, rest, kind := parseU32(s); kind == 0 {
-		if number == 0 {
-			return SkipTo{}, s, fail{Kind: ErrExpectedSkipTo, At: s}
-		}
-		return SkipTo{Kind: SkipToNumber, Number: number}, rest, fail{}
-	}
-	if rest, ok := prefix(s, "tablearg"); ok {
-		return SkipTo{Kind: SkipToTableArg}, rest, fail{}
-	}
-	return SkipTo{}, s, fail{Kind: ErrExpectedSkipTo, At: s}
 }

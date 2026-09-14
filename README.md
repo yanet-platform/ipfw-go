@@ -28,7 +28,8 @@ Licensed under the Apache License 2.0, see [LICENSE](LICENSE).
 
 - **Names are yours to resolve.**
 
-  Protocols, services, hostnames and macros go through your resolvers, so `/etc/services`, a DNS cache or a macro expander plug in where you need them, and an unresolvable name fails the line instead of matching quietly.
+  Protocols, services, hostnames and custom targets go through your resolvers. You can use
+  `/etc/services`, a DNS cache or your own target registry. An unresolvable name fails the line.
 
 - **The grammar is extensible.**
 
@@ -99,6 +100,32 @@ before the next `Next` or `Reset` if it must be kept. Its strings continue to bo
 input.
 A reusable `State` must be reset explicitly between records, including after a parse error.
 
+### Parser configuration
+
+The default parser follows FreeBSD syntax. Project label declarations (`:NEXT`) and symbolic
+jumps (`skipto :NEXT`) require `WithLabels()`. Existing callers that use these forms must pass
+the option when constructing the parser, including parsers passed to `vm.Build`.
+
+| Option | Without the option | What it enables |
+|---|---|---|
+| `WithLabels()` | Label declarations and symbolic `skipto` are rejected | `:NAME` declarations and `skipto :NAME` jumps |
+| `WithCommandHook(hook)` | Unknown command lines are rejected | The hook parses unknown commands using the existing sub-parsers |
+| `WithOptionHook(hook)` | Unknown rule options are rejected | The hook parses unknown option keywords and their arguments |
+
+`Reset` retains the configured options. Hooks own the syntax they consume and must report
+how much input they used. Enabled built-in syntax takes precedence over command hooks.
+A command hook can supply a `RecordLabel` explicitly when built-in labels are disabled.
+
+Numeric `skipto`, `skipto tablearg`, `check-state :flow` and `keep-state :flow` keep their
+default behavior. FreeBSD supports numbered jumps and named dynamic states. Symbolic rule
+labels are a project extension. See the upstream
+[jump syntax](https://github.com/freebsd/freebsd-src/blob/88e7371d9dc26f85dfc1b008cbe59ebc7e4a33da/sbin/ipfw/ipfw.8#L1062)
+and [named state syntax](https://github.com/freebsd/freebsd-src/blob/88e7371d9dc26f85dfc1b008cbe59ebc7e4a33da/sbin/ipfw/ipfw2.c#L4338).
+
+Table values remain raw text, including `:NEXT` and `::1`. In the VM, a symbolic tablearg
+can resolve to a label supplied by an enabled declaration or a command hook. It does not need
+a separate VM option. See `ExampleBuild_labels`.
+
 ## Errors
 
 A line the grammar does not accept is a `*ParseError` carrying the line, the column and the text, which `Diag` renders:
@@ -115,7 +142,7 @@ error: unknown option
 
 ## Names into values
 
-A `Resolver` is the `State` that resolves every name within an `Environment` — networks into the caller's own types, protocols and services into numbers, hostnames and macros into the networks they stand for — and hands the typed tokens to a `VMState`, which `ReduceVMState` collects. A name no resolver turns into a value fails the line where the name stands.
+A `Resolver` is the `State` that resolves every name within an `Environment` — networks into the caller's own types, protocols and services into numbers, hostnames and custom targets into the networks they stand for — and hands the typed tokens to a `VMState`, which `ReduceVMState` collects. A name no resolver turns into a value fails the line where the name stands.
 
 Plugging [xnetip](https://github.com/yanet-platform/xnetip) in is one literal:
 
@@ -129,7 +156,7 @@ env := ipfw.Environment[xnetip.Network4, xnetip.Network6]{
 	},
 	Protos:   protocols, // ipfw.ProtoResolver, e.g. /etc/protocols
 	Services: services,  // ipfw.ServiceResolver, e.g. /etc/services
-	Targets:  hosts,     // ipfw.TargetResolver: hostnames and macros → networks
+	Targets:  hosts,     // ipfw.TargetResolver: names → networks
 }
 var typed ipfw.ReduceVMState[xnetip.Network4, xnetip.Network6]
 rec, err := ipfw.NewParser(src).Next(ipfw.NewResolver(&typed, env))
@@ -156,7 +183,7 @@ verdict := machine.Check(ctx, packet)                                // ipfw.Act
 action, matched := machine.CheckTrace(ctx, packet, tracer)           // every rule evaluated
 ```
 
-A `table NAME create type` line says what the keys of the table are: an address table takes networks and, through the target resolver, hostnames and macros, an interface table takes interface names. A table never created is an address table, as in `ipfw(8)`.
+A `table NAME create type` line says what the keys of the table are: an address table takes networks and, through the target resolver, hostnames and custom targets, an interface table takes interface names. A table never created is an address table, as in `ipfw(8)`.
 
 `Packet` is an interface over the fields the matchers read. `RawIPv4Packet` and `RawIPv6Packet` implement it over raw bytes and double as builders in tests. See `ExampleBuild` and `ExampleVM_CheckTrace`.
 
@@ -171,7 +198,7 @@ Everything the format leaves to the site — what a name means, what a keyword t
 | `NetworkParser` | network text into your own types, `NetworkParserFuncs` to plug a library in one literal |
 | `ProtoResolver` | protocol names into numbers |
 | `ServiceResolver` | service names into ports |
-| `TargetResolver` | a hostname or a macro into any number of networks of both families |
+| `TargetResolver` | a hostname or custom target into any number of networks of both families |
 
 **Grammar**
 

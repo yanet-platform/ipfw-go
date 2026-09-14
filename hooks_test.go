@@ -10,6 +10,350 @@ import (
 	"github.com/yanet-platform/ipfw-go"
 )
 
+// verifies that an invented command preserves borrowed tokens, implied source and option logic.
+func Test_CommandHook_CompatibilitySeam(t *testing.T) {
+	cases := []struct {
+		name    string
+		input   string
+		comment string
+		inline  string
+		state   ipfw.ReduceState
+	}{
+		{
+			name:    "protocol alternatives and a custom token",
+			input:   "EX_PASS({ not tcp or udp }, { custom:first }) in # note",
+			comment: " note",
+			state: ipfw.ReduceState{
+				Protos: []ipfw.ProtoMatch{
+					{Neg: true, Proto: ipfw.Proto{Name: "tcp"}},
+					{Proto: ipfw.Proto{Name: "udp"}},
+				},
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "custom:first"}},
+				Options:      []ipfw.Opt{{Kind: ipfw.OptIn}},
+			},
+		},
+		{
+			name:  "custom token and negated port list",
+			input: "EX_PASS(tcp, { not custom:second }, not 443,8443) { in or not out }",
+			state: ipfw.ReduceState{
+				Protos:  []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+				Sources: []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{
+					{Neg: true, Kind: ipfw.TargetCustom, Text: "custom:second"},
+				},
+				DestinationPorts: []ipfw.PortMatch{
+					{Neg: true, Lo: ipfw.Port{Number: 443}, Hi: ipfw.Port{Number: 443}},
+					{Neg: true, Lo: ipfw.Port{Number: 8443}, Hi: ipfw.Port{Number: 8443}},
+				},
+				Options: []ipfw.Opt{{Kind: ipfw.OptIn}, {Or: true, Neg: true, Kind: ipfw.OptOut}},
+			},
+		},
+		{
+			name:   "table target and rule comment",
+			input:  "EX_PASS(ip6, { table(_EX_TABLE_) }) // note",
+			inline: " note",
+			state: ipfw.ReduceState{
+				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPv6}},
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetTable, Text: "_EX_TABLE_"}},
+			},
+		},
+		{
+			name:   "vertical tab payload",
+			input:  "EX_PASS(ip, { any }) // note\v",
+			inline: " note\v",
+			state: ipfw.ReduceState{
+				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+			},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			parser := ipfw.NewParser(testCase.input, ipfw.WithCommandHook(examplePass))
+			var state ipfw.ReduceState
+			record, err := parser.Next(&state)
+			require.Nil(t, err)
+			require.Equal(t, ipfw.Record{
+				Line: 1, Text: testCase.input, Kind: ipfw.RecordInstruction,
+				Comment: testCase.comment,
+				Instruction: ipfw.Instruction{
+					Action: ipfw.Action{Kind: ipfw.ActionPass}, InlineComment: testCase.inline,
+				},
+			}, *record)
+			require.Equal(t, testCase.state, state)
+			next(t, parser, eof)
+		})
+	}
+}
+
+// verifies that built-in labels take precedence over a recognizing command hook.
+func Test_CommandHook_Label(t *testing.T) {
+	const input = ":EX_HOOK# hash\n"
+	for _, testCase := range []struct {
+		name    string
+		options []ipfw.ParserOption
+		calls   int
+	}{
+		{name: "hook only", calls: 1},
+		{name: "built-in labels", options: []ipfw.ParserOption{ipfw.WithLabels()}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			calls := 0
+			hook := func(line string, _ ipfw.State) (ipfw.Record, int, error) {
+				calls++
+				if line != ":EX_HOOK" {
+					return ipfw.Record{}, 0, nil
+				}
+				return ipfw.Record{Kind: ipfw.RecordLabel, Label: line[1:]}, len(line), nil
+			}
+			options := append([]ipfw.ParserOption{ipfw.WithCommandHook(hook)}, testCase.options...)
+			parser := ipfw.NewParser(input, options...)
+			next(t, parser, ipfw.Record{
+				Line: 1, Text: ":EX_HOOK# hash", Kind: ipfw.RecordLabel, Label: "EX_HOOK",
+				Comment: " hash",
+			})
+			next(t, parser, eof)
+			require.Equal(t, testCase.calls, calls)
+		})
+	}
+}
+
+// examplePass composes public subparsers over an invented command with grouped destinations.
+func examplePass(line string, state ipfw.State) (ipfw.Record, int, error) {
+	const keyword = "EX_PASS"
+	if !strings.HasPrefix(line, keyword) {
+		return ipfw.Record{}, 0, nil
+	}
+	position := len(keyword)
+	if !strings.HasPrefix(line[position:], "(") {
+		return ipfw.Record{}, position, ipfw.ErrExpectedPrefix
+	}
+	position++
+	consumed, err := ipfw.ParseProtocols(line[position:], state)
+	position += consumed
+	if err != nil {
+		return ipfw.Record{}, position, err
+	}
+	if !strings.HasPrefix(line[position:], ",") {
+		return ipfw.Record{}, position, ipfw.ErrExpectedPrefix
+	}
+	position = skipSpaces(line, position+1)
+	if err = state.OnSourceTarget(ipfw.Target{Kind: ipfw.TargetAny}); err != nil {
+		return ipfw.Record{}, position, err
+	}
+	consumed, err = ipfw.ParseDestinationTargets(line[position:], state)
+	position += consumed
+	if err != nil {
+		return ipfw.Record{}, position, err
+	}
+	if strings.HasPrefix(line[position:], ",") {
+		position = skipSpaces(line, position+1)
+		consumed, err = ipfw.ParseDestinationPorts(line[position:], state)
+		position += consumed
+		if err != nil {
+			return ipfw.Record{}, position, err
+		}
+	}
+	if !strings.HasPrefix(line[position:], ")") {
+		return ipfw.Record{}, position, ipfw.ErrExpectedPrefix
+	}
+	position = skipSpaces(line, position+1)
+	consumed, err = ipfw.ParseOptions(line[position:], state, nil)
+	position += consumed
+	if err != nil {
+		return ipfw.Record{}, position, err
+	}
+	record := ipfw.Record{
+		Kind:        ipfw.RecordInstruction,
+		Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
+	}
+	if strings.HasPrefix(line[position:], "//") {
+		record.Instruction.InlineComment = strings.TrimRight(line[position+2:], " \t\r\n\f")
+		position = len(line)
+	}
+	return record, position, nil
+}
+
+// verifies that command failures retain exact positions and every token emitted before failure.
+func Test_CommandHook_CompatibilityErrors(t *testing.T) {
+	protocol := ipfw.ReduceState{Protos: []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}}}
+	body := ipfw.ReduceState{
+		Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+		Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+		Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+	}
+	withOption := body
+	withOption.Options = []ipfw.Opt{{Kind: ipfw.OptIn}}
+	cases := []struct {
+		name   string
+		input  string
+		kind   ipfw.ErrorKind
+		column int
+		state  ipfw.ReduceState
+	}{
+		{name: "opening bracket", input: "EX_PASS tcp", kind: ipfw.ErrExpectedPrefix, column: 7},
+		{
+			name:   "separator",
+			input:  "EX_PASS(tcp; { any })",
+			kind:   ipfw.ErrExpectedPrefix,
+			column: 11,
+			state:  protocol,
+		},
+		{
+			name:   "closing bracket",
+			input:  "EX_PASS(tcp, { any }",
+			kind:   ipfw.ErrExpectedPrefix,
+			column: 20,
+			state:  body,
+		},
+		{
+			name:   "group bracket",
+			input:  "EX_PASS(tcp, { any ])",
+			kind:   ipfw.ErrExpectedOr,
+			column: 19,
+			state:  body,
+		},
+		{
+			name:   "unknown option",
+			input:  "EX_PASS(tcp, { any }) in extra",
+			kind:   ipfw.ErrUnknownOption,
+			column: 25,
+			state:  withOption,
+		},
+		{name: "unknown command", input: "OTHER_PASS(tcp, { any })", kind: ipfw.ErrExpectedLine},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			parser := ipfw.NewParser(testCase.input, ipfw.WithCommandHook(examplePass))
+			var state ipfw.ReduceState
+			record, err := parser.Next(&state)
+			require.Nil(t, record)
+			require.NotNil(t, err)
+			require.Equal(t, ipfw.ParseError{
+				Kind: testCase.kind, Line: 1, Column: testCase.column, Text: testCase.input,
+			}, *err)
+			require.Equal(t, testCase.state, state)
+			next(t, parser, eof)
+		})
+	}
+}
+
+// verifies that a callback failure is attached at the original token and skips exactly one line.
+func Test_CommandHook_CompatibilityCallbackFailure(t *testing.T) {
+	source := ruleset(`
+		EX_PASS(tcp, { any }) in # metadata
+		add check-state
+	`)
+	parser := ipfw.NewParser(source, ipfw.WithCommandHook(examplePass))
+	cause := errors.New("example target rejected")
+	state := exampleRejectedTarget{Err: cause}
+	record, err := parser.Next(&state)
+	require.Nil(t, record)
+	require.NotNil(t, err)
+	require.Equal(t, ipfw.ParseError{
+		Kind: ipfw.ErrState, Err: cause, Line: 1, Column: 15,
+		Text: "EX_PASS(tcp, { any }) in # metadata",
+	}, *err)
+	require.ErrorIs(t, err, cause)
+	require.Equal(t, ipfw.ReduceState{
+		Protos:  []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+		Sources: []ipfw.Target{{Kind: ipfw.TargetAny}},
+	}, state.ReduceState)
+	next(t, parser, ipfw.Record{
+		Line: 2, Text: "add check-state", Kind: ipfw.RecordInstruction,
+		Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionCheckState}},
+	})
+	next(t, parser, eof)
+}
+
+type exampleRejectedTarget struct {
+	ipfw.ReduceState
+	Err error
+}
+
+// OnDestinationTarget rejects a destination with the configured cause.
+func (m *exampleRejectedTarget) OnDestinationTarget(ipfw.Target) error {
+	return m.Err
+}
+
+// verifies that all public command subparsers compose without allocation after sink warmup.
+func Test_CommandHook_CompatibilityNoAllocs(t *testing.T) {
+	const input = "EX_PASS(tcp, { custom:first }, 443) { in or not out } // note # hash\n"
+	parser := ipfw.NewParser(input, ipfw.WithCommandHook(examplePass))
+	var state ipfw.ReduceState
+	_, err := parser.Next(&state)
+	require.Nil(t, err)
+	ok := true
+	allocations := testing.AllocsPerRun(100, func() {
+		parser.Reset(input)
+		state.Reset()
+		if _, err := parser.Next(&state); err != nil {
+			ok = false
+		}
+	})
+	require.True(t, ok)
+	require.Zero(t, allocations)
+}
+
+// verifies that composed subparsers leave exact original remainders and complete raw state.
+func Test_CommandHook_SubparserRemainders(t *testing.T) {
+	cases := []struct {
+		name      string
+		input     string
+		remainder string
+		consumed  int
+		parse     func(string, ipfw.State) (int, error)
+		state     ipfw.ReduceState
+	}{
+		{
+			name: "protocols", input: "{ not tcp or udp }, after", remainder: ", after",
+			consumed: 18, parse: ipfw.ParseProtocols,
+			state: ipfw.ReduceState{Protos: []ipfw.ProtoMatch{
+				{Neg: true, Proto: ipfw.Proto{Name: "tcp"}}, {Proto: ipfw.Proto{Name: "udp"}},
+			}},
+		},
+		{
+			name: "targets", input: "{ custom:first or not custom:second }, after",
+			remainder: ", after", consumed: 37, parse: ipfw.ParseDestinationTargets,
+			state: ipfw.ReduceState{Destinations: []ipfw.Target{
+				{Kind: ipfw.TargetCustom, Text: "custom:first"},
+				{Neg: true, Pattern: 1, Kind: ipfw.TargetCustom, Text: "custom:second"},
+			}},
+		},
+		{
+			name: "ports", input: "not 443,8443) after", remainder: ") after",
+			consumed: 12, parse: ipfw.ParseDestinationPorts,
+			state: ipfw.ReduceState{DestinationPorts: []ipfw.PortMatch{
+				{Neg: true, Lo: ipfw.Port{Number: 443}, Hi: ipfw.Port{Number: 443}},
+				{Neg: true, Lo: ipfw.Port{Number: 8443}, Hi: ipfw.Port{Number: 8443}},
+			}},
+		},
+		{
+			name: "options", input: "{ in or not out } // after", remainder: "// after",
+			consumed: 18,
+			parse: func(input string, state ipfw.State) (int, error) {
+				return ipfw.ParseOptions(input, state, nil)
+			},
+			state: ipfw.ReduceState{Options: []ipfw.Opt{
+				{Kind: ipfw.OptIn}, {Or: true, Neg: true, Kind: ipfw.OptOut},
+			}},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			var state ipfw.ReduceState
+			consumed, err := testCase.parse(testCase.input, &state)
+			require.NoError(t, err)
+			require.Equal(t, testCase.consumed, consumed)
+			require.Equal(t, testCase.remainder, testCase.input[consumed:])
+			require.Equal(t, testCase.state, state)
+		})
+	}
+}
+
 // allowFromAny is a command hook for `ALLOW_FROM_ANY(PROTO, DST[, PORTS])
 // [// comment]`, a syntax the parser does not know.
 //
@@ -93,18 +437,18 @@ func Test_CommandHook_Table(t *testing.T) {
 	}{
 		{
 			name:        "protocol, group and range",
-			input:       "ALLOW_FROM_ANY(tcp, { _VPN_LOOPBACKS_ }, 1-65535)\n",
+			input:       "ALLOW_FROM_ANY(tcp, { custom:first }, 1-65535)\n",
 			instruction: pass,
 			state: ipfw.ReduceState{
 				Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 				Sources:          []ipfw.Target{{Kind: ipfw.TargetAny}},
-				Destinations:     []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "_VPN_LOOPBACKS_"}},
+				Destinations:     []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "custom:first"}},
 				DestinationPorts: []ipfw.PortMatch{portSpan(ipfw.Port{Number: 1}, ipfw.Port{Number: 65535})},
 			},
 		},
 		{
 			name:  "port list and inline comment",
-			input: "ALLOW_FROM_ANY(udp, { _CDN_NETS_ }, 80,443) // {\"id\": 1}\n",
+			input: "ALLOW_FROM_ANY(udp, { custom:second }, 80,443) // {\"id\": 1}\n",
 			instruction: ipfw.Instruction{
 				Action:        ipfw.Action{Kind: ipfw.ActionPass},
 				InlineComment: " {\"id\": 1}",
@@ -112,18 +456,18 @@ func Test_CommandHook_Table(t *testing.T) {
 			state: ipfw.ReduceState{
 				Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "udp"}}},
 				Sources:          []ipfw.Target{{Kind: ipfw.TargetAny}},
-				Destinations:     []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "_CDN_NETS_"}},
+				Destinations:     []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "custom:second"}},
 				DestinationPorts: []ipfw.PortMatch{portNumber(80), portNumber(443)},
 			},
 		},
 		{
 			name:        "no ports",
-			input:       "ALLOW_FROM_ANY(esp, { _X_ })\n",
+			input:       "ALLOW_FROM_ANY(esp, { custom:first })\n",
 			instruction: pass,
 			state: ipfw.ReduceState{
 				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "esp"}}},
 				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
-				Destinations: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "_X_"}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "custom:first"}},
 			},
 		},
 	}
@@ -154,7 +498,7 @@ func Test_CommandHook_HashComment(t *testing.T) {
 		received = line
 		return allowFromAny(line, state)
 	}
-	parser := ipfw.NewParser(input, ipfw.WithCommandHook(hook))
+	parser := ipfw.NewParser(input, ipfw.WithCommandHook(hook), ipfw.WithLabels())
 	var state ipfw.ReduceState
 	record, err := parser.Next(&state)
 	require.Nil(t, err)
@@ -234,7 +578,7 @@ func Test_CommandHook_HashCommentErrors(t *testing.T) {
 				require.Equal(t, "CUSTOM line ", line)
 				return ipfw.Record{}, testCase.consumed, testCase.err
 			}
-			parser := ipfw.NewParser(input, ipfw.WithCommandHook(hook))
+			parser := ipfw.NewParser(input, ipfw.WithCommandHook(hook), ipfw.WithLabels())
 			nextError(t, parser, ipfw.ParseError{
 				Kind:   testCase.kind,
 				Err:    testCase.err,
@@ -279,24 +623,24 @@ func Test_CommandHook_Errors(t *testing.T) {
 	}{
 		{
 			name:  "trailing content after the hook",
-			input: "ALLOW_FROM_ANY(esp, { _X_ }) x\n",
+			input: "ALLOW_FROM_ANY(esp, { custom:first }) x\n",
 			hook:  allowFromAny,
 			expected: ipfw.ParseError{
 				Kind:   ipfw.ErrExpectedNewlineOrEOF,
 				Line:   1,
-				Column: 29,
-				Text:   "ALLOW_FROM_ANY(esp, { _X_ }) x",
+				Column: 38,
+				Text:   "ALLOW_FROM_ANY(esp, { custom:first }) x",
 			},
 		},
 		{
 			name:  "error kind from the hook",
-			input: "ALLOW_FROM_ANY(esp { _X_ })\n",
+			input: "ALLOW_FROM_ANY(esp { custom:first })\n",
 			hook:  allowFromAny,
 			expected: ipfw.ParseError{
 				Kind:   ipfw.ErrExpectedPrefix,
 				Line:   1,
 				Column: 18,
-				Text:   "ALLOW_FROM_ANY(esp { _X_ })",
+				Text:   "ALLOW_FROM_ANY(esp { custom:first })",
 			},
 		},
 		{
@@ -339,12 +683,12 @@ func Test_CommandHook_Errors(t *testing.T) {
 		},
 		{
 			name:  "no hook",
-			input: "ALLOW_FROM_ANY(esp, { _X_ })\n",
+			input: "ALLOW_FROM_ANY(esp, { custom:first })\n",
 			expected: ipfw.ParseError{
 				Kind:   ipfw.ErrExpectedLine,
 				Line:   1,
 				Column: 0,
-				Text:   "ALLOW_FROM_ANY(esp, { _X_ })",
+				Text:   "ALLOW_FROM_ANY(esp, { custom:first })",
 			},
 		},
 	}
@@ -368,11 +712,11 @@ func Test_CommandHook_NoAllocs(t *testing.T) {
 	}{
 		{
 			name:  "plain",
-			input: "ALLOW_FROM_ANY(tcp, { _VPN_LOOPBACKS_ }, 1-65535)\n",
+			input: "ALLOW_FROM_ANY(tcp, { custom:first }, 1-65535)\n",
 		},
 		{
 			name:  "hash comment",
-			input: "ALLOW_FROM_ANY(tcp, { _VPN_LOOPBACKS_ }, 1-65535) # metadata\r\n",
+			input: "ALLOW_FROM_ANY(tcp, { custom:first }, 1-65535) # metadata\r\n",
 		},
 	}
 	for _, testCase := range cases {
@@ -558,7 +902,7 @@ func Test_OptionHook_HashComment(t *testing.T) {
 				require.Equal(t, testCase.hookInput, rest)
 				return option, 1000, nil
 			}
-			parser := ipfw.NewParser(testCase.input, ipfw.WithOptionHook(hook))
+			parser := ipfw.NewParser(testCase.input, ipfw.WithOptionHook(hook), ipfw.WithLabels())
 			var state ipfw.ReduceState
 			record, err := parser.Next(&state)
 			require.Nil(t, err)
@@ -600,7 +944,7 @@ func Test_OptionHook_HashCommentErrors(t *testing.T) {
 				require.Equal(t, "custom ", rest)
 				return ipfw.Opt{}, testCase.consumed, ipfw.ErrExpectedOpt
 			}
-			parser := ipfw.NewParser(input, ipfw.WithOptionHook(hook))
+			parser := ipfw.NewParser(input, ipfw.WithOptionHook(hook), ipfw.WithLabels())
 			var state ipfw.ReduceState
 			record, err := parser.Next(&state)
 			require.Nil(t, record)

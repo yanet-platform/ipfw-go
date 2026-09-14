@@ -61,7 +61,7 @@ The policy is `.agents/conventions/comments.md`: a brief of 1–2 lines, then, o
 - `rapid.Check` for properties with simple oracles; native fuzzing for the parser entry points and `MatchIfMask`; seed corpora are checked in.
 - Benchmarks and fuzz targets live in the same `_test.go` file as the unit tests of the code they exercise — no separate `*_bench_test.go` or `fuzz_test.go` files.
 - One style per unit. The parser is tested as a black box (`package ipfw_test`) through `Next` and the exported sub-parsers, unexported helpers are covered indirectly. Only the lexer (`lex_test.go`) is white-box, having no exported surface.
-- Test data is made up: documentation networks (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `2001:db8::/32`), `example.com` hostnames, invented macro and label names. Never copy strings from real rulesets, comments or tickets.
+- Test data is made up: documentation networks (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `2001:db8::/32`), `example.com` hostnames, invented custom target and label names. Never copy strings from real rulesets, comments or tickets.
 
 ## Session protocol (TDD, one feature per session)
 

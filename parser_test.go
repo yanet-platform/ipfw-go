@@ -420,6 +420,7 @@ func Test_Parser_Next_HashComments(t *testing.T) {
 	cases := []struct {
 		name     string
 		input    string
+		options  []ipfw.ParserOption
 		expected ipfw.Record
 		state    ipfw.ReduceState
 	}{
@@ -547,8 +548,9 @@ func Test_Parser_Next_HashComments(t *testing.T) {
 			},
 		},
 		{
-			name:  "label",
-			input: ":NEXT# label\n",
+			name:    "label",
+			input:   ":NEXT# label\n",
+			options: []ipfw.ParserOption{ipfw.WithLabels()},
 			expected: ipfw.Record{
 				Line:    1,
 				Text:    ":NEXT# label",
@@ -633,7 +635,7 @@ func Test_Parser_Next_HashComments(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			parser := ipfw.NewParser(testCase.input)
+			parser := ipfw.NewParser(testCase.input, testCase.options...)
 			var state ipfw.ReduceState
 			record, err := parser.Next(&state)
 			require.Nil(t, err)
@@ -673,11 +675,12 @@ func Test_Parser_Next_HashCommentPortOptions(t *testing.T) {
 // verifies that a hash keeps exact failures and partial state at the invalid prefix.
 func Test_Parser_Next_HashCommentErrors(t *testing.T) {
 	cases := []struct {
-		name   string
-		input  string
-		kind   ipfw.ErrorKind
-		column int
-		state  ipfw.ReduceState
+		name    string
+		input   string
+		options []ipfw.ParserOption
+		kind    ipfw.ErrorKind
+		column  int
+		state   ipfw.ReduceState
 	}{
 		{
 			name:   "missing command whitespace",
@@ -744,16 +747,18 @@ func Test_Parser_Next_HashCommentErrors(t *testing.T) {
 			column: 23,
 		},
 		{
-			name:   "missing label",
-			input:  ":# metadata",
-			kind:   ipfw.ErrExpectedToken,
-			column: 1,
+			name:    "missing label",
+			input:   ":# metadata",
+			options: []ipfw.ParserOption{ipfw.WithLabels()},
+			kind:    ipfw.ErrExpectedToken,
+			column:  1,
 		},
 		{
-			name:   "label with trailing token",
-			input:  ":NEXT extra# metadata",
-			kind:   ipfw.ErrExpectedNewlineOrEOF,
-			column: 6,
+			name:    "label with trailing token",
+			input:   ":NEXT extra# metadata",
+			options: []ipfw.ParserOption{ipfw.WithLabels()},
+			kind:    ipfw.ErrExpectedNewlineOrEOF,
+			column:  6,
 		},
 		{
 			name:  "standalone slash comment",
@@ -767,16 +772,18 @@ func Test_Parser_Next_HashCommentErrors(t *testing.T) {
 			column: 18,
 		},
 		{
-			name:   "label slash comment",
-			input:  ":NEXT // legacy# metadata",
-			kind:   ipfw.ErrExpectedNewlineOrEOF,
-			column: 6,
+			name:    "label slash comment",
+			input:   ":NEXT // legacy# metadata",
+			options: []ipfw.ParserOption{ipfw.WithLabels()},
+			kind:    ipfw.ErrExpectedNewlineOrEOF,
+			column:  6,
 		},
 		{
-			name:   "lone carriage return before hash",
-			input:  ":NEXT\r# metadata",
-			kind:   ipfw.ErrExpectedNewlineOrEOF,
-			column: 5,
+			name:    "lone carriage return before hash",
+			input:   ":NEXT\r# metadata",
+			options: []ipfw.ParserOption{ipfw.WithLabels()},
+			kind:    ipfw.ErrExpectedNewlineOrEOF,
+			column:  5,
 		},
 		{
 			name:   "source-position src-port",
@@ -794,7 +801,7 @@ func Test_Parser_Next_HashCommentErrors(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			parser := ipfw.NewParser(testCase.input)
+			parser := ipfw.NewParser(testCase.input, testCase.options...)
 			var state ipfw.ReduceState
 			record, err := parser.Next(&state)
 			require.Nil(t, record)
@@ -836,7 +843,7 @@ func Test_Parser_Next_HashCommentStreaming(t *testing.T) {
 		passAnyToAny(4, "add pass ip from any to any"),
 		{Line: 5, Text: "# final", Kind: ipfw.RecordComment, Comment: " final"},
 	}
-	parser := ipfw.NewParser(source)
+	parser := ipfw.NewParser(source, ipfw.WithLabels())
 	var state ipfw.ReduceState
 	var saved []ipfw.Record
 	for _, expectedRecord := range expected {
@@ -937,7 +944,7 @@ func Test_Parser_Next_HashCommentsNoAllocs(t *testing.T) {
 		:NEXT# label
 		# {"id": "HASH-7"}
 	`)
-	parser := ipfw.NewParser(source)
+	parser := ipfw.NewParser(source, ipfw.WithLabels())
 	var state ipfw.ReduceState
 	for range 7 {
 		state.Reset()
@@ -958,33 +965,90 @@ func Test_Parser_Next_HashCommentsNoAllocs(t *testing.T) {
 	require.Zero(t, allocations)
 }
 
+// verifies that label declarations require their own opt-in.
+func Test_Parser_Next_LabelsOptIn(t *testing.T) {
+	const input = ":EXAMPLE_NEXT\n"
+	for _, testCase := range []struct {
+		name     string
+		accepted bool
+		options  []ipfw.ParserOption
+	}{
+		{name: "default"},
+		{name: "explicit labels", accepted: true, options: []ipfw.ParserOption{ipfw.WithLabels()}},
+		{
+			name: "option hook only",
+			options: []ipfw.ParserOption{ipfw.WithOptionHook(func(string) (ipfw.Opt, int, error) {
+				return ipfw.Opt{}, 0, ipfw.ErrUnknownOption
+			})},
+		},
+		{
+			name: "declining command hook only",
+			options: []ipfw.ParserOption{
+				ipfw.WithCommandHook(func(string, ipfw.State) (ipfw.Record, int, error) {
+					return ipfw.Record{}, 0, nil
+				}),
+			},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			parser := ipfw.NewParser(input, testCase.options...)
+			var state ipfw.ReduceState
+			record, err := parser.Next(&state)
+			if !testCase.accepted {
+				require.Nil(t, record)
+				require.NotNil(t, err)
+				require.Equal(t, ipfw.ParseError{
+					Kind: ipfw.ErrExpectedLine, Line: 1, Column: 0, Text: ":EXAMPLE_NEXT",
+				}, *err)
+			} else {
+				require.Nil(t, err)
+				require.Equal(t, ipfw.Record{
+					Line: 1, Text: ":EXAMPLE_NEXT", Kind: ipfw.RecordLabel, Label: "EXAMPLE_NEXT",
+				}, *record)
+			}
+			require.Equal(t, ipfw.ReduceState{}, state)
+			next(t, parser, eof)
+		})
+	}
+}
+
 // verifies that labels retain hash metadata and reject missing names or trailing tokens.
 func Test_Parser_Next_Label(t *testing.T) {
 	next(
 		t,
-		ipfw.NewParser(":ENDOFME\n"),
+		ipfw.NewParser(":ENDOFME\n", ipfw.WithLabels()),
 		ipfw.Record{Line: 1, Text: ":ENDOFME", Kind: ipfw.RecordLabel, Label: "ENDOFME"},
 	)
 	next(
 		t,
-		ipfw.NewParser(":L  \n"),
+		ipfw.NewParser(":L  \n", ipfw.WithLabels()),
 		ipfw.Record{Line: 1, Text: ":L", Kind: ipfw.RecordLabel, Label: "L"},
 	)
 	nextError(
 		t,
-		ipfw.NewParser(":"),
+		ipfw.NewParser(":", ipfw.WithLabels()),
 		ipfw.ParseError{Kind: ipfw.ErrExpectedToken, Line: 1, Column: 1, Text: ":"},
 	)
 	next(
 		t,
-		ipfw.NewParser(":X # c"),
+		ipfw.NewParser(":X # c", ipfw.WithLabels()),
 		ipfw.Record{Line: 1, Text: ":X # c", Kind: ipfw.RecordLabel, Comment: " c", Label: "X"},
 	)
 	nextError(
 		t,
-		ipfw.NewParser(":X // c"),
+		ipfw.NewParser(":X // c", ipfw.WithLabels()),
 		ipfw.ParseError{Kind: ipfw.ErrExpectedNewlineOrEOF, Line: 1, Column: 3, Text: ":X // c"},
 	)
+}
+
+// verifies that embedded slashes remain in label names when labels are enabled.
+func Test_Parser_Next_LabelEmbeddedSlashes(t *testing.T) {
+	const input = ":finish//part\n"
+	parser := ipfw.NewParser(input, ipfw.WithLabels())
+	next(t, parser, ipfw.Record{
+		Line: 1, Text: ":finish//part", Kind: ipfw.RecordLabel, Label: "finish//part",
+	})
+	next(t, parser, eof)
 }
 
 // verifies that a line starting with none of the known commands is
@@ -1055,18 +1119,23 @@ func Test_Parser_Next_CommandStubs(t *testing.T) {
 
 // verifies that every physical line counts, blank ones included.
 func Test_Parser_Next_LineNumbers(t *testing.T) {
-	parser := ipfw.NewParser("# a\n\n:L\n")
+	source := ruleset(`
+		# a
+
+		:L
+	`)
+	parser := ipfw.NewParser(source, ipfw.WithLabels())
 	next(t, parser, ipfw.Record{Line: 1, Text: "# a", Kind: ipfw.RecordComment, Comment: " a"})
 	next(t, parser, ipfw.Record{Line: 2, Kind: ipfw.RecordEmpty})
 	next(t, parser, ipfw.Record{Line: 3, Text: ":L", Kind: ipfw.RecordLabel, Label: "L"})
 	next(t, parser, eof)
 }
 
-// verifies that CRLF terminates rules, empty lines and failures without
-// changing record text, error positions or the next physical line.
+// verifies that CRLF preserves record text, error positions and advancement across physical lines.
 func Test_Parser_Next_CRLF(t *testing.T) {
 	t.Run("records", func(t *testing.T) {
-		parser := ipfw.NewParser("add pass ip from any to any\r\n\r\n:L\r\n")
+		source := ruleset("\n\t\tadd pass ip from any to any\r\n\t\t\r\n\t\t:L\r\n\t")
+		parser := ipfw.NewParser(source, ipfw.WithLabels())
 		var state ipfw.ReduceState
 		rec, err := parser.Next(&state)
 		require.Nil(t, err)
@@ -1078,7 +1147,8 @@ func Test_Parser_Next_CRLF(t *testing.T) {
 	})
 
 	t.Run("positioned error", func(t *testing.T) {
-		parser := ipfw.NewParser("\t:X y\t\r\n:L\r\n")
+		source := ruleset("\n\t\t:X y\t\r\n\t\t:L\r\n\t")
+		parser := ipfw.NewParser(source, ipfw.WithLabels())
 		nextError(
 			t,
 			parser,
@@ -1096,15 +1166,18 @@ func Test_Parser_Next_CRLF(t *testing.T) {
 
 // verifies that the last line needs no newline.
 func Test_Parser_Next_NoTrailingNewline(t *testing.T) {
-	parser := ipfw.NewParser(":L")
+	parser := ipfw.NewParser(":L", ipfw.WithLabels())
 	next(t, parser, ipfw.Record{Line: 1, Text: ":L", Kind: ipfw.RecordLabel, Label: "L"})
 	next(t, parser, eof)
 }
 
-// verifies that a failing line is skipped as a whole, so the next call
-// parses the following line and the input is always consumed.
+// verifies that a failing line is consumed and the next call parses the following line.
 func Test_Parser_Next_SkipsFailedLine(t *testing.T) {
-	parser := ipfw.NewParser("bad line\n:L\n")
+	source := ruleset(`
+		bad line
+		:L
+	`)
+	parser := ipfw.NewParser(source, ipfw.WithLabels())
 	nextError(
 		t,
 		parser,
@@ -1124,15 +1197,20 @@ func Test_ParseError_Position(t *testing.T) {
 	)
 	nextError(
 		t,
-		ipfw.NewParser("\t:X y\t\n"),
+		ipfw.NewParser("\t:X y\t\n", ipfw.WithLabels()),
 		ipfw.ParseError{Kind: ipfw.ErrExpectedNewlineOrEOF, Line: 1, Column: 3, Text: ":X y"},
 	)
 }
 
-// verifies that the iterator yields every record and stops right after the
-// first failure, which is its last value.
+// verifies that the iterator yields every record and stops after the first failure.
 func Test_Parser_All_StopsAtError(t *testing.T) {
-	parser := ipfw.NewParser(":A\n# c\nbad\n:B\n")
+	source := ruleset(`
+		:A
+		# c
+		bad
+		:B
+	`)
+	parser := ipfw.NewParser(source, ipfw.WithLabels())
 	var records []ipfw.Record
 	var errs []*ipfw.ParseError
 	for rec, err := range parser.Records(ipfw.DiscardState{}) {
@@ -1151,18 +1229,21 @@ func Test_Parser_All_StopsAtError(t *testing.T) {
 	require.ErrorIs(t, errs[2], ipfw.ErrExpectedLine)
 }
 
-// verifies that the iterator ends cleanly at the end of the input and
-// honours an early break.
+// verifies that the iterator stops at EOF and honours an early break.
 func Test_Parser_All_EOFAndBreak(t *testing.T) {
+	source := ruleset(`
+		:A
+		:B
+	`)
 	count := 0
-	for _, err := range ipfw.NewParser(":A\n:B\n").Records(ipfw.DiscardState{}) {
+	for _, err := range ipfw.NewParser(source, ipfw.WithLabels()).Records(ipfw.DiscardState{}) {
 		require.Nil(t, err)
 		count++
 	}
 	require.Equal(t, 2, count)
 
 	count = 0
-	for range ipfw.NewParser(":A\n:B\n").Records(ipfw.DiscardState{}) {
+	for range ipfw.NewParser(source, ipfw.WithLabels()).Records(ipfw.DiscardState{}) {
 		count++
 		break
 	}
@@ -1234,11 +1315,14 @@ func Test_Proto_Port_IsNumber(t *testing.T) {
 	require.False(t, ipfw.Port{Name: "ssh"}.IsNumber())
 }
 
-// verifies that steady-state parsing of comments, labels and blank lines
-// allocates nothing once the parser is reused.
+// verifies that repeated parsing of comments, labels and blank lines allocates nothing.
 func Test_Parser_Next_NoAllocs(t *testing.T) {
-	src := "# c\n:L\n\n"
-	parser := ipfw.NewParser(src)
+	src := ruleset(`
+		# c
+		:L
+
+	`)
+	parser := ipfw.NewParser(src, ipfw.WithLabels())
 	var state ipfw.ReduceState
 	ok := true
 	allocs := testing.AllocsPerRun(100, func() {
@@ -1314,6 +1398,428 @@ func Test_Parser_Next_InstructionNumber(t *testing.T) {
 				Line:   1,
 				Column: 4,
 				Text:   "add x",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			nextError(t, ipfw.NewParser(tc.input), tc.expected)
+		})
+	}
+}
+
+// verifies that pass aliases parse by prefix and invalid actions fail at the expected position.
+func Test_Parser_Next_ActionPass(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		expected ipfw.ParseError
+	}{
+		{name: "allow", input: "add allow _", expected: bodyError("add allow _", 10)},
+		{name: "pass", input: "add pass _", expected: bodyError("add pass _", 9)},
+		{name: "accept", input: "add accept _", expected: bodyError("add accept _", 11)},
+		{name: "permit", input: "add permit _", expected: bodyError("add permit _", 11)},
+		{
+			name:     "numbered rule",
+			input:    "add 100 permit _",
+			expected: bodyError("add 100 permit _", 15),
+		},
+		{
+			name:  "prefix match then whitespace expected",
+			input: "add passthru x",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 8,
+				Text:   "add passthru x",
+			},
+		},
+		{
+			name:  "truncated keyword",
+			input: "add pas ip",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedAction,
+				Line:   1,
+				Column: 4,
+				Text:   "add pas ip",
+			},
+		},
+		{
+			name:  "no whitespace after the action",
+			input: "add allow\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 9,
+				Text:   "add allow",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			nextError(t, ipfw.NewParser(tc.input), tc.expected)
+		})
+	}
+	var state ipfw.ReduceState
+	rec, err := ipfw.NewParser("add accept ip from any to any\n").Next(&state)
+	require.Nil(t, err)
+	require.Equal(t, passAnyToAny(1, "add accept ip from any to any"), *rec)
+}
+
+// bodyError is the failure of a line whose body is `_`, a token that is
+// never a protocol: reaching it proves the header before it parsed.
+func bodyError(text string, column int) ipfw.ParseError {
+	return ipfw.ParseError{
+		Kind:   ipfw.ErrExpectedEitherIPOrProto,
+		Line:   1,
+		Column: column,
+		Text:   text,
+	}
+}
+
+// verifies that both spellings of the deny action are recognized by prefix.
+func Test_Parser_Next_ActionDeny(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		expected ipfw.ParseError
+	}{
+		{name: "deny", input: "add deny _", expected: bodyError("add deny _", 9)},
+		{name: "drop", input: "add drop _", expected: bodyError("add drop _", 9)},
+		{
+			name:  "prefix match then whitespace expected",
+			input: "add denyall _",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 8,
+				Text:   "add denyall _",
+			},
+		},
+		{
+			name:  "denied is not deny",
+			input: "add denied _",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedAction,
+				Line:   1,
+				Column: 4,
+				Text:   "add denied _",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			nextError(t, ipfw.NewParser(tc.input), tc.expected)
+		})
+	}
+	var state ipfw.ReduceState
+	rec, err := ipfw.NewParser("add deny ip from any to any").Next(&state)
+	require.Nil(t, err)
+	expected := passAnyToAny(1, "add deny ip from any to any")
+	expected.Instruction.Action = ipfw.Action{Kind: ipfw.ActionDeny}
+	require.Equal(t, expected, *rec)
+}
+
+// verifies that the count action is recognized.
+func Test_Parser_Next_ActionCount(t *testing.T) {
+	nextError(t, ipfw.NewParser("add count _"), bodyError("add count _", 10))
+	var state ipfw.ReduceState
+	rec, err := ipfw.NewParser("add count ip from any to any").Next(&state)
+	require.Nil(t, err)
+	expected := passAnyToAny(1, "add count ip from any to any")
+	expected.Instruction.Action = ipfw.Action{Kind: ipfw.ActionCount}
+	require.Equal(t, expected, *rec)
+}
+
+// verifies that symbolic skipto requires the explicit label option.
+func Test_Parser_Next_SkipToLabelsOptIn(t *testing.T) {
+	const input = "add skipto :EXAMPLE_NEXT ip from any to any"
+	for _, testCase := range []struct {
+		name    string
+		labels  bool
+		options []ipfw.ParserOption
+	}{
+		{name: "default"},
+		{name: "labels", labels: true, options: []ipfw.ParserOption{ipfw.WithLabels()}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			parser := ipfw.NewParser(input, testCase.options...)
+			var state ipfw.ReduceState
+			record, err := parser.Next(&state)
+			if testCase.labels {
+				require.Nil(t, err)
+				require.Equal(t, ipfw.Record{
+					Line: 1, Text: input, Kind: ipfw.RecordInstruction,
+					Instruction: ipfw.Instruction{Action: ipfw.Action{
+						Kind:   ipfw.ActionSkipTo,
+						SkipTo: ipfw.SkipTo{Kind: ipfw.SkipToLabel, Label: "EXAMPLE_NEXT"},
+					}},
+				}, *record)
+				require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), state)
+			} else {
+				require.Nil(t, record)
+				require.NotNil(t, err)
+				require.Equal(t, ipfw.ParseError{
+					Kind: ipfw.ErrExpectedSkipTo, Line: 1, Column: 11, Text: input,
+				}, *err)
+				require.Equal(t, ipfw.ReduceState{}, state)
+			}
+			next(t, parser, eof)
+		})
+	}
+}
+
+// verifies that numeric jumps and state-flow names retain their default syntax and metadata.
+func Test_Parser_Next_StandardActionsWithoutCompatibility(t *testing.T) {
+	cases := []struct {
+		name   string
+		input  string
+		action ipfw.Action
+		state  ipfw.ReduceState
+	}{
+		{
+			name: "numeric jump", input: "add skipto 100 ip from any to any // rule # hash",
+			action: ipfw.Action{
+				Kind: ipfw.ActionSkipTo, SkipTo: ipfw.SkipTo{Kind: ipfw.SkipToNumber, Number: 100},
+			},
+			state: anyToAnyState(ipfw.ProtoIPAny),
+		},
+		{
+			name: "tablearg", input: "add skipto tablearg ip from any to any // rule # hash",
+			action: ipfw.Action{Kind: ipfw.ActionSkipTo, SkipTo: ipfw.SkipTo{Kind: ipfw.SkipToTableArg}},
+			state:  anyToAnyState(ipfw.ProtoIPAny),
+		},
+		{
+			name: "state flow", input: "add check-state :flow // rule # hash",
+			action: ipfw.Action{Kind: ipfw.ActionCheckState, Flow: "flow"},
+		},
+		{
+			name: "keep flow", input: "add pass ip from any to any keep-state :flow // rule # hash",
+			action: ipfw.Action{Kind: ipfw.ActionPass},
+			state: ipfw.ReduceState{
+				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Options:      []ipfw.Opt{{Kind: ipfw.OptKeepState, Text: "flow"}},
+			},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			parser := ipfw.NewParser(testCase.input)
+			var state ipfw.ReduceState
+			record, err := parser.Next(&state)
+			require.Nil(t, err)
+			require.Equal(t, ipfw.Record{
+				Line: 1, Text: testCase.input, Kind: ipfw.RecordInstruction, Comment: " hash",
+				Instruction: ipfw.Instruction{Action: testCase.action, InlineComment: " rule"},
+			}, *record)
+			require.Equal(t, testCase.state, state)
+			next(t, parser, eof)
+		})
+	}
+}
+
+// verifies that skipto accepts enabled labels, positive numbers and tablearg, with exact errors.
+func Test_Parser_Next_ActionSkipTo(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		options  []ipfw.ParserOption
+		expected ipfw.ParseError
+	}{
+		{
+			name:     "label",
+			input:    "add skipto :ADMIN_RULES _",
+			options:  []ipfw.ParserOption{ipfw.WithLabels()},
+			expected: bodyError("add skipto :ADMIN_RULES _", 24),
+		},
+		{name: "number", input: "add skipto 1500 _", expected: bodyError("add skipto 1500 _", 16)},
+		{
+			name:     "tablearg",
+			input:    "add skipto tablearg _",
+			expected: bodyError("add skipto tablearg _", 20),
+		},
+		{
+			name:  "no whitespace",
+			input: "add skipto",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 10,
+				Text:   "add skipto",
+			},
+		},
+		{
+			name:  "keyword glued to a word",
+			input: "add skiptox _",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 10,
+				Text:   "add skiptox _",
+			},
+		},
+		{
+			name:  "unknown target",
+			input: "add skipto x",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedSkipTo,
+				Line:   1,
+				Column: 11,
+				Text:   "add skipto x",
+			},
+		},
+		{
+			name:    "label without a name",
+			input:   "add skipto :",
+			options: []ipfw.ParserOption{ipfw.WithLabels()},
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedToken,
+				Line:   1,
+				Column: 12,
+				Text:   "add skipto :",
+			},
+		},
+		{
+			name:  "overflowing number",
+			input: "add skipto 4294967296",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedSkipTo,
+				Line:   1,
+				Column: 11,
+				Text:   "add skipto 4294967296",
+			},
+		},
+		{
+			name:  "zero target",
+			input: "add skipto 0",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedSkipTo,
+				Line:   1,
+				Column: 11,
+				Text:   "add skipto 0",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			nextError(t, ipfw.NewParser(tc.input, tc.options...), tc.expected)
+		})
+	}
+
+	targets := []struct {
+		name    string
+		input   string
+		options []ipfw.ParserOption
+		num     uint32
+		skipTo  ipfw.SkipTo
+	}{
+		{
+			name:    "label",
+			input:   "add skipto :ADMIN_RULES ip from any to any",
+			options: []ipfw.ParserOption{ipfw.WithLabels()},
+			skipTo:  ipfw.SkipTo{Kind: ipfw.SkipToLabel, Label: "ADMIN_RULES"},
+		},
+		{
+			name:   "number",
+			input:  "add 100 skipto 200 ip from any to any",
+			num:    100,
+			skipTo: ipfw.SkipTo{Kind: ipfw.SkipToNumber, Number: 200},
+		},
+		{
+			name:   "tablearg",
+			input:  "add skipto tablearg ip from any to any",
+			skipTo: ipfw.SkipTo{Kind: ipfw.SkipToTableArg},
+		},
+	}
+	for _, tc := range targets {
+		t.Run(tc.name, func(t *testing.T) {
+			var state ipfw.ReduceState
+			rec, err := ipfw.NewParser(tc.input, tc.options...).Next(&state)
+			require.Nil(t, err)
+			expected := passAnyToAny(1, tc.input)
+			expected.Instruction.Num = tc.num
+			expected.Instruction.Action = ipfw.Action{Kind: ipfw.ActionSkipTo, SkipTo: tc.skipTo}
+			require.Equal(t, expected, *rec)
+			require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), state)
+		})
+	}
+}
+
+// verifies that check-state accepts an optional flow and comment, rejecting other trailing tokens.
+func Test_Parser_Next_ActionCheckState(t *testing.T) {
+	checkState := func(line int, text, flow string, num uint32) ipfw.Record {
+		return ipfw.Record{
+			Line: line,
+			Text: text,
+			Kind: ipfw.RecordInstruction,
+			Instruction: ipfw.Instruction{
+				Num:    num,
+				Action: ipfw.Action{Kind: ipfw.ActionCheckState, Flow: flow},
+			},
+		}
+	}
+	next(
+		t,
+		ipfw.NewParser("add check-state :any\n"),
+		checkState(1, "add check-state :any", "any", 0),
+	)
+	next(t, ipfw.NewParser("add check-state"), checkState(1, "add check-state", "", 0))
+	next(
+		t,
+		ipfw.NewParser("add 10 check-state :x\n"),
+		checkState(1, "add 10 check-state :x", "x", 10),
+	)
+
+	source := ruleset(`
+		add check-state :any // comment
+		add pass ip from any to any
+	`)
+	parser := ipfw.NewParser(source)
+	expected := checkState(1, "add check-state :any // comment", "any", 0)
+	expected.Instruction.InlineComment = " comment"
+	next(t, parser, expected)
+	var state ipfw.ReduceState
+	rec, err := parser.Next(&state)
+	require.Nil(t, err)
+	require.Equal(t, passAnyToAny(2, "add pass ip from any to any"), *rec)
+	require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), state)
+	next(t, parser, eof)
+
+	cases := []struct {
+		name     string
+		input    string
+		expected ipfw.ParseError
+	}{
+		{
+			name:  "colon without a name",
+			input: "add check-state :\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedNewlineOrEOF,
+				Line:   1,
+				Column: 16,
+				Text:   "add check-state :",
+			},
+		},
+		{
+			name:  "word after the keyword",
+			input: "add check-state foo",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedNewlineOrEOF,
+				Line:   1,
+				Column: 16,
+				Text:   "add check-state foo",
+			},
+		},
+		{
+			name:  "keyword glued to a word",
+			input: "add check-statex",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedNewlineOrEOF,
+				Line:   1,
+				Column: 15,
+				Text:   "add check-statex",
 			},
 		},
 	}
@@ -3147,7 +3653,7 @@ func Test_Parser_Next_StateError(t *testing.T) {
 		add allow foobar from any to any # callback
 		:AFTER# next
 	`)
-	parser := ipfw.NewParser(input)
+	parser := ipfw.NewParser(input, ipfw.WithLabels())
 	next(t, parser, ipfw.Record{Line: 1, Kind: ipfw.RecordEmpty})
 	_, err = parser.Next(rejectingState{err: boom})
 	require.NotNil(t, err)
@@ -3234,12 +3740,12 @@ func Test_Parser_Next_CustomTarget(t *testing.T) {
 			},
 		},
 		{
-			name:  "macro name in a braced group",
-			input: "add allow tcp from { host.example.com } to { _TEST_SERVERS_ }\n",
+			name:  "custom token in a braced group",
+			input: "add allow tcp from { host.example.com } to { custom:first }\n",
 			state: ipfw.ReduceState{
 				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 				Sources:      []ipfw.Target{{Kind: ipfw.TargetHostname, Text: "host.example.com"}},
-				Destinations: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "_TEST_SERVERS_"}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "custom:first"}},
 			},
 		},
 		{
@@ -3454,7 +3960,7 @@ func Test_Parser_Next_CommentTrailingWhitespace(t *testing.T) {
 
 // verifies that a long label name is taken whole.
 func Test_Parser_Next_LongLabel(t *testing.T) {
-	next(t, ipfw.NewParser(":LONG_LABEL_NAME_42\n"), ipfw.Record{
+	next(t, ipfw.NewParser(":LONG_LABEL_NAME_42\n", ipfw.WithLabels()), ipfw.Record{
 		Line:  1,
 		Text:  ":LONG_LABEL_NAME_42",
 		Kind:  ipfw.RecordLabel,
@@ -3470,9 +3976,9 @@ var (
 
 // benchmarkNext measures parsing one line over and over with a reused
 // parser and a warmed-up state.
-func benchmarkNext(b *testing.B, line string) {
+func benchmarkNext(b *testing.B, line string, options ...ipfw.ParserOption) {
 	b.Helper()
-	parser := ipfw.NewParser(line)
+	parser := ipfw.NewParser(line, options...)
 	var state ipfw.ReduceState
 	if _, err := parser.Next(&state); err != nil {
 		b.Fatal(err)
@@ -3501,7 +4007,7 @@ var fuzzSeeds = []string{
 	"add 100 deny log logamount 5 tag 7 tcp from any 22 to any 80 established\n",
 	"add allow { tcp or udp } from { 192.0.2.0/24 or not ::1 } 1024-65535 to me domain\n",
 	"add skipto :LBL ip from table(t) to host.example.com { in or out }\n",
-	"add count ip from `node-1.example.net' to _MACRO_ via vlan1?? keep-state :flow\n",
+	"add count ip from `node-1.example.net' to custom:first via vlan1?? keep-state :flow\n",
 	"add check-state :flow log\n",
 	"add deny ip from any to any not dst-port 22,80 tcpflags syn,!ack icmptypes 0,8\n",
 	"add pass ip from any to any proto tcp via table(t,:L) antispoof frag diverted // c\n",
@@ -3552,36 +4058,41 @@ func Fuzz_Parser_Next(f *testing.F) {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, input string) {
-		parser := ipfw.NewParser(input)
-		replay := ipfw.NewParser("")
-		var state, again ipfw.ReduceState
-		for lines := 0; ; lines++ {
-			require.LessOrEqual(t, lines, strings.Count(input, "\n")+1, "the parser must terminate")
-			state.Reset()
-			rec, err := parser.Next(&state)
-			if err != nil {
-				require.GreaterOrEqual(t, err.Line, 1)
-				require.GreaterOrEqual(t, err.Column, 0)
-				require.LessOrEqual(t, err.Column, len(err.Text))
-				require.Contains(t, input, err.Text)
-				require.NotEmpty(t, err.Error())
-				continue
+		for _, options := range [][]ipfw.ParserOption{
+			nil,
+			{ipfw.WithLabels()},
+		} {
+			parser := ipfw.NewParser(input, options...)
+			replay := ipfw.NewParser("", options...)
+			var state, again ipfw.ReduceState
+			for lines := 0; ; lines++ {
+				require.LessOrEqual(t, lines, strings.Count(input, "\n")+1, "the parser must terminate")
+				state.Reset()
+				rec, err := parser.Next(&state)
+				if err != nil {
+					require.GreaterOrEqual(t, err.Line, 1)
+					require.GreaterOrEqual(t, err.Column, 0)
+					require.LessOrEqual(t, err.Column, len(err.Text))
+					require.Contains(t, input, err.Text)
+					require.NotEmpty(t, err.Error())
+					continue
+				}
+				if rec.Kind == ipfw.RecordEOF {
+					break
+				}
+				require.Contains(t, input, rec.Text)
+				if rec.Kind == ipfw.RecordEmpty {
+					continue
+				}
+				expected := *rec
+				expected.Line = 1
+				again.Reset()
+				replay.Reset(rec.Text)
+				replayed, replayErr := replay.Next(&again)
+				require.Nil(t, replayErr, "the text of a record must parse again")
+				require.Equal(t, expected, *replayed)
+				require.Equal(t, emptyToNil(state), emptyToNil(again))
 			}
-			if rec.Kind == ipfw.RecordEOF {
-				break
-			}
-			require.Contains(t, input, rec.Text)
-			if rec.Kind == ipfw.RecordEmpty {
-				continue
-			}
-			expected := *rec
-			expected.Line = 1
-			again.Reset()
-			replay.Reset(rec.Text)
-			replayed, replayErr := replay.Next(&again)
-			require.Nil(t, replayErr, "the text of a record must parse again")
-			require.Equal(t, expected, *replayed)
-			require.Equal(t, emptyToNil(state), emptyToNil(again))
 		}
 	})
 }
@@ -3675,7 +4186,7 @@ var syntheticRuleset = sync.OnceValue(func() string {
 			b.WriteString(" from ")
 			b.WriteString(pick(
 				"any", "me", "192.0.2.0/24", "2001:db8::/32", "host.example.com",
-				"table(_T1_)", "{ 192.0.2.1 or ::1 or me6 }", "not 198.51.100.0/24", "_MACRO_",
+				"table(_T1_)", "{ 192.0.2.1 or ::1 or me6 }", "not 198.51.100.0/24", "custom:first",
 			))
 			b.WriteString(pick("", "", " 22", " 1024-65535", " 22,80,443", " not 22"))
 			b.WriteString(" to ")
@@ -3701,7 +4212,7 @@ var syntheticRuleset = sync.OnceValue(func() string {
 // without a single allocation.
 func Test_Parser_SyntheticRuleset_NoAllocs(t *testing.T) {
 	src := syntheticRuleset()
-	parser := ipfw.NewParser(src)
+	parser := ipfw.NewParser(src, ipfw.WithLabels())
 	var state ipfw.ReduceState
 	for _, err := range parser.Records(&state) {
 		require.Nil(t, err)
@@ -3727,7 +4238,7 @@ func Test_Parser_SyntheticRuleset_NoAllocs(t *testing.T) {
 
 func Benchmark_Parser_Next_Discard(b *testing.B) {
 	src := syntheticRuleset()
-	parser := ipfw.NewParser(src)
+	parser := ipfw.NewParser(src, ipfw.WithLabels())
 	b.SetBytes(int64(len(src)))
 	b.ReportAllocs()
 	for b.Loop() {
@@ -3746,7 +4257,7 @@ func Benchmark_Parser_Next_Discard(b *testing.B) {
 
 func Benchmark_Parser_Next_Reduce(b *testing.B) {
 	src := syntheticRuleset()
-	parser := ipfw.NewParser(src)
+	parser := ipfw.NewParser(src, ipfw.WithLabels())
 	var state ipfw.ReduceState
 	b.SetBytes(int64(len(src)))
 	b.ReportAllocs()
@@ -3803,5 +4314,5 @@ func Benchmark_Parser_Next_InlineCommentLong(b *testing.B) {
 }
 
 func Benchmark_Parser_Next_Label(b *testing.B) {
-	benchmarkNext(b, ":LONG_LABEL_NAME_42\n")
+	benchmarkNext(b, ":LONG_LABEL_NAME_42\n", ipfw.WithLabels())
 }
