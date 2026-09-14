@@ -143,6 +143,116 @@ func Test_CommandHook_Table(t *testing.T) {
 	}
 }
 
+// verifies that command hooks receive the command prefix and keep parser-owned hash metadata.
+func Test_CommandHook_HashComment(t *testing.T) {
+	input := ruleset(`
+		ALLOW_FROM_ANY(tcp, any, 00443) # {"id": "HOOK-7"}
+		:AFTER
+	`)
+	var received string
+	hook := func(line string, state ipfw.State) (ipfw.Record, int, error) {
+		received = line
+		return allowFromAny(line, state)
+	}
+	parser := ipfw.NewParser(input, ipfw.WithCommandHook(hook))
+	var state ipfw.ReduceState
+	record, err := parser.Next(&state)
+	require.Nil(t, err)
+	require.Equal(t, "ALLOW_FROM_ANY(tcp, any, 00443) ", received)
+	require.Equal(t, ipfw.Record{
+		Line:        1,
+		Text:        `ALLOW_FROM_ANY(tcp, any, 00443) # {"id": "HOOK-7"}`,
+		Kind:        ipfw.RecordInstruction,
+		Comment:     ` {"id": "HOOK-7"}`,
+		Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
+	}, *record)
+	require.Equal(t, ipfw.ReduceState{
+		Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+		Sources:          []ipfw.Target{{Kind: ipfw.TargetAny}},
+		Destinations:     []ipfw.Target{{Kind: ipfw.TargetAny}},
+		DestinationPorts: []ipfw.PortMatch{portNumber(443)},
+	}, state)
+	next(t, parser, ipfw.Record{Line: 2, Text: ":AFTER", Kind: ipfw.RecordLabel, Label: "AFTER"})
+	next(t, parser, eof)
+
+	parser = ipfw.NewParser("IGNORE# metadata\n", ipfw.WithCommandHook(swallowing))
+	next(t, parser, ipfw.Record{
+		Line:    1,
+		Text:    "IGNORE# metadata",
+		Kind:    ipfw.RecordEmpty,
+		Comment: " metadata",
+	})
+	next(t, parser, eof)
+}
+
+// verifies that command-hook consumption and errors stay within the prefix before the hash.
+func Test_CommandHook_HashCommentErrors(t *testing.T) {
+	boom := errors.New("command failed")
+	cases := []struct {
+		name     string
+		consumed int
+		err      error
+		kind     ipfw.ErrorKind
+		column   int
+	}{
+		{
+			name:     "negative consumption",
+			consumed: -1,
+			err:      boom,
+			kind:     ipfw.ErrState,
+			column:   0,
+		},
+		{
+			name:     "error at chosen offset",
+			consumed: 5,
+			err:      boom,
+			kind:     ipfw.ErrState,
+			column:   5,
+		},
+		{
+			name:     "error beyond prefix",
+			consumed: 1000,
+			err:      boom,
+			kind:     ipfw.ErrState,
+			column:   12,
+		},
+		{name: "declined command", kind: ipfw.ErrExpectedLine},
+		{
+			name:     "partial command",
+			consumed: 6,
+			kind:     ipfw.ErrExpectedNewlineOrEOF,
+			column:   7,
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			input := ruleset(`
+				CUSTOM line # metadata
+				:AFTER
+			`)
+			hook := func(line string, _ ipfw.State) (ipfw.Record, int, error) {
+				require.Equal(t, "CUSTOM line ", line)
+				return ipfw.Record{}, testCase.consumed, testCase.err
+			}
+			parser := ipfw.NewParser(input, ipfw.WithCommandHook(hook))
+			nextError(t, parser, ipfw.ParseError{
+				Kind:   testCase.kind,
+				Err:    testCase.err,
+				Line:   1,
+				Column: testCase.column,
+				Text:   "CUSTOM line # metadata",
+			})
+			next(t, parser, ipfw.Record{
+				Line:  2,
+				Text:  ":AFTER",
+				Kind:  ipfw.RecordLabel,
+				Label: "AFTER",
+			})
+			next(t, parser, eof)
+		})
+	}
+}
+
 // verifies that a hook consuming a line without a record yields an empty
 // record for it, the next line parsing as usual.
 func Test_CommandHook_Swallowed(t *testing.T) {
@@ -252,20 +362,37 @@ func Test_CommandHook_Errors(t *testing.T) {
 // verifies that a line handled by a hook built from the sub-parsers parses
 // into a warmed-up state without allocating.
 func Test_CommandHook_NoAllocs(t *testing.T) {
-	src := "ALLOW_FROM_ANY(tcp, { _VPN_LOOPBACKS_ }, 1-65535)\n"
-	parser := ipfw.NewParser(src, ipfw.WithCommandHook(allowFromAny))
-	var state ipfw.ReduceState
-	_, _ = parser.Next(&state)
-	ok := true
-	allocs := testing.AllocsPerRun(100, func() {
-		parser.Reset(src)
-		state.Reset()
-		if _, err := parser.Next(&state); err != nil {
-			ok = false
-		}
-	})
-	require.True(t, ok)
-	require.Zero(t, allocs)
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "plain",
+			input: "ALLOW_FROM_ANY(tcp, { _VPN_LOOPBACKS_ }, 1-65535)\n",
+		},
+		{
+			name:  "hash comment",
+			input: "ALLOW_FROM_ANY(tcp, { _VPN_LOOPBACKS_ }, 1-65535) # metadata\r\n",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			parser := ipfw.NewParser(testCase.input, ipfw.WithCommandHook(allowFromAny))
+			var state ipfw.ReduceState
+			_, err := parser.Next(&state)
+			require.Nil(t, err)
+			ok := true
+			allocations := testing.AllocsPerRun(100, func() {
+				parser.Reset(testCase.input)
+				state.Reset()
+				if _, err := parser.Next(&state); err != nil {
+					ok = false
+				}
+			})
+			require.True(t, ok)
+			require.Zero(t, allocations)
+		})
+	}
 }
 
 // customOptions is an option hook for two options the grammar does not
@@ -376,6 +503,126 @@ func Test_OptionHook_Precedence(t *testing.T) {
 	require.Positive(t, calls)
 }
 
+// verifies that option hooks cannot consume hash payloads or following physical lines.
+func Test_OptionHook_HashComment(t *testing.T) {
+	cases := []struct {
+		name      string
+		input     string
+		hookInput string
+		expected  ipfw.Record
+	}{
+		{
+			name:      "hash on this line",
+			input:     "add pass ip from any to any custom # metadata\r\n:AFTER# next\n",
+			hookInput: "custom ",
+			expected: ipfw.Record{
+				Line:        1,
+				Text:        "add pass ip from any to any custom # metadata",
+				Kind:        ipfw.RecordInstruction,
+				Comment:     " metadata",
+				Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
+			},
+		},
+		{
+			name: "hash on next line after LF",
+			input: ruleset(`
+				add pass ip from any to any custom
+				:AFTER# next
+			`),
+			hookInput: "custom\n",
+			expected: ipfw.Record{
+				Line:        1,
+				Text:        "add pass ip from any to any custom",
+				Kind:        ipfw.RecordInstruction,
+				Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
+			},
+		},
+		{
+			name:      "hash on next line after CRLF",
+			input:     "add pass ip from any to any custom\r\n:AFTER# next\n",
+			hookInput: "custom\r\n",
+			expected: ipfw.Record{
+				Line:        1,
+				Text:        "add pass ip from any to any custom",
+				Kind:        ipfw.RecordInstruction,
+				Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
+			},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			option := ipfw.Opt{Kind: ipfw.OptCustom, Text: "custom"}
+			calls := 0
+			hook := func(rest string) (ipfw.Opt, int, error) {
+				calls++
+				require.Equal(t, testCase.hookInput, rest)
+				return option, 1000, nil
+			}
+			parser := ipfw.NewParser(testCase.input, ipfw.WithOptionHook(hook))
+			var state ipfw.ReduceState
+			record, err := parser.Next(&state)
+			require.Nil(t, err)
+			require.Positive(t, calls)
+			require.Equal(t, testCase.expected, *record)
+			expectedState := anyToAnyState(ipfw.ProtoIPAny)
+			expectedState.Options = []ipfw.Opt{option}
+			require.Equal(t, expectedState, state)
+			next(t, parser, ipfw.Record{
+				Line:    2,
+				Text:    ":AFTER# next",
+				Kind:    ipfw.RecordLabel,
+				Comment: " next",
+				Label:   "AFTER",
+			})
+			next(t, parser, eof)
+		})
+	}
+}
+
+// verifies that option-hook failures retain the original text and prefix-relative positions.
+func Test_OptionHook_HashCommentErrors(t *testing.T) {
+	cases := []struct {
+		name     string
+		consumed int
+		column   int
+	}{
+		{name: "negative consumption", consumed: -1, column: 28},
+		{name: "error at chosen offset", consumed: 2, column: 30},
+		{name: "error beyond prefix", consumed: 1000, column: 35},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			input := ruleset(`
+				add pass ip from any to any custom # metadata
+				:AFTER
+			`)
+			hook := func(rest string) (ipfw.Opt, int, error) {
+				require.Equal(t, "custom ", rest)
+				return ipfw.Opt{}, testCase.consumed, ipfw.ErrExpectedOpt
+			}
+			parser := ipfw.NewParser(input, ipfw.WithOptionHook(hook))
+			var state ipfw.ReduceState
+			record, err := parser.Next(&state)
+			require.Nil(t, record)
+			require.NotNil(t, err)
+			require.Equal(t, ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedOpt,
+				Line:   1,
+				Column: testCase.column,
+				Text:   "add pass ip from any to any custom # metadata",
+			}, *err)
+			require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), state)
+			next(t, parser, ipfw.Record{
+				Line:  2,
+				Text:  ":AFTER",
+				Kind:  ipfw.RecordLabel,
+				Label: "AFTER",
+			})
+			next(t, parser, eof)
+		})
+	}
+}
+
 // verifies the failures around an option hook.
 //
 // A declined token is an unknown option, a hook error is positioned at the
@@ -447,18 +694,36 @@ func Test_ParseOptions_Hook(t *testing.T) {
 // verifies that a line with custom options parses into a warmed-up state
 // without allocating.
 func Test_OptionHook_NoAllocs(t *testing.T) {
-	src := "add allow tcp from any to any uid root { setup or in } established\n"
-	parser := ipfw.NewParser(src, ipfw.WithOptionHook(customOptions))
-	var state ipfw.ReduceState
-	_, _ = parser.Next(&state)
-	ok := true
-	allocs := testing.AllocsPerRun(100, func() {
-		parser.Reset(src)
-		state.Reset()
-		if _, err := parser.Next(&state); err != nil {
-			ok = false
-		}
-	})
-	require.True(t, ok)
-	require.Zero(t, allocs)
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "plain",
+			input: "add allow tcp from any to any uid root { setup or in } established\n",
+		},
+		{
+			name: "hash comment",
+			input: "add allow tcp from any to any uid root { setup or in } established " +
+				"# metadata\r\n",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			parser := ipfw.NewParser(testCase.input, ipfw.WithOptionHook(customOptions))
+			var state ipfw.ReduceState
+			_, err := parser.Next(&state)
+			require.Nil(t, err)
+			ok := true
+			allocations := testing.AllocsPerRun(100, func() {
+				parser.Reset(testCase.input)
+				state.Reset()
+				if _, err := parser.Next(&state); err != nil {
+					ok = false
+				}
+			})
+			require.True(t, ok)
+			require.Zero(t, allocations)
+		})
+	}
 }

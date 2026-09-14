@@ -75,6 +75,23 @@ for {
 
 Every token keeps its text: a network is `Target{Kind: TargetNetwork4, Text: "192.0.2.0/24"}`, a service is `Port{Name: "ssh"}`. See `ExampleParser_Next`.
 
+The first `#` on a physical line starts a comment before the command is parsed, as in FreeBSD file
+input. It may stand alone or follow a rule, table command or label, even without separating
+whitespace.
+`Record.Comment` borrows the payload after `#`, preserving leading space and trimming trailing
+whitespace. `Record.Text` keeps the complete original line, including both comment markers and
+payloads, without leading or trailing whitespace.
+
+Rule comments introduced by `//` remain in `Instruction.InlineComment`, with the same payload
+whitespace rules. In `add pass ip from any to any // rule # metadata`, the inline payload is ` rule`
+and the hash payload is ` metadata`. The first hash separates the line even inside quoted text.
+Standalone `//` and slash comments after tables or labels are not enabled by this behavior.
+
+LF, CRLF and a final line without a newline each produce one record. Copy the returned `Record`
+before the next `Next` or `Reset` if it must be kept. Its strings continue to borrow the original
+input.
+A reusable `State` must be reset explicitly between records, including after a parse error.
+
 ## Errors
 
 A line the grammar does not accept is a `*ParseError` carrying the line, the column and the text, which `Diag` renders:

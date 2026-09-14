@@ -84,8 +84,583 @@ func Test_Parser_Next_Comment(t *testing.T) {
 	next(t, ipfw.NewParser("#"), ipfw.Record{Line: 1, Text: "#", Kind: ipfw.RecordComment})
 }
 
-// verifies that a label line yields the name without the colon and that a
-// missing name or trailing content is a positioned error.
+// verifies that trailing hash metadata leaves the complete rule and body intact.
+func Test_Parser_Next_TrailingHashComment(t *testing.T) {
+	const input = "add pass ip from any to any # {\"id\": \"HASH-7\"}\n"
+	parser := ipfw.NewParser(input)
+	var state ipfw.ReduceState
+	record, err := parser.Next(&state)
+	require.Nil(t, err)
+	require.Equal(t, ipfw.Record{
+		Line:        1,
+		Text:        `add pass ip from any to any # {"id": "HASH-7"}`,
+		Kind:        ipfw.RecordInstruction,
+		Comment:     ` {"id": "HASH-7"}`,
+		Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
+	}, *record)
+	require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), state)
+	next(t, parser, eof)
+}
+
+// verifies that quoting inside a slash comment does not hide the first hash separator.
+func Test_Parser_Next_HashCommentInQuotedText(t *testing.T) {
+	const input = `add pass ip from any to any // {"id": "before#after"}`
+	parser := ipfw.NewParser(input)
+	var state ipfw.ReduceState
+	record, err := parser.Next(&state)
+	require.Nil(t, err)
+	expected := passAnyToAny(1, input)
+	expected.Instruction.InlineComment = ` {"id": "before`
+	expected.Comment = `after"}`
+	require.Equal(t, expected, *record)
+	require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), state)
+	next(t, parser, eof)
+}
+
+// verifies that the first hash separates borrowed metadata for every supported record kind.
+func Test_Parser_Next_HashComments(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		expected ipfw.Record
+		state    ipfw.ReduceState
+	}{
+		{
+			name:  "rule with LF",
+			input: "\t add pass ip from any to any # metadata \t\n",
+			expected: ipfw.Record{
+				Line:        1,
+				Text:        "add pass ip from any to any # metadata",
+				Kind:        ipfw.RecordInstruction,
+				Comment:     " metadata",
+				Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
+			},
+			state: anyToAnyState(ipfw.ProtoIPAny),
+		},
+		{
+			name:  "rule with CRLF",
+			input: "\t add pass ip from any to any # metadata \t\r\n",
+			expected: ipfw.Record{
+				Line:        1,
+				Text:        "add pass ip from any to any # metadata",
+				Kind:        ipfw.RecordInstruction,
+				Comment:     " metadata",
+				Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
+			},
+			state: anyToAnyState(ipfw.ProtoIPAny),
+		},
+		{
+			name:  "rule at EOF",
+			input: "\t add pass ip from any to any # metadata \t",
+			expected: ipfw.Record{
+				Line:        1,
+				Text:        "add pass ip from any to any # metadata",
+				Kind:        ipfw.RecordInstruction,
+				Comment:     " metadata",
+				Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
+			},
+			state: anyToAnyState(ipfw.ProtoIPAny),
+		},
+		{
+			name:  "empty rule comment",
+			input: "add pass ip from any to any # \t\n",
+			expected: ipfw.Record{
+				Line:        1,
+				Text:        "add pass ip from any to any #",
+				Kind:        ipfw.RecordInstruction,
+				Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
+			},
+			state: anyToAnyState(ipfw.ProtoIPAny),
+		},
+		{
+			name:  "adjacent empty rule comment",
+			input: "add pass ip from any to any#",
+			expected: ipfw.Record{
+				Line:        1,
+				Text:        "add pass ip from any to any#",
+				Kind:        ipfw.RecordInstruction,
+				Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
+			},
+			state: anyToAnyState(ipfw.ProtoIPAny),
+		},
+		{
+			name:  "adjacent rule metadata",
+			input: "add pass ip from any to any#metadata\n",
+			expected: ipfw.Record{
+				Line:        1,
+				Text:        "add pass ip from any to any#metadata",
+				Kind:        ipfw.RecordInstruction,
+				Comment:     "metadata",
+				Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
+			},
+			state: anyToAnyState(ipfw.ProtoIPAny),
+		},
+		{
+			name:  "check-state",
+			input: "add check-state# metadata\n",
+			expected: ipfw.Record{
+				Line:        1,
+				Text:        "add check-state# metadata",
+				Kind:        ipfw.RecordInstruction,
+				Comment:     " metadata",
+				Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionCheckState}},
+			},
+		},
+		{
+			name:  "table create",
+			input: "table META create type addr#metadata\n",
+			expected: ipfw.Record{
+				Line:    1,
+				Text:    "table META create type addr#metadata",
+				Kind:    ipfw.RecordTable,
+				Comment: "metadata",
+				Table:   ipfw.Table{Name: "META", Kind: ipfw.TableCreate, Type: ipfw.TableTypeAddr},
+			},
+		},
+		{
+			name:  "table key without value",
+			input: "table META add 192.0.2.0/24# key\n",
+			expected: ipfw.Record{
+				Line:    1,
+				Text:    "table META add 192.0.2.0/24# key",
+				Kind:    ipfw.RecordTable,
+				Comment: " key",
+				Table: ipfw.Table{
+					Name: "META",
+					Kind: ipfw.TableAdd,
+					Key:  ipfw.TableKey{Kind: ipfw.TableKeyNetwork4, Text: "192.0.2.0/24"},
+				},
+			},
+		},
+		{
+			name:  "table key with value",
+			input: "table META add 2001:db8::/32 :NEXT# value\r\n",
+			expected: ipfw.Record{
+				Line:    1,
+				Text:    "table META add 2001:db8::/32 :NEXT# value",
+				Kind:    ipfw.RecordTable,
+				Comment: " value",
+				Table: ipfw.Table{
+					Name:  "META",
+					Kind:  ipfw.TableAdd,
+					Key:   ipfw.TableKey{Kind: ipfw.TableKeyNetwork6, Text: "2001:db8::/32"},
+					Value: ":NEXT",
+				},
+			},
+		},
+		{
+			name:  "label",
+			input: ":NEXT# label\n",
+			expected: ipfw.Record{
+				Line:    1,
+				Text:    ":NEXT# label",
+				Kind:    ipfw.RecordLabel,
+				Comment: " label",
+				Label:   "NEXT",
+			},
+		},
+		{
+			name:  "standalone JSON metadata",
+			input: "\t # \t{\"id\": \"HASH-7\", \"enabled\": true} \t\r\n",
+			expected: ipfw.Record{
+				Line:    1,
+				Text:    "# \t{\"id\": \"HASH-7\", \"enabled\": true}",
+				Kind:    ipfw.RecordComment,
+				Comment: " \t{\"id\": \"HASH-7\", \"enabled\": true}",
+			},
+		},
+		{
+			name:     "standalone empty comment",
+			input:    "#",
+			expected: ipfw.Record{Line: 1, Text: "#", Kind: ipfw.RecordComment},
+		},
+		{
+			name:     "standalone whitespace comment",
+			input:    "\t # \t\n",
+			expected: ipfw.Record{Line: 1, Text: "#", Kind: ipfw.RecordComment},
+		},
+		{
+			name:  "repeated hashes",
+			input: "add pass ip from any to any ##first # second\n",
+			expected: ipfw.Record{
+				Line:        1,
+				Text:        "add pass ip from any to any ##first # second",
+				Kind:        ipfw.RecordInstruction,
+				Comment:     "#first # second",
+				Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
+			},
+			state: anyToAnyState(ipfw.ProtoIPAny),
+		},
+		{
+			name:  "carriage return in payload",
+			input: "add pass ip from any to any # left\rright\n",
+			expected: ipfw.Record{
+				Line:        1,
+				Text:        "add pass ip from any to any # left\rright",
+				Kind:        ipfw.RecordInstruction,
+				Comment:     " left\rright",
+				Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
+			},
+			state: anyToAnyState(ipfw.ProtoIPAny),
+		},
+		{
+			name:  "rule slash comment",
+			input: "add pass ip from any to any // {\"id\": \"SLASH-4\"} # metadata\n",
+			expected: ipfw.Record{
+				Line:    1,
+				Text:    `add pass ip from any to any // {"id": "SLASH-4"} # metadata`,
+				Kind:    ipfw.RecordInstruction,
+				Comment: " metadata",
+				Instruction: ipfw.Instruction{
+					Action:        ipfw.Action{Kind: ipfw.ActionPass},
+					InlineComment: ` {"id": "SLASH-4"}`,
+				},
+			},
+			state: anyToAnyState(ipfw.ProtoIPAny),
+		},
+		{
+			name:  "check-state slash comment",
+			input: "add check-state // state#metadata",
+			expected: ipfw.Record{
+				Line:    1,
+				Text:    "add check-state // state#metadata",
+				Kind:    ipfw.RecordInstruction,
+				Comment: "metadata",
+				Instruction: ipfw.Instruction{
+					Action:        ipfw.Action{Kind: ipfw.ActionCheckState},
+					InlineComment: " state",
+				},
+			},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			parser := ipfw.NewParser(testCase.input)
+			var state ipfw.ReduceState
+			record, err := parser.Next(&state)
+			require.Nil(t, err)
+			require.Equal(t, testCase.expected, *record)
+			require.Equal(t, testCase.state, state)
+			next(t, parser, eof)
+		})
+	}
+}
+
+// verifies that hash metadata neither changes decimal ports nor flattens trailing options.
+func Test_Parser_Next_HashCommentPortOptions(t *testing.T) {
+	const input = "add pass tcp from any 00443 to any 00443 " +
+		"not src-port 00443 { dst-port 08443 or proto ipv6 }# guard"
+	parser := ipfw.NewParser(input + "\n")
+	var state ipfw.ReduceState
+	record, err := parser.Next(&state)
+	require.Nil(t, err)
+	expected := passAnyToAny(1, input)
+	expected.Comment = " guard"
+	require.Equal(t, expected, *record)
+	require.Equal(t, ipfw.ReduceState{
+		Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+		Sources:          []ipfw.Target{{Kind: ipfw.TargetAny}},
+		Destinations:     []ipfw.Target{{Kind: ipfw.TargetAny}},
+		SourcePorts:      []ipfw.PortMatch{portNumber(443)},
+		DestinationPorts: []ipfw.PortMatch{portNumber(443)},
+		Options: []ipfw.Opt{
+			notOpt(srcPort(443)),
+			dstPort(8443),
+			{Or: true, Kind: ipfw.OptProto, Proto: ipfw.Proto{Name: "ipv6"}},
+		},
+	}, state)
+	next(t, parser, eof)
+}
+
+// verifies that a hash keeps exact failures and partial state at the invalid prefix.
+func Test_Parser_Next_HashCommentErrors(t *testing.T) {
+	cases := []struct {
+		name   string
+		input  string
+		kind   ipfw.ErrorKind
+		column int
+		state  ipfw.ReduceState
+	}{
+		{
+			name:   "missing command whitespace",
+			input:  "add# metadata",
+			kind:   ipfw.ErrExpectedWhitespace,
+			column: 3,
+		},
+		{
+			name:   "missing action",
+			input:  "add # metadata",
+			kind:   ipfw.ErrExpectedAction,
+			column: 4,
+		},
+		{
+			name:   "missing destination",
+			input:  "add pass ip from any to # metadata",
+			kind:   ipfw.ErrExpectedTarget,
+			column: 24,
+			state: ipfw.ReduceState{
+				IPProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:  []ipfw.Target{{Kind: ipfw.TargetAny}},
+			},
+		},
+		{
+			name:   "unclosed option group",
+			input:  "add pass ip from any to any { in # metadata",
+			kind:   ipfw.ErrExpectedOr,
+			column: len("add pass ip from any to any { in "),
+			state: ipfw.ReduceState{
+				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Options:      []ipfw.Opt{{Kind: ipfw.OptIn}},
+			},
+		},
+		{
+			name:   "dangling or in option group",
+			input:  "add pass ip from any to any { in or # metadata",
+			kind:   ipfw.ErrUnknownOption,
+			column: len("add pass ip from any to any { in or "),
+			state: ipfw.ReduceState{
+				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Options:      []ipfw.Opt{{Kind: ipfw.OptIn}},
+			},
+		},
+		{
+			name:   "missing table command",
+			input:  "table META # metadata",
+			kind:   ipfw.ErrExpectedTableCommand,
+			column: 11,
+		},
+		{
+			name:   "missing table key",
+			input:  "table META add # metadata",
+			kind:   ipfw.ErrExpectedTableKey,
+			column: 15,
+		},
+		{
+			name:   "missing table type",
+			input:  "table META create type # metadata",
+			kind:   ipfw.ErrExpectedTableType,
+			column: 23,
+		},
+		{
+			name:   "missing label",
+			input:  ":# metadata",
+			kind:   ipfw.ErrExpectedToken,
+			column: 1,
+		},
+		{
+			name:   "label with trailing token",
+			input:  ":NEXT extra# metadata",
+			kind:   ipfw.ErrExpectedNewlineOrEOF,
+			column: 6,
+		},
+		{
+			name:  "standalone slash comment",
+			input: "// legacy# metadata",
+			kind:  ipfw.ErrExpectedLine,
+		},
+		{
+			name:   "table slash comment",
+			input:  "table META create // legacy# metadata",
+			kind:   ipfw.ErrExpectedNewlineOrEOF,
+			column: 18,
+		},
+		{
+			name:   "label slash comment",
+			input:  ":NEXT // legacy# metadata",
+			kind:   ipfw.ErrExpectedNewlineOrEOF,
+			column: 6,
+		},
+		{
+			name:   "lone carriage return before hash",
+			input:  ":NEXT\r# metadata",
+			kind:   ipfw.ErrExpectedNewlineOrEOF,
+			column: 5,
+		},
+		{
+			name:   "source-position src-port",
+			input:  "add pass tcp from any src-port 00443 to any# excluded",
+			kind:   ipfw.ErrExpectedPrefix,
+			column: 31,
+			state: ipfw.ReduceState{
+				Protos:  []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+				Sources: []ipfw.Target{{Kind: ipfw.TargetAny}},
+				SourcePorts: []ipfw.PortMatch{
+					portSpan(ipfw.Port{Name: "src"}, ipfw.Port{Name: "port"}),
+				},
+			},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			parser := ipfw.NewParser(testCase.input)
+			var state ipfw.ReduceState
+			record, err := parser.Next(&state)
+			require.Nil(t, record)
+			require.NotNil(t, err)
+			require.Equal(t, ipfw.ParseError{
+				Kind:   testCase.kind,
+				Line:   1,
+				Column: testCase.column,
+				Text:   testCase.input,
+			}, *err)
+			require.Equal(t, testCase.state, state)
+			next(t, parser, eof)
+		})
+	}
+}
+
+// verifies that saved records survive later lines and resets without comment carryover.
+func Test_Parser_Next_HashCommentStreaming(t *testing.T) {
+	source := ruleset(`
+		add pass ip from any to any
+		add pass ip from any to any // slash # hash
+		:NEXT# label
+		add pass ip from any to any
+		# final
+	`)
+	expected := []ipfw.Record{
+		passAnyToAny(1, "add pass ip from any to any"),
+		{
+			Line:    2,
+			Text:    "add pass ip from any to any // slash # hash",
+			Kind:    ipfw.RecordInstruction,
+			Comment: " hash",
+			Instruction: ipfw.Instruction{
+				Action:        ipfw.Action{Kind: ipfw.ActionPass},
+				InlineComment: " slash",
+			},
+		},
+		{Line: 3, Text: ":NEXT# label", Kind: ipfw.RecordLabel, Comment: " label", Label: "NEXT"},
+		passAnyToAny(4, "add pass ip from any to any"),
+		{Line: 5, Text: "# final", Kind: ipfw.RecordComment, Comment: " final"},
+	}
+	parser := ipfw.NewParser(source)
+	var state ipfw.ReduceState
+	var saved []ipfw.Record
+	for _, expectedRecord := range expected {
+		state.Reset()
+		record, err := parser.Next(&state)
+		require.Nil(t, err)
+		require.Equal(t, expectedRecord, *record)
+		expectedState := ipfw.ReduceState{}
+		if expectedRecord.Kind == ipfw.RecordInstruction {
+			expectedState = anyToAnyState(ipfw.ProtoIPAny)
+		}
+		require.Equal(t, expectedState, emptyToNil(state))
+		saved = append(saved, *record)
+	}
+	next(t, parser, eof)
+	parser.Reset("# replacement\n")
+	next(t, parser, ipfw.Record{
+		Line:    1,
+		Text:    "# replacement",
+		Kind:    ipfw.RecordComment,
+		Comment: " replacement",
+	})
+	require.Equal(t, expected, saved)
+}
+
+// ruleset removes the opening newline and closing indentation from a rule literal.
+func ruleset(text string) string {
+	return strings.TrimRight(strings.TrimPrefix(text, "\n"), "\t ")
+}
+
+// verifies that an explicit state reset after a hash-commented failure clears partial tokens.
+func Test_Parser_Next_HashCommentStateAfterFailure(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{
+			name: "LF",
+			input: ruleset(`
+				add pass tcp from 192.0.2.1 00443 to any in bogus # failed
+				add pass ip from any to any # recovered
+			`),
+		},
+		{
+			name: "CRLF",
+			input: "\t add pass tcp from 192.0.2.1 00443 to any in bogus # failed\r\n" +
+				"add pass ip from any to any # recovered\r\n",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			parser := ipfw.NewParser(testCase.input)
+			var state ipfw.ReduceState
+			record, err := parser.Next(&state)
+			require.Nil(t, record)
+			require.NotNil(t, err)
+			require.Equal(t, ipfw.ParseError{
+				Kind:   ipfw.ErrUnknownOption,
+				Line:   1,
+				Column: 44,
+				Text:   "add pass tcp from 192.0.2.1 00443 to any in bogus # failed",
+			}, *err)
+			require.Equal(t, ipfw.ReduceState{
+				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"}},
+				SourcePorts:  []ipfw.PortMatch{portNumber(443)},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Options:      []ipfw.Opt{{Kind: ipfw.OptIn}},
+			}, state)
+
+			state.Reset()
+			record, err = parser.Next(&state)
+			require.Nil(t, err)
+			require.Equal(t, ipfw.Record{
+				Line:        2,
+				Text:        "add pass ip from any to any # recovered",
+				Kind:        ipfw.RecordInstruction,
+				Comment:     " recovered",
+				Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
+			}, *record)
+			require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), emptyToNil(state))
+			record, err = parser.Next(&state)
+			require.Nil(t, err)
+			require.Equal(t, eof, *record)
+			require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), emptyToNil(state))
+		})
+	}
+}
+
+// verifies that hash-comment paths allocate nothing with an explicitly reset, warmed state.
+func Test_Parser_Next_HashCommentsNoAllocs(t *testing.T) {
+	source := ruleset(`
+		add pass tcp from any 00443 to any 00443 not src-port 80 # rule
+		add check-state // state # check
+		table META create type addr# create
+		table META add 192.0.2.0/24# key
+		table META add 2001:db8::/32 :NEXT# value
+		:NEXT# label
+		# {"id": "HASH-7"}
+	`)
+	parser := ipfw.NewParser(source)
+	var state ipfw.ReduceState
+	for range 7 {
+		state.Reset()
+		_, err := parser.Next(&state)
+		require.Nil(t, err)
+	}
+	ok := true
+	allocations := testing.AllocsPerRun(100, func() {
+		parser.Reset(source)
+		for range 7 {
+			state.Reset()
+			if _, err := parser.Next(&state); err != nil {
+				ok = false
+			}
+		}
+	})
+	require.True(t, ok)
+	require.Zero(t, allocations)
+}
+
+// verifies that labels retain hash metadata and reject missing names or trailing tokens.
 func Test_Parser_Next_Label(t *testing.T) {
 	next(
 		t,
@@ -102,10 +677,15 @@ func Test_Parser_Next_Label(t *testing.T) {
 		ipfw.NewParser(":"),
 		ipfw.ParseError{Kind: ipfw.ErrExpectedToken, Line: 1, Column: 1, Text: ":"},
 	)
-	nextError(
+	next(
 		t,
 		ipfw.NewParser(":X # c"),
-		ipfw.ParseError{Kind: ipfw.ErrExpectedNewlineOrEOF, Line: 1, Column: 3, Text: ":X # c"},
+		ipfw.Record{Line: 1, Text: ":X # c", Kind: ipfw.RecordLabel, Comment: " c", Label: "X"},
+	)
+	nextError(
+		t,
+		ipfw.NewParser(":X // c"),
+		ipfw.ParseError{Kind: ipfw.ErrExpectedNewlineOrEOF, Line: 1, Column: 3, Text: ":X // c"},
 	)
 }
 
@@ -2263,6 +2843,33 @@ func Test_Parser_Next_StateError(t *testing.T) {
 	require.ErrorIs(t, err, boom)
 	require.ErrorIs(t, err, ipfw.ErrState)
 	require.Equal(t, "1:10: state error: boom", err.Error())
+
+	input := ruleset(`
+
+		add allow foobar from any to any # callback
+		:AFTER# next
+	`)
+	parser := ipfw.NewParser(input)
+	next(t, parser, ipfw.Record{Line: 1, Kind: ipfw.RecordEmpty})
+	_, err = parser.Next(rejectingState{err: boom})
+	require.NotNil(t, err)
+	require.Equal(t, ipfw.ParseError{
+		Kind:   ipfw.ErrState,
+		Err:    boom,
+		Line:   2,
+		Column: 10,
+		Text:   "add allow foobar from any to any # callback",
+	}, *err)
+	require.ErrorIs(t, err, boom)
+	require.ErrorIs(t, err, ipfw.ErrState)
+	next(t, parser, ipfw.Record{
+		Line:    3,
+		Text:    ":AFTER# next",
+		Kind:    ipfw.RecordLabel,
+		Comment: " next",
+		Label:   "AFTER",
+	})
+	next(t, parser, eof)
 }
 
 // verifies that an option list failing past its first option fails the
@@ -2614,6 +3221,18 @@ var fuzzSeeds = []string{
 	"add pass ip from any to any established }\n",
 	"// not a comment\n",
 	"add pass ip from any to any # trailing\n",
+	"add pass tcp from any 00443 to any 00443 " +
+		"not src-port 80 { dst-port 8443 or proto ipv6 }# id\n",
+	"add check-state // state # {\"id\": \"CHECK-7\"}\r\n",
+	"add pass ip from any to any // {\"id\": \"before#after\"}",
+	"table META create type addr# metadata\r\n",
+	"table META add 192.0.2.0/24 # metadata\n",
+	"table META add 2001:db8::/32 :NEXT# metadata",
+	":NEXT# adjacent\n## repeated # hash\n",
+	"add pass ip from any to # missing\r\n:RECOVERED# ok",
+	":NEXT\r# lone carriage return\n",
+	"add pass ip from any to any\n# next line only",
+	"#",
 	"add pass ip from any to any //",
 	"add pass ip from " + strings.Repeat("a", 4096) + ".example.com to any\n",
 	"add pass ip from any to any " + strings.Repeat("{ ", 64) + "in\n",

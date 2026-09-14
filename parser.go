@@ -59,7 +59,8 @@ func (m *Parser) Reset(src string) {
 	m.line = 0
 }
 
-// Next parses the next line, pushing the rule body into state.
+// Next parses the next physical line, pushing the rule body into state.
+// The first `#` starts metadata before the grammar or hooks run.
 //
 // The record belongs to the parser and is overwritten by the next call to
 // Next or Reset, copy it to keep it. Once the input is exhausted the record
@@ -74,11 +75,20 @@ func (m *Parser) Next(state State) (*Record, *ParseError) {
 	}
 	m.line++
 	text := ws0(m.rest)
-	rest, err := m.parseLine(text, state)
+	line, rest := takeLine(text)
+	if rest != "" {
+		rest = rest[1:]
+	}
+	command, comment, hasComment := strings.Cut(line, "#")
+	if !hasComment {
+		// Keep CRLF distinct from a lone carriage return in command text.
+		command = text[:len(text)-len(rest)]
+	}
+	m.rest = rest
+	_, err := m.parseLine(command, state)
 	if err.Failed() {
-		lineText := physicalLine(text)
-		m.rest = afterLine(text)
-		column := min(max(len(text)-len(err.At), 0), len(lineText))
+		lineText := trimRightSpace(line)
+		column := min(max(len(command)-len(err.At), 0), len(lineText))
 		return nil, &ParseError{
 			Kind:   err.Kind,
 			Err:    err.Err,
@@ -87,14 +97,19 @@ func (m *Parser) Next(state State) (*Record, *ParseError) {
 			Text:   lineText,
 		}
 	}
+	if hasComment {
+		m.record.Comment = trimRightSpace(comment)
+		if command == "" {
+			m.record.Kind = RecordComment
+		}
+	}
 	m.record.Line = m.line
-	m.record.Text = trimRightSpace(text[:len(text)-len(rest)])
-	m.rest = rest
+	m.record.Text = trimRightSpace(line)
 	return &m.record, nil
 }
 
-// parseLine parses one line starting at its first non-blank byte into the
-// parser's record and returns the input after the line's newline.
+// parseLine accepts one complete command with an optional LF or CRLF ending.
+// A failure leaves the input untouched.
 func (m *Parser) parseLine(text string, state State) (string, fail) {
 	record := &m.record
 	s := text
@@ -134,18 +149,11 @@ func (m *Parser) parseLine(text string, state State) (string, fail) {
 	if rest, ok := parseLineEnd(s); ok {
 		return rest, fail{}
 	}
-	if !commanded {
-		if rest, ok := prefix(s, "#"); ok {
-			record.Comment, rest = takeLine(rest)
-			record.Comment = trimRightSpace(record.Comment)
-			record.Kind = RecordComment
-			s = rest
-		} else if s != "" && s[0] != '\n' && m.opts.CommandHook != nil {
-			if s, err = m.hookLine(s, state); err.Failed() {
-				return text, err
-			}
-			s, commanded = ws0(s), true
+	if !commanded && s != "" && s[0] != '\n' && m.opts.CommandHook != nil {
+		if s, err = m.hookLine(s, state); err.Failed() {
+			return text, err
 		}
+		s, commanded = ws0(s), true
 	}
 	if rest, ok := parseLineEnd(s); ok {
 		return rest, fail{}
@@ -357,14 +365,14 @@ func (m *Parser) parseBody(s string, state State) (string, fail) {
 // parseInlineComment returns the text after `//` without its trailing
 // whitespace, or the untouched input when there is none.
 //
-// Whitespace before the slashes is skipped.
+// Input contains only the current physical line, with any hash suffix removed.
+// A comment consumes the remaining input. Whitespace before the slashes is skipped.
 func parseInlineComment(s string) (string, string) {
 	rest, ok := prefix(ws0(s), "//")
 	if !ok {
 		return "", s
 	}
-	comment, rest := takeLine(rest)
-	return trimRightSpace(comment), rest
+	return trimRightSpace(rest), ""
 }
 
 // parseTable parses `NAME create|add …` after `table `.
@@ -482,16 +490,6 @@ func takeLine(s string) (string, string) {
 	return s, ""
 }
 
-func physicalLine(text string) string {
-	line, _, _ := strings.Cut(text, "\n")
-	return trimRightSpace(line)
-}
-
-func afterLine(text string) string {
-	_, after, _ := strings.Cut(text, "\n")
-	return after
-}
-
 func trimRightSpace(s string) string {
 	end := len(s)
 	for end > 0 && isASCIISpace(s[end-1]) {
@@ -534,11 +532,13 @@ const (
 type Record struct {
 	// Line is 1-based.
 	Line int
-	// Text is the line without leading and trailing whitespace.
+	// Text is the original line, including comments, without leading or
+	// trailing whitespace.
 	Text string
 	// Kind is what the line holds.
 	Kind RecordKind
-	// Comment is the text after `#`, leading space included.
+	// Comment is the borrowed text after the first `#`, for any record kind.
+	// Leading space is kept and trailing whitespace removed.
 	Comment string
 	// Instruction is set for an add rule.
 	Instruction Instruction
@@ -558,7 +558,8 @@ type Instruction struct {
 	Log Log
 	// Tag is the positive `tag` number, 0 when absent.
 	Tag uint32
-	// InlineComment is the raw text after `//`, empty when absent.
+	// InlineComment is the borrowed text after `//` and before any `#`.
+	// Leading space is kept and trailing whitespace removed.
 	InlineComment string
 }
 
