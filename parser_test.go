@@ -3847,6 +3847,20 @@ func Test_Parser_Next_AddressListErrors(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:  "reserved destination not before comma",
+			input: "add pass ip from any to not,",
+			err: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedTarget,
+				Line:   1,
+				Column: 24,
+				Text:   "add pass ip from any to not,",
+			},
+			state: ipfw.ReduceState{
+				IPProtos: []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:  []ipfw.Target{{Kind: ipfw.TargetAny}},
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

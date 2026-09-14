@@ -177,6 +177,8 @@ func classifyTarget(token string) (Target, ErrorKind, int) {
 		return Target{}, ErrExpectedTarget, 0
 	}
 	switch token {
+	case "not":
+		return Target{}, ErrExpectedTarget, 0
 	case "any":
 		return Target{Kind: TargetAny}, 0, 0
 	case "me6":
