@@ -84,6 +84,304 @@ func Test_Parser_Next_Comment(t *testing.T) {
 	next(t, ipfw.NewParser("#"), ipfw.Record{Line: 1, Text: "#", Kind: ipfw.RecordComment})
 }
 
+// verifies that comment-only rules are count instructions with implicit any targets.
+func Test_Parser_Next_CommentOnlyRule(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		expected ipfw.Record
+	}{
+		{
+			name:  "comment with LF",
+			input: "add // note\n",
+			expected: ipfw.Record{
+				Line: 1,
+				Text: "add // note",
+				Kind: ipfw.RecordInstruction,
+				Instruction: ipfw.Instruction{
+					Action:        ipfw.Action{Kind: ipfw.ActionCount},
+					InlineComment: " note",
+				},
+			},
+		},
+		{
+			name:  "number and hash metadata with CRLF",
+			input: "\tadd 100 // note \t# metadata \t\r\n",
+			expected: ipfw.Record{
+				Line:    1,
+				Text:    "add 100 // note \t# metadata",
+				Kind:    ipfw.RecordInstruction,
+				Comment: " metadata",
+				Instruction: ipfw.Instruction{
+					Num:           100,
+					Action:        ipfw.Action{Kind: ipfw.ActionCount},
+					InlineComment: " note",
+				},
+			},
+		},
+		{
+			name:  "empty comment at EOF",
+			input: "add //",
+			expected: ipfw.Record{
+				Line:        1,
+				Text:        "add //",
+				Kind:        ipfw.RecordInstruction,
+				Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionCount}},
+			},
+		},
+		{
+			name:  "empty comment with LF",
+			input: "add //\n",
+			expected: ipfw.Record{
+				Line:        1,
+				Text:        "add //",
+				Kind:        ipfw.RecordInstruction,
+				Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionCount}},
+			},
+		},
+		{
+			name:  "empty comment with CRLF",
+			input: "add //\r\n",
+			expected: ipfw.Record{
+				Line:        1,
+				Text:        "add //",
+				Kind:        ipfw.RecordInstruction,
+				Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionCount}},
+			},
+		},
+		{
+			name:  "empty comment before adjacent hash",
+			input: "add //# metadata\n",
+			expected: ipfw.Record{
+				Line:        1,
+				Text:        "add //# metadata",
+				Kind:        ipfw.RecordInstruction,
+				Comment:     " metadata",
+				Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionCount}},
+			},
+		},
+		{
+			name:  "comment content is not rule syntax",
+			input: "add 200 //\tdeny log tcp from any to any in // more \t",
+			expected: ipfw.Record{
+				Line: 1,
+				Text: "add 200 //\tdeny log tcp from any to any in // more",
+				Kind: ipfw.RecordInstruction,
+				Instruction: ipfw.Instruction{
+					Num:           200,
+					Action:        ipfw.Action{Kind: ipfw.ActionCount},
+					InlineComment: "\tdeny log tcp from any to any in // more",
+				},
+			},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			parser := ipfw.NewParser(test.input)
+			var state ipfw.ReduceState
+			record, err := parser.Next(&state)
+			require.Nil(t, err)
+			require.Equal(t, test.expected, *record)
+			require.Equal(t, ipfw.ReduceState{
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+			}, state)
+			next(t, parser, eof)
+		})
+	}
+}
+
+// verifies that comment-only rules clear prior metadata and preserve streaming through an error.
+func Test_Parser_Next_CommentOnlyRuleStreaming(t *testing.T) {
+	parser := ipfw.NewParser(ruleset(`
+		add 5 skipto 10 log logamount 3 tag 7 tcp from 192.0.2.1 443 to any in // prior # hash
+		add 10 // first
+		add 20 //joined
+		add pass ip from any to any
+	`))
+	var state ipfw.ReduceState
+	record, err := parser.Next(&state)
+	require.Nil(t, err)
+	require.Equal(t, ipfw.Record{
+		Line:    1,
+		Text:    "add 5 skipto 10 log logamount 3 tag 7 tcp from 192.0.2.1 443 to any in // prior # hash",
+		Kind:    ipfw.RecordInstruction,
+		Comment: " hash",
+		Instruction: ipfw.Instruction{
+			Num: 5,
+			Action: ipfw.Action{
+				Kind:   ipfw.ActionSkipTo,
+				SkipTo: ipfw.SkipTo{Kind: ipfw.SkipToNumber, Number: 10},
+			},
+			Log:           ipfw.Log{Enabled: true, HasAmount: true, Amount: 3},
+			Tag:           7,
+			InlineComment: " prior",
+		},
+	}, *record)
+	require.Equal(t, ipfw.ReduceState{
+		Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+		Sources:      []ipfw.Target{{Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"}},
+		Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+		SourcePorts:  []ipfw.PortMatch{portNumber(443)},
+		Options:      []ipfw.Opt{{Kind: ipfw.OptIn}},
+	}, state)
+	state.Reset()
+	record, err = parser.Next(&state)
+	require.Nil(t, err)
+	require.Equal(t, ipfw.Record{
+		Line: 2,
+		Text: "add 10 // first",
+		Kind: ipfw.RecordInstruction,
+		Instruction: ipfw.Instruction{
+			Num:           10,
+			Action:        ipfw.Action{Kind: ipfw.ActionCount},
+			InlineComment: " first",
+		},
+	}, *record)
+	require.Equal(t, ipfw.ReduceState{
+		Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+		Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+	}, emptyToNil(state))
+	state.Reset()
+	record, err = parser.Next(&state)
+	require.Nil(t, record)
+	require.Equal(t, &ipfw.ParseError{
+		Kind:   ipfw.ErrExpectedAction,
+		Line:   3,
+		Column: 7,
+		Text:   "add 20 //joined",
+	}, err)
+	require.Equal(t, ipfw.ReduceState{}, emptyToNil(state))
+	record, err = parser.Next(&state)
+	require.Nil(t, err)
+	require.Equal(t, passAnyToAny(4, "add pass ip from any to any"), *record)
+	require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), emptyToNil(state))
+	next(t, parser, eof)
+}
+
+// verifies that incomplete or joined slash actions remain positioned errors.
+func Test_Parser_Next_CommentOnlyRuleInvalidAction(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{name: "single slash", input: "add /"},
+		{name: "three slashes", input: "add ///"},
+		{name: "joined payload", input: "add //note"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			parser := ipfw.NewParser(test.input)
+			var state ipfw.ReduceState
+			record, err := parser.Next(&state)
+			require.Nil(t, record)
+			require.Equal(t, &ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedAction,
+				Line:   1,
+				Column: 4,
+				Text:   test.input,
+			}, err)
+			require.Equal(t, ipfw.ReduceState{}, state)
+			next(t, parser, eof)
+		})
+	}
+}
+
+// verifies that implicit target rejection is positioned at the comment action.
+func Test_Parser_Next_CommentOnlyRuleCallbackFailure(t *testing.T) {
+	failure := errors.New("target rejected")
+	cases := []struct {
+		name  string
+		state commentRejectingState
+		kind  ipfw.ErrorKind
+		cause error
+		want  ipfw.ReduceState
+	}{
+		{
+			name:  "source error kind",
+			state: commentRejectingState{SourceError: ipfw.ErrExpectedTarget},
+			kind:  ipfw.ErrExpectedTarget,
+		},
+		{
+			name:  "destination error cause",
+			state: commentRejectingState{DestinationError: failure},
+			kind:  ipfw.ErrState,
+			cause: failure,
+			want: ipfw.ReduceState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetAny}},
+			},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			parser := ipfw.NewParser("add 100 // note # metadata\n")
+			record, err := parser.Next(&test.state)
+			require.Nil(t, record)
+			require.Equal(t, &ipfw.ParseError{
+				Kind:   test.kind,
+				Err:    test.cause,
+				Line:   1,
+				Column: 8,
+				Text:   "add 100 // note # metadata",
+			}, err)
+			require.ErrorIs(t, err, test.kind)
+			if test.cause != nil {
+				require.ErrorIs(t, err, test.cause)
+			}
+			require.Equal(t, test.want, test.state.ReduceState)
+			next(t, parser, eof)
+		})
+	}
+}
+
+// commentRejectingState rejects one implicit target and retains earlier callbacks.
+type commentRejectingState struct {
+	ipfw.ReduceState
+	SourceError      error
+	DestinationError error
+}
+
+// OnSourceTarget implements State.
+func (m *commentRejectingState) OnSourceTarget(target ipfw.Target) error {
+	if m.SourceError != nil {
+		return m.SourceError
+	}
+	return m.ReduceState.OnSourceTarget(target)
+}
+
+// OnDestinationTarget implements State.
+func (m *commentRejectingState) OnDestinationTarget(target ipfw.Target) error {
+	if m.DestinationError != nil {
+		return m.DestinationError
+	}
+	return m.ReduceState.OnDestinationTarget(target)
+}
+
+// verifies that parsing a comment-only count rule allocates nothing.
+func Test_Parser_Next_CommentOnlyRuleNoAllocs(t *testing.T) {
+	const input = "add 100 // note # metadata\n"
+	parser := ipfw.NewParser(input)
+	var state ipfw.ReduceState
+	record, err := parser.Next(&state)
+	require.Nil(t, err)
+	require.Equal(t, ipfw.ActionCount, record.Instruction.Action.Kind)
+	valid := true
+	allocs := testing.AllocsPerRun(1000, func() {
+		parser.Reset(input)
+		state.Reset()
+		record, err := parser.Next(&state)
+		if err != nil || record.Instruction.Action.Kind != ipfw.ActionCount {
+			valid = false
+		}
+	})
+	require.True(t, valid)
+	require.Zero(t, allocs)
+	require.Equal(t, ipfw.ReduceState{
+		Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+		Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+	}, state)
+}
+
 // verifies that trailing hash metadata leaves the complete rule and body intact.
 func Test_Parser_Next_TrailingHashComment(t *testing.T) {
 	const input = "add pass ip from any to any # {\"id\": \"HASH-7\"}\n"
@@ -3740,6 +4038,9 @@ var fuzzSeeds = []string{
 	"add pass ip from any to any\n# next line only",
 	"#",
 	"add pass ip from any to any //",
+	"add 100 // note # metadata\r\n",
+	"add //",
+	"add //joined\n",
 	"add pass ip from " + strings.Repeat("a", 4096) + ".example.com to any\n",
 	"add pass ip from any to any " + strings.Repeat("{ ", 64) + "in\n",
 	"add pass\n",
@@ -3998,6 +4299,10 @@ func Benchmark_Parser_Next_OptionsAfterTarget(b *testing.B) {
 
 func Benchmark_Parser_Next_Comment(b *testing.B) {
 	benchmarkNext(b, "# a comment line of an ordinary length\n")
+}
+
+func Benchmark_Parser_Next_CommentOnlyRule(b *testing.B) {
+	benchmarkNext(b, "add 100 // a comment-only rule\n")
 }
 
 func Benchmark_Parser_Next_CommentLong(b *testing.B) {

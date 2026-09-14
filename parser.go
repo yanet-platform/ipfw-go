@@ -210,6 +210,18 @@ func (m *Parser) parseInstruction(s string, state State, instruction *Instructio
 			instruction.Num, s = num, afterWS
 		}
 	}
+	if rest, ok := prefix(s, "//"); ok && (rest == "" || isASCIISpace(rest[0])) {
+		instruction.Action.Kind = ActionCount
+		// An omitted body counts every packet, including both address families.
+		if err := state.OnSourceTarget(Target{Kind: TargetAny}); err != nil {
+			return input, failFrom(err, s)
+		}
+		if err := state.OnDestinationTarget(Target{Kind: TargetAny}); err != nil {
+			return input, failFrom(err, s)
+		}
+		instruction.InlineComment, rest = parseInlineComment(s)
+		return rest, fail{}
+	}
 	rest, err := m.parseAction(s, &instruction.Action)
 	if err.Failed() {
 		return input, err

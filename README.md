@@ -88,6 +88,13 @@ whitespace rules. In `add pass ip from any to any // rule # metadata`, the inlin
 and the hash payload is ` metadata`. The first hash separates the line even inside quoted text.
 Standalone `//` and slash comments after tables or labels are not enabled by this behavior.
 
+Comment-only rules such as `add 100 // note` are supported by default, as in
+[FreeBSD](https://github.com/freebsd/freebsd-src/blob/88e7371d9dc26f85dfc1b008cbe59ebc7e4a33da/sbin/ipfw/ipfw.8#L1622).
+They produce an `ActionCount` instruction with implicit `TargetAny` source and destination
+callbacks. The VM matches the rule and continues to the next one. The payload stays in
+`Instruction.InlineComment`, and any hash metadata stays in `Record.Comment`.
+The `//` action must be a complete token, so `add //note` is rejected.
+
 LF, CRLF and a final line without a newline each produce one record. Copy the returned `Record`
 before the next `Next` or `Reset` if it must be kept. Its strings continue to borrow the original
 input.
