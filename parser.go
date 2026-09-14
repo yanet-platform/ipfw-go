@@ -7,8 +7,8 @@ import (
 
 // parserOptions is what a ParserOption configures.
 type parserOptions struct {
-	// Labels enables project label declarations and symbolic skipto jumps.
-	Labels bool
+	// EnableLabels enables project label declarations and symbolic skipto jumps.
+	EnableLabels bool
 	// CommandHook takes the lines the grammar does not know, nil rejecting them.
 	CommandHook CommandHook
 	// OptionHook takes the option keywords the grammar does not know, nil
@@ -26,7 +26,7 @@ type ParserOption func(*parserOptions)
 // WithLabels enables project label declarations and symbolic skipto jumps, disabled by default.
 func WithLabels() ParserOption {
 	return func(opts *parserOptions) {
-		opts.Labels = true
+		opts.EnableLabels = true
 	}
 }
 
@@ -147,7 +147,7 @@ func (m *Parser) parseLine(text string, state State) (string, fail) {
 		}
 		record.Kind = RecordTable
 		s, commanded = rest, true
-	} else if rest, ok := prefix(s, ":"); ok && m.opts.Labels {
+	} else if rest, ok := prefix(s, ":"); ok && m.opts.EnableLabels {
 		record.Label, rest = token(rest)
 		if record.Label == "" {
 			return text, fail{Kind: ErrExpectedToken, At: rest}
@@ -287,7 +287,7 @@ func (m *Parser) parseAction(s string, action *Action) (string, fail) {
 
 // parseSkipTo reads a rule number, tablearg or an explicitly enabled label.
 func (m *Parser) parseSkipTo(s string) (SkipTo, string, fail) {
-	if rest, ok := prefix(s, ":"); ok && m.opts.Labels {
+	if rest, ok := prefix(s, ":"); ok && m.opts.EnableLabels {
 		var label string
 		label, rest = token(rest)
 		if label == "" {
