@@ -226,13 +226,17 @@ func (m *Parser) parseInstruction(s string, state State, instruction *Instructio
 	if err.Failed() {
 		return input, err
 	}
-	instruction.Log, rest, err = parseLog(rest)
-	if err.Failed() {
-		return input, err
+	// The optional log and tag parts and the body each follow one run of
+	// whitespace, consumed only once the keyword behind it is known.
+	if buf, ok := ws1(rest); ok && hasPrefix(buf, "log") {
+		if instruction.Log, rest, err = parseLog(buf); err.Failed() {
+			return input, err
+		}
 	}
-	instruction.Tag, rest, err = parseTag(rest)
-	if err.Failed() {
-		return input, err
+	if buf, ok := ws1(rest); ok && hasPrefix(buf, "tag") {
+		if instruction.Tag, rest, err = parseTag(buf); err.Failed() {
+			return input, err
+		}
 	}
 	if instruction.Action.Kind == ActionCheckState {
 		instruction.InlineComment, rest = parseInlineComment(rest)
@@ -319,18 +323,14 @@ func (m *Parser) parseSkipTo(s string) (SkipTo, string, fail) {
 	return SkipTo{}, s, fail{Kind: ErrExpectedSkipTo, At: s}
 }
 
-// parseLog parses the optional ` log [logamount N]` after the action, the
-// input coming back untouched when the log keyword is absent.
+// parseLog parses `log [logamount N]` starting at the log keyword.
 //
 // The keywords match by prefix, so `logamount` without `log` before it is
 // read as `log`.
 func parseLog(s string) (Log, string, fail) {
-	buf, ok := ws1Keyword(s, "log")
+	rest, _ := prefix(s, "log")
+	buf, ok := ws1Keyword(rest, "logamount")
 	if !ok {
-		return Log{}, s, fail{}
-	}
-	rest := buf
-	if buf, ok = ws1Keyword(buf, "logamount"); !ok {
 		return Log{Enabled: true}, rest, fail{}
 	}
 	if buf, ok = ws1(buf); !ok {
@@ -343,14 +343,11 @@ func parseLog(s string) (Log, string, fail) {
 	return Log{Enabled: true, HasAmount: true, Amount: amount}, buf, fail{}
 }
 
-// parseTag parses the optional positive ` tag N` after log, leaving input
-// untouched when absent.
+// parseTag parses the positive `tag N` starting at the tag keyword.
 func parseTag(s string) (uint32, string, fail) {
-	buf, ok := ws1Keyword(s, "tag")
+	rest, _ := prefix(s, "tag")
+	buf, ok := ws1(rest)
 	if !ok {
-		return 0, s, fail{}
-	}
-	if buf, ok = ws1(buf); !ok {
 		return 0, s, fail{Kind: ErrExpectedWhitespace, At: buf}
 	}
 	tagInput := buf
@@ -401,7 +398,11 @@ func (m *Parser) parseBody(s string, state State) (string, fail) {
 	}
 	// Only `to` followed by whitespace ends the source part, so a port such
 	// as `topx` or `notify` is not mistaken for a keyword.
-	if buf, ok := keywordWS1(rest, "to"); ok {
+	buf, ok := prefix(rest, "to")
+	if ok {
+		buf, ok = ws1(buf)
+	}
+	if ok {
 		rest = buf
 	} else {
 		rest, err = parsePorts(rest, state, sourceSide)

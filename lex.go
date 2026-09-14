@@ -132,23 +132,6 @@ func isTokenByte(c byte) bool {
 	return !isASCIISpace(c)
 }
 
-// keywordWS1 consumes the keyword only when whitespace follows, so a token
-// that merely starts with it is left alone.
-//
-// That is what tells a port named `topx` from the keyword `to` and a
-// protocol named `nottcp` from the negation.
-func keywordWS1(s, keyword string) (string, bool) {
-	rest, ok := prefix(s, keyword)
-	if !ok {
-		return s, false
-	}
-	rest, ok = ws1(rest)
-	if !ok {
-		return s, false
-	}
-	return rest, true
-}
-
 func notPrefix(s string) (string, bool) {
 	return prefix(s, "not")
 }
