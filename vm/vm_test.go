@@ -374,6 +374,37 @@ func Test_VM_Check_Count(t *testing.T) {
 	require.Equal(t, pass, counting.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.1")))
 }
 
+// verifies that numbered comment-only rules accept jumps and count both families before continuing.
+func Test_VM_Check_CommentOnlyRule(t *testing.T) {
+	machine := build(t, ruleset(`
+		add 50 skipto 100 ip from any to any
+		add 75 deny ip from any to any
+		add 100 // note
+		add 200 pass ip from any to any
+	`), none)
+	require.Equal(t, 4, machine.Len())
+	packets := []vm.Packet{
+		tcp4("192.0.2.1", "198.51.100.1"),
+		vm.NewIPv6Packet(
+			netip.MustParseAddr("2001:db8::1"),
+			netip.MustParseAddr("2001:db8::2"),
+		).WithTCP(ipfw.TCPSyn, 40000, 443),
+	}
+	for _, packet := range packets {
+		tracer := &recordingTracer{}
+		action, matched := machine.CheckTrace(&vm.Context{}, packet, tracer)
+		require.True(t, matched)
+		require.Equal(t, pass, action)
+		require.Equal(t, []traced{
+			{line: 1, action: ipfw.ActionSkipTo, matched: true},
+			{line: 3, action: ipfw.ActionCount, matched: true},
+			{line: 4, action: ipfw.ActionPass, matched: true},
+		}, tracer.seen)
+	}
+	counting := build(t, "add // note\n", vm.Config[net4, net6]{DefaultVerdict: pass})
+	require.Equal(t, pass, counting.Check(&vm.Context{}, packets[0]))
+}
+
 // verifies that a check-state rule, with or without a flow, never matches
 // and is traced as such.
 func Test_VM_Check_CheckState(t *testing.T) {
