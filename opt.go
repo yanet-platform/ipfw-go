@@ -86,7 +86,7 @@ func parseOptions(s string, state State, hook OptionHook) (string, fail) {
 	rest := s
 	var ctx optionContext
 	var ok bool
-	for rest != "" && rest[0] != '\n' && !strings.HasPrefix(rest, "//") {
+	for rest != "" && rest[0] != '\n' && !hasPrefix(rest, "//") {
 		buf, err := parseOptionGroup(&ctx, rest, state, hook)
 		if err.Failed() {
 			return s, err
@@ -206,36 +206,36 @@ func argumentOption(s string) (OptKind, int) {
 	}
 	switch s[0] {
 	case 's':
-		if strings.HasPrefix(s, "src-port") {
+		if hasPrefix(s, "src-port") {
 			return OptSourcePort, len("src-port")
 		}
 	case 'd':
-		if strings.HasPrefix(s, "dst-port") {
+		if hasPrefix(s, "dst-port") {
 			return OptDestinationPort, len("dst-port")
 		}
 	case 'i':
 		switch {
-		case strings.HasPrefix(s, "icmptypes"):
+		case hasPrefix(s, "icmptypes"):
 			return OptICMPTypes, len("icmptypes")
-		case strings.HasPrefix(s, "icmptype"):
+		case hasPrefix(s, "icmptype"):
 			return OptICMPTypes, len("icmptype")
-		case strings.HasPrefix(s, "icmp6types"):
+		case hasPrefix(s, "icmp6types"):
 			return OptICMP6Types, len("icmp6types")
 		}
 	case 'k':
-		if strings.HasPrefix(s, "keep-state") {
+		if hasPrefix(s, "keep-state") {
 			return OptKeepState, len("keep-state")
 		}
 	case 'p':
-		if strings.HasPrefix(s, "proto") {
+		if hasPrefix(s, "proto") {
 			return OptProto, len("proto")
 		}
 	case 't':
-		if strings.HasPrefix(s, "tcpflags") {
+		if hasPrefix(s, "tcpflags") {
 			return OptTCPFlags, len("tcpflags")
 		}
 	case 'v':
-		if strings.HasPrefix(s, "via") {
+		if hasPrefix(s, "via") {
 			return OptVia, len("via")
 		}
 	}

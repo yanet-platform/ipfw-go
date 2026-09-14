@@ -142,7 +142,7 @@ func isAddressListTarget(target Target) bool {
 	case TargetHostname, TargetNetwork4, TargetNetwork6:
 		return true
 	case TargetCustom:
-		return !strings.HasPrefix(target.Text, "table(")
+		return !hasPrefix(target.Text, "table(")
 	default:
 		return false
 	}
