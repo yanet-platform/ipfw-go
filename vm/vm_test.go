@@ -57,7 +57,7 @@ func (fakeServices) ResolveService(name string) (uint16, bool) {
 	return 0, false
 }
 
-// fakeTargets stands one hostname for a network of each family, `_NETS_` for
+// fakeTargets stands one hostname for a network of each family, `custom:first` for
 // two IPv4 networks and the empty hostnames for nothing.
 type fakeTargets struct{}
 
@@ -66,7 +66,7 @@ func (fakeTargets) ResolveTarget(target ipfw.Target) ([]net4, []net6, error) {
 	switch target.Text {
 	case "host.example.com":
 		return []net4{parse4("192.0.2.1/32")}, []net6{parse6("2001:db8::1/128")}, nil
-	case "_NETS_":
+	case "custom:first":
 		return []net4{parse4("192.0.2.0/24"), parse4("198.51.100.0/24")}, nil, nil
 	case "nothing.example.com", "empty.example.com":
 		return nil, nil, nil
@@ -115,10 +115,15 @@ func ruleset(text string) string {
 
 // build builds a VM from src with the fake resolvers, failing the test on
 // any error.
-func build(t *testing.T, src string, cfg vm.Config[net4, net6]) *vm.VM[net4, net6] {
+func build(
+	t *testing.T,
+	src string,
+	cfg vm.Config[net4, net6],
+	options ...ipfw.ParserOption,
+) *vm.VM[net4, net6] {
 	t.Helper()
 	cfg.Environment = resolving
-	machine, err := vm.Build(ipfw.NewParser(src), cfg)
+	machine, err := vm.Build(ipfw.NewParser(src, options...), cfg)
 	require.NoError(t, err)
 	return machine
 }
@@ -460,7 +465,7 @@ func Test_VM_Check_SkipToLabel(t *testing.T) {
 		add pass tcp from any to 203.0.113.1
 		add deny ip from any to any
 	`)
-	machine := build(t, src, none)
+	machine := build(t, src, none, ipfw.WithLabels())
 	require.Equal(t, 4, machine.Len())
 	require.Equal(t, pass, machine.Check(&vm.Context{}, tcp4("192.0.2.4", "203.0.113.1")))
 	require.Equal(t, deny, machine.Check(&vm.Context{}, tcp4("192.0.2.1", "203.0.113.1")))
@@ -484,7 +489,7 @@ func Test_VM_Check_Labels(t *testing.T) {
 		add deny ip from any to any
 		:END
 	`)
-	ending := build(t, src, vm.Config[net4, net6]{DefaultVerdict: pass})
+	ending := build(t, src, vm.Config[net4, net6]{DefaultVerdict: pass}, ipfw.WithLabels())
 	tracer := &recordingTracer{}
 	_, matched := ending.CheckTrace(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.2"), tracer)
 	require.False(t, matched)
@@ -498,7 +503,7 @@ func Test_VM_Check_Labels(t *testing.T) {
 		:A
 		add pass ip from any to any
 	`)
-	repeated := build(t, src, none)
+	repeated := build(t, src, none, ipfw.WithLabels())
 	tracer = &recordingTracer{}
 	action, matched := repeated.CheckTrace(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.2"), tracer)
 	require.True(t, matched)
@@ -519,7 +524,7 @@ func Test_VM_Check_UnresolvedJumpsFallThrough(t *testing.T) {
 		add skipto 7 ip from any to any
 		add pass ip from any to any
 	`)
-	machine := build(t, src, cfg)
+	machine := build(t, src, cfg, ipfw.WithLabels())
 	tracer := &recordingTracer{}
 	action, matched := machine.CheckTrace(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.2"), tracer)
 	require.True(t, matched)
@@ -1619,45 +1624,45 @@ func Test_VM_Check_ResolvedTargets(t *testing.T) {
 			verdict: pass,
 		},
 		{
-			name: "macro, first network",
+			name: "custom token, first network",
 			rules: ruleset(`
-				add pass ip from any to _NETS_
+				add pass ip from any to custom:first
 				add deny ip from any to any
 			`),
 			packet:  tcp4("203.0.113.1", "192.0.2.5"),
 			verdict: pass,
 		},
 		{
-			name: "macro, second network",
+			name: "custom token, second network",
 			rules: ruleset(`
-				add pass ip from any to _NETS_
+				add pass ip from any to custom:first
 				add deny ip from any to any
 			`),
 			packet:  tcp4("203.0.113.1", "198.51.100.5"),
 			verdict: pass,
 		},
 		{
-			name: "macro, outside",
+			name: "custom token, outside",
 			rules: ruleset(`
-				add pass ip from any to _NETS_
+				add pass ip from any to custom:first
 				add deny ip from any to any
 			`),
 			packet:  tcp4("203.0.113.1", "203.0.113.5"),
 			verdict: deny,
 		},
 		{
-			name: "negated macro, inside",
+			name: "negated custom token, inside",
 			rules: ruleset(`
-				add pass ip from any to not _NETS_
+				add pass ip from any to not custom:first
 				add deny ip from any to any
 			`),
 			packet:  tcp4("203.0.113.1", "198.51.100.5"),
 			verdict: deny,
 		},
 		{
-			name: "negated macro in a group with a network",
+			name: "negated custom token in a group with a network",
 			rules: ruleset(`
-				add pass ip from { 203.0.113.0/24 or not _NETS_ } to any
+				add pass ip from { 203.0.113.0/24 or not custom:first } to any
 				add deny ip from any to any
 			`),
 			packet:  tcp4("198.51.100.5", "203.0.113.1"),
@@ -1761,9 +1766,11 @@ func Test_VM_Check_AddressLists(t *testing.T) {
 
 // verifies that a check over resolved names allocates nothing.
 func Test_VM_Check_Resolved_NoAllocs(t *testing.T) {
-	rules := "add deny ip from not host.example.com,192.0.2.2 to _NETS_\n" +
-		"add pass ip from host.example.com to { _NETS_ or not host.example.com }\n" +
-		"add deny ip from any to any\n"
+	rules := ruleset(`
+		add deny ip from not host.example.com,192.0.2.2 to custom:first
+		add pass ip from host.example.com to { custom:first or not host.example.com }
+		add deny ip from any to any
+	`)
 	machine, err := vm.Build(
 		ipfw.NewParser(rules),
 		vm.Config[net4, net6]{Environment: resolvingTargets},
@@ -1950,7 +1957,7 @@ func Test_VM_Build_Tables(t *testing.T) {
 // verifies that the type a create gives a table tells what its keys are, a
 // table never created being an address table as in ipfw(8).
 //
-// An address table takes networks, and hostnames and macros through the
+// An address table takes networks, and hostnames and custom tokens through the
 // target resolver, an interface table every key as an interface name. A
 // name standing for nothing adds nothing, the resolver's error fails the
 // build at the line, and so do a missing resolver and a type the VM cannot
@@ -1963,7 +1970,7 @@ func Test_VM_Build_TableTypes(t *testing.T) {
 	src := ruleset(`
 		table h create type addr
 		table h add host.example.com
-		table h add _NETS_ 7
+		table h add custom:first 7
 		table h add nothing.example.com
 		table a create
 		table a add 2001:db8::/32
@@ -2360,7 +2367,7 @@ func Test_VM_Check_OptionShortCircuit_TableArg(t *testing.T) {
 		:ALLOW
 		add pass ip from any to any
 	`)
-	machine := build(t, src, vm.Config[net4, net6]{Tables: tables})
+	machine := build(t, src, vm.Config[net4, net6]{Tables: tables}, ipfw.WithLabels())
 	packet := tcp4("192.0.2.1", "192.0.2.2")
 	ctx := &vm.Context{Direction: vm.In, IfName: "vlan0"}
 	require.Equal(t, deny, machine.Check(ctx, packet))
@@ -2420,12 +2427,60 @@ func Test_VM_Check_TableArgLastLookup(t *testing.T) {
 				"add deny ip from any to any\n" +
 				":FIRST\nadd " + tc.first + " ip from any to any\n" +
 				":SECOND\nadd " + tc.second + " ip from any to any\n")
-			machine := build(t, src, none)
+			machine := build(t, src, none, ipfw.WithLabels())
 			packet := tcp4("192.0.2.1", "192.0.2.2")
 			ctx := &vm.Context{IfName: "vlan0"}
 			require.Equal(t, tc.verdict, machine.Check(ctx, packet))
 		})
 	}
+}
+
+// verifies that symbolic tablearg resolves labels supplied by an explicit option or command hook.
+func Test_VM_Build_TableArgLabelsOptIn(t *testing.T) {
+	source := ruleset(`
+		table jump create type iface
+		table jump add vlan42 :NEXT
+		add skipto tablearg ip from any to any via table(jump)
+		add deny ip from any to any
+		:NEXT
+		add pass ip from any to any
+	`)
+	machine, err := vm.Build(ipfw.NewParser(source), none)
+	require.Nil(t, machine)
+	require.ErrorIs(t, err, ipfw.ErrExpectedLine)
+	var positioned *ipfw.ParseError
+	require.ErrorAs(t, err, &positioned)
+	require.Equal(t, ipfw.ParseError{
+		Kind: ipfw.ErrExpectedLine, Line: 5, Text: ":NEXT",
+	}, *positioned)
+
+	machine, err = vm.Build(ipfw.NewParser(source, ipfw.WithLabels()), none)
+	require.NoError(t, err)
+	packet := tcp4("192.0.2.1", "203.0.113.2")
+	require.Equal(t, pass, machine.Check(&vm.Context{IfName: "vlan42"}, packet))
+	require.Equal(t, deny, machine.Check(&vm.Context{IfName: "vlan43"}, packet))
+
+	hook := func(line string, _ ipfw.State) (ipfw.Record, int, error) {
+		if line != ":NEXT" {
+			return ipfw.Record{}, 0, nil
+		}
+		return ipfw.Record{Kind: ipfw.RecordLabel, Label: line[1:]}, len(line), nil
+	}
+	machine, err = vm.Build(ipfw.NewParser(source, ipfw.WithCommandHook(hook)), none)
+	require.NoError(t, err)
+	require.Equal(t, pass, machine.Check(&vm.Context{IfName: "vlan42"}, packet))
+	require.Equal(t, deny, machine.Check(&vm.Context{IfName: "vlan43"}, packet))
+
+	withoutLabel := ruleset(`
+		table jump create type iface
+		table jump add vlan42 :NEXT
+		add skipto tablearg ip from any to any via table(jump)
+		add deny ip from any to any
+		add pass ip from any to any
+	`)
+	machine, err = vm.Build(ipfw.NewParser(withoutLabel), none)
+	require.NoError(t, err)
+	require.Equal(t, deny, machine.Check(&vm.Context{IfName: "vlan42"}, packet))
 }
 
 // verifies that via table(NAME) matches an interface the table lists and
@@ -2445,7 +2500,7 @@ func Test_VM_Check_TableArg(t *testing.T) {
 		:INBOUND
 		add pass ip from any to any
 	`)
-	tablearg := build(t, src, none)
+	tablearg := build(t, src, none, ipfw.WithLabels())
 	require.Equal(t, pass, tablearg.Check(&vm.Context{IfName: "vlan1234"}, packet))
 	require.Equal(t, deny, tablearg.Check(&vm.Context{IfName: "eth0"}, packet))
 	require.Equal(t, deny, tablearg.Check(&vm.Context{IfName: "vlan1234", Direction: vm.Out}, packet))
@@ -2463,7 +2518,7 @@ func Test_VM_Check_TableArg(t *testing.T) {
 		add count ip from any to any
 		add deny ip from any to any
 	`)
-	two := build(t, src, none)
+	two := build(t, src, none, ipfw.WithLabels())
 	cases := []struct {
 		ifname  string
 		verdict ipfw.Action
@@ -2524,7 +2579,7 @@ func Test_VM_Check_TableArg(t *testing.T) {
 		add skipto tablearg ip from any to any via table(j)
 		add pass ip from any to any
 	`)
-	backward := build(t, src, none)
+	backward := build(t, src, none, ipfw.WithLabels())
 	tracer := &recordingTracer{}
 	action, matched := backward.CheckTrace(&vm.Context{IfName: "vlan1"}, packet, tracer)
 	require.True(t, matched)
@@ -2559,7 +2614,7 @@ func Test_VM_TableArg_NoAllocs(t *testing.T) {
 		:ONE
 		add pass ip from any to any
 	`)
-	machine := build(t, src, none)
+	machine := build(t, src, none, ipfw.WithLabels())
 	packet := tcp4("192.0.2.1", "192.0.2.2")
 	ctx := &vm.Context{IfName: "vlan1"}
 	verdict := pass
@@ -2582,6 +2637,7 @@ func Test_VM_Build_Errors(t *testing.T) {
 		name        string
 		rules       string
 		environment ipfw.Environment[net4, net6]
+		options     []ipfw.ParserOption
 		line        int
 		text        string
 		cause       error
@@ -2660,6 +2716,7 @@ func Test_VM_Build_Errors(t *testing.T) {
 				add pass ip from any to any
 			`),
 			environment: resolving,
+			options:     []ipfw.ParserOption{ipfw.WithLabels()},
 			line:        1,
 			text:        "add skipto :NOWHERE ip from any to any",
 			cause:       vm.ErrUnresolvedJump,
@@ -2672,6 +2729,7 @@ func Test_VM_Build_Errors(t *testing.T) {
 				add skipto :BACK ip from any to any
 			`),
 			environment: resolving,
+			options:     []ipfw.ParserOption{ipfw.WithLabels()},
 			line:        3,
 			text:        "add skipto :BACK ip from any to any",
 			cause:       vm.ErrUnresolvedJump,
@@ -2746,7 +2804,10 @@ func Test_VM_Build_Errors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := vm.Build(ipfw.NewParser(tc.rules), vm.Config[net4, net6]{Environment: tc.environment})
+			_, err := vm.Build(
+				ipfw.NewParser(tc.rules, tc.options...),
+				vm.Config[net4, net6]{Environment: tc.environment},
+			)
 			require.Error(t, err)
 			var buildErr *vm.BuildError
 			require.ErrorAs(t, err, &buildErr)
@@ -2789,7 +2850,7 @@ func Test_VM_Build_NumericProto(t *testing.T) {
 	require.Equal(t, pass, machine.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.1")))
 }
 
-// anyTargets stands every hostname and macro for one network of each
+// anyTargets stands every hostname and custom token for one network of each
 // family.
 type anyTargets struct{}
 
@@ -2808,7 +2869,7 @@ var everyMatcher = ruleset(`
 	add count ip from any to any icmptypes 0,8
 	add count ip from any to any icmp6types 128,129
 	add deny tcp from any 1-1023 to me6 not established
-	add deny ip from host.example.com to _NETS_ frag
+	add deny ip from host.example.com to custom:first frag
 	add count tcp from any to any tcpflags syn,!ack dst-port 8080,8443
 	add count ip from any to any { proto 17 or out } keep-state :flow
 	add skipto tablearg ip from any to any via table(i) in
@@ -2822,7 +2883,7 @@ var everyMatcher = ruleset(`
 // and whose names any resolver serves.
 func everyMatcherVM(t *testing.T) *vm.VM[net4, net6] {
 	t.Helper()
-	machine, err := vm.Build(ipfw.NewParser(everyMatcher), vm.Config[net4, net6]{
+	machine, err := vm.Build(ipfw.NewParser(everyMatcher, ipfw.WithLabels()), vm.Config[net4, net6]{
 		Environment: ipfw.Environment[net4, net6]{Networks: nets, Protos: fakeProtos{}, Targets: anyTargets{}},
 	})
 	require.NoError(t, err)
@@ -2907,9 +2968,9 @@ func benchmarkRuleset(n int, tail string) string {
 }
 
 // benchmarkCheck measures Check over the ruleset with the benchmark packet.
-func benchmarkCheck(b *testing.B, ruleset string) {
+func benchmarkCheck(b *testing.B, ruleset string, options ...ipfw.ParserOption) {
 	b.Helper()
-	machine, err := vm.Build(ipfw.NewParser(ruleset), vm.Config[net4, net6]{
+	machine, err := vm.Build(ipfw.NewParser(ruleset, options...), vm.Config[net4, net6]{
 		Environment:     ipfw.Environment[net4, net6]{Networks: nets, Protos: fakeProtos{}, Targets: anyTargets{}},
 		UnresolvedJumps: vm.UnresolvedJumpsFallThrough,
 	})
@@ -3060,11 +3121,11 @@ func Benchmark_VM_Check_Jumps(b *testing.B) {
 		fmt.Fprintf(&rules, section, idx, idx)
 	}
 	rules.WriteString("add pass ip from any to any\n")
-	benchmarkCheck(b, rules.String())
+	benchmarkCheck(b, rules.String(), ipfw.WithLabels())
 }
 
 func Benchmark_VM_Check_EveryMatcher(b *testing.B) {
-	benchmarkCheck(b, strings.Repeat(everyMatcher, 100))
+	benchmarkCheck(b, strings.Repeat(everyMatcher, 100), ipfw.WithLabels())
 }
 
 func Benchmark_VM_Build_Large(b *testing.B) {
@@ -3076,7 +3137,7 @@ func Benchmark_VM_Build_Large(b *testing.B) {
 	b.ReportAllocs()
 	b.SetBytes(int64(len(src)))
 	for b.Loop() {
-		if _, err := vm.Build(ipfw.NewParser(src), cfg); err != nil {
+		if _, err := vm.Build(ipfw.NewParser(src, ipfw.WithLabels()), cfg); err != nil {
 			b.Fatal(err)
 		}
 	}

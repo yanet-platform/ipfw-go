@@ -15,7 +15,7 @@
 // pushes the rule body, protocols, source and destination targets, ports and
 // options, as raw tokens into a State. A Resolver is the State that turns
 // names into values, networks with the consumer's own types, protocols and
-// services into numbers, hostnames and macros into networks, and forwards
+// services into numbers, hostnames and custom targets into networks, and forwards
 // them to a VMState, which is what package vm consumes to evaluate packets.
 //
 // The format is documented in https://man.freebsd.org/cgi/man.cgi?ipfw(8).

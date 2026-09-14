@@ -10,6 +10,26 @@ import (
 	"github.com/yanet-platform/ipfw-go/vm"
 )
 
+// verifies that a configured parser enables symbolic interface-table jumps during VM construction.
+func ExampleBuild_labels() {
+	source := ruleset(`
+		table jump create type iface
+		table jump add vlan42 :NEXT
+		add skipto tablearg ip from any to any via table(jump)
+		add deny ip from any to any
+		:NEXT
+		add pass ip from any to any
+	`)
+	parser := ipfw.NewParser(source, ipfw.WithLabels())
+	machine, err := vm.Build(parser, vm.Config[xnetip.Network4, xnetip.Network6]{})
+	if err != nil {
+		panic(err)
+	}
+	packet := vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("203.0.113.2"))
+	fmt.Println(machine.Check(&vm.Context{IfName: "vlan42"}, packet))
+	// Output: pass
+}
+
 // protocols resolves the protocol names a ruleset uses.
 type protocols map[string]uint8
 

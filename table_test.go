@@ -9,6 +9,39 @@ import (
 	"github.com/yanet-platform/ipfw-go"
 )
 
+// verifies that every table value remains raw regardless of whether label syntax is enabled.
+func Test_Parser_Next_TableValuesRemainRaw(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		value string
+	}{
+		{name: "label value", input: "table t add vlan42 :NEXT", value: ":NEXT"},
+		{name: "colon value", input: "table t add vlan42 :", value: ":"},
+		{name: "IPv6 value", input: "table t add vlan42 ::1", value: "::1"},
+		{name: "numeric value", input: "table t add vlan42 100", value: "100"},
+		{name: "embedded slashes", input: "table t add vlan42 value//part", value: "value//part"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			for _, options := range [][]ipfw.ParserOption{
+				nil,
+				{ipfw.WithLabels()},
+			} {
+				parser := ipfw.NewParser(testCase.input, options...)
+				next(t, parser, ipfw.Record{
+					Line: 1, Text: testCase.input, Kind: ipfw.RecordTable,
+					Table: ipfw.Table{
+						Name: "t", Kind: ipfw.TableAdd, Value: testCase.value,
+						Key: ipfw.TableKey{Kind: ipfw.TableKeyName, Text: "vlan42"},
+					},
+				})
+				next(t, parser, eof)
+			}
+		})
+	}
+}
+
 // verifies that `table NAME create [type T]…` parses into a table record,
 // the last type winning and a missing one staying unset.
 func Test_Parser_Next_TableCreate(t *testing.T) {
@@ -150,12 +183,12 @@ func Test_Parser_Next_TableAdd(t *testing.T) {
 			},
 		},
 		{
-			name:  "macro",
-			input: "table t add _NETS_ :LABEL\n",
+			name:  "custom key",
+			input: "table t add custom:first :LABEL\n",
 			table: ipfw.Table{
 				Name:  "t",
 				Kind:  ipfw.TableAdd,
-				Key:   ipfw.TableKey{Kind: ipfw.TableKeyName, Text: "_NETS_"},
+				Key:   ipfw.TableKey{Kind: ipfw.TableKeyName, Text: "custom:first"},
 				Value: ":LABEL",
 			},
 		},

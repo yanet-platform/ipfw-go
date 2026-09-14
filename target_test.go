@@ -302,11 +302,11 @@ func Test_ParseTargets_Table(t *testing.T) {
 			},
 		},
 		{
-			name:  "at sign makes IPv6 text custom",
-			input: "2001:db8::1@2 to any",
+			name:  "invalid character makes IPv6 text custom",
+			input: "2001:db8::1!2 to any",
 			n:     13,
 			state: ipfw.ReduceState{
-				Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "2001:db8::1@2"}},
+				Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "2001:db8::1!2"}},
 			},
 		},
 		{
@@ -398,12 +398,12 @@ func Test_ParseTargets_Table(t *testing.T) {
 		},
 		{
 			name:  "custom address list",
-			input: "localhost,_NETS_ to any",
-			n:     16,
+			input: "localhost,custom:first to any",
+			n:     22,
 			state: ipfw.ReduceState{
 				Sources: []ipfw.Target{
 					{Kind: ipfw.TargetCustom, Text: "localhost"},
-					{Kind: ipfw.TargetCustom, Text: "_NETS_"},
+					{Kind: ipfw.TargetCustom, Text: "custom:first"},
 				},
 			},
 		},
@@ -486,11 +486,11 @@ func Test_ParseTargets_Table(t *testing.T) {
 			err:   ipfw.ErrExpectedTarget,
 		},
 		{
-			name:  "macro name is custom",
-			input: "_VIRTUAL_SERVERS_ to any",
-			n:     17,
+			name:  "raw token is custom",
+			input: "custom:first to any",
+			n:     12,
 			state: ipfw.ReduceState{
-				Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "_VIRTUAL_SERVERS_"}},
+				Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "custom:first"}},
 			},
 		},
 		{
@@ -561,11 +561,11 @@ func Test_ParseTargets_Table(t *testing.T) {
 		{name: "closing brace alone", input: "} x", n: 0, err: ipfw.ErrExpectedTarget},
 		{
 			name:  "group of three shapes",
-			input: "{ host.example.com or _X_ or table(t) } x",
-			n:     39,
+			input: "{ host.example.com or custom:first or table(t) } x",
+			n:     48,
 			state: ipfw.ReduceState{Sources: []ipfw.Target{
 				{Kind: ipfw.TargetHostname, Text: "host.example.com"},
-				{Pattern: 1, Kind: ipfw.TargetCustom, Text: "_X_"},
+				{Pattern: 1, Kind: ipfw.TargetCustom, Text: "custom:first"},
 				{Pattern: 2, Kind: ipfw.TargetTable, Text: "t"},
 			}},
 		},
@@ -709,15 +709,14 @@ func Test_ParseTargets_StateError(t *testing.T) {
 // verifies that a braced group of every shape, an address list and negations
 // included, allocates nothing.
 func Test_ParseTargets_Group_NoAllocs(t *testing.T) {
-	input := "{ 192.0.2.0/24,198.51.100.0/24 or not 2001:db8::/32 or " +
-		"`host.example.com' or table(t) or _M_ } to any"
+	input := "{ 192.0.2.0/24,198.51.100.0/24 or not 2001:db8::/32 or `host.example.com' or table(t) or custom:first } to any"
 	var state ipfw.ReduceState
 	_, _ = ipfw.ParseSourceTargets(input, &state)
 	ok := true
 	allocs := testing.AllocsPerRun(100, func() {
 		state.Reset()
 		n, err := ipfw.ParseSourceTargets(input, &state)
-		if err != nil || n != 94 {
+		if err != nil || n != 103 {
 			ok = false
 		}
 	})

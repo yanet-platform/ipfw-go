@@ -7,6 +7,8 @@ import (
 
 // parserOptions is what a ParserOption configures.
 type parserOptions struct {
+	// Labels enables project label declarations and symbolic skipto jumps.
+	Labels bool
 	// CommandHook takes the lines the grammar does not know, nil rejecting them.
 	CommandHook CommandHook
 	// OptionHook takes the option keywords the grammar does not know, nil
@@ -20,6 +22,13 @@ func newParserOptions() parserOptions {
 
 // ParserOption configures a Parser, see the With functions.
 type ParserOption func(*parserOptions)
+
+// WithLabels enables project label declarations and symbolic skipto jumps, disabled by default.
+func WithLabels() ParserOption {
+	return func(opts *parserOptions) {
+		opts.Labels = true
+	}
+}
 
 // WithCommandHook hands the lines the grammar does not know to hook.
 func WithCommandHook(hook CommandHook) ParserOption {
@@ -44,7 +53,8 @@ type Parser struct {
 	record Record
 }
 
-// NewParser returns a parser over src.
+// NewParser returns a parser over src, with built-in labels disabled by default.
+// WithLabels enables label declarations and symbolic skipto jumps.
 func NewParser(src string, options ...ParserOption) *Parser {
 	opts := newParserOptions()
 	for _, option := range options {
@@ -53,7 +63,7 @@ func NewParser(src string, options ...ParserOption) *Parser {
 	return &Parser{rest: src, opts: opts}
 }
 
-// Reset makes the parser read src from its first line.
+// Reset makes the parser read src from its first line, retaining its options.
 func (m *Parser) Reset(src string) {
 	m.rest = src
 	m.line = 0
@@ -137,7 +147,7 @@ func (m *Parser) parseLine(text string, state State) (string, fail) {
 		}
 		record.Kind = RecordTable
 		s, commanded = rest, true
-	} else if rest, ok := prefix(s, ":"); ok {
+	} else if rest, ok := prefix(s, ":"); ok && m.opts.Labels {
 		record.Label, rest = token(rest)
 		if record.Label == "" {
 			return text, fail{Kind: ErrExpectedToken, At: rest}
@@ -200,7 +210,7 @@ func (m *Parser) parseInstruction(s string, state State, instruction *Instructio
 			instruction.Num, s = num, afterWS
 		}
 	}
-	rest, err := parseAction(s, &instruction.Action)
+	rest, err := m.parseAction(s, &instruction.Action)
 	if err.Failed() {
 		return input, err
 	}
@@ -226,6 +236,75 @@ func (m *Parser) parseInstruction(s string, state State, instruction *Instructio
 	}
 	instruction.InlineComment, rest = parseInlineComment(rest)
 	return rest, fail{}
+}
+
+// The keyword-only actions in the order they are tried, the most frequent
+// spellings first.
+var actionKeywords = [...]struct {
+	keyword string
+	kind    ActionKind
+}{
+	{"allow", ActionPass},
+	{"pass", ActionPass},
+	{"accept", ActionPass},
+	{"permit", ActionPass},
+	{"deny", ActionDeny},
+	{"drop", ActionDeny},
+	{"count", ActionCount},
+}
+
+// parseAction recognizes the action keyword by prefix, writing into action,
+// which may be partially written when it fails.
+func (m *Parser) parseAction(s string, action *Action) (string, fail) {
+	for _, entry := range actionKeywords {
+		if rest, ok := prefix(s, entry.keyword); ok {
+			action.Kind = entry.kind
+			return rest, fail{}
+		}
+	}
+	if rest, ok := prefix(s, "check-state"); ok {
+		action.Kind = ActionCheckState
+		if flow, afterFlow, found := parseFlowName(rest); found {
+			action.Flow, rest = flow, afterFlow
+		}
+		return rest, fail{}
+	}
+	if rest, ok := prefix(s, "skipto"); ok {
+		rest, ok = ws1(rest)
+		if !ok {
+			return s, fail{Kind: ErrExpectedWhitespace, At: rest}
+		}
+		var err fail
+		action.SkipTo, rest, err = m.parseSkipTo(rest)
+		if err.Failed() {
+			return s, err
+		}
+		action.Kind = ActionSkipTo
+		return rest, fail{}
+	}
+	return s, fail{Kind: ErrExpectedAction, At: s}
+}
+
+// parseSkipTo reads a rule number, tablearg or an explicitly enabled label.
+func (m *Parser) parseSkipTo(s string) (SkipTo, string, fail) {
+	if rest, ok := prefix(s, ":"); ok && m.opts.Labels {
+		var label string
+		label, rest = token(rest)
+		if label == "" {
+			return SkipTo{}, s, fail{Kind: ErrExpectedToken, At: rest}
+		}
+		return SkipTo{Kind: SkipToLabel, Label: label}, rest, fail{}
+	}
+	if number, rest, kind := parseU32(s); kind == 0 {
+		if number == 0 {
+			return SkipTo{}, s, fail{Kind: ErrExpectedSkipTo, At: s}
+		}
+		return SkipTo{Kind: SkipToNumber, Number: number}, rest, fail{}
+	}
+	if rest, ok := prefix(s, "tablearg"); ok {
+		return SkipTo{Kind: SkipToTableArg}, rest, fail{}
+	}
+	return SkipTo{}, s, fail{Kind: ErrExpectedSkipTo, At: s}
 }
 
 // parseLog parses the optional ` log [logamount N]` after the action, the
