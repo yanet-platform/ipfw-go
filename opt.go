@@ -198,8 +198,8 @@ func parseOption(
 // argumentOption tells an option with an argument by its keyword and
 // returns its kind with the keyword's length, zero for none.
 //
-// The first byte narrows the candidates to the one to three keywords
-// starting with it before a prefix is compared.
+// The first byte narrows the candidate spellings. Longer spellings are
+// checked before their prefixes.
 func argumentOption(s string) (OptKind, int) {
 	if s == "" {
 		return 0, 0
@@ -221,6 +221,8 @@ func argumentOption(s string) (OptKind, int) {
 			return OptICMPTypes, len("icmptype")
 		case hasPrefix(s, "icmp6types"):
 			return OptICMP6Types, len("icmp6types")
+		case hasPrefix(s, "icmp6type"):
+			return OptICMP6Types, len("icmp6type")
 		}
 	case 'k':
 		if hasPrefix(s, "keep-state") {
@@ -231,8 +233,11 @@ func argumentOption(s string) (OptKind, int) {
 			return OptProto, len("proto")
 		}
 	case 't':
-		if hasPrefix(s, "tcpflags") {
+		switch {
+		case hasPrefix(s, "tcpflags"):
 			return OptTCPFlags, len("tcpflags")
+		case hasPrefix(s, "tcpflgs"):
+			return OptTCPFlags, len("tcpflgs")
 		}
 	case 'v':
 		if hasPrefix(s, "via") {
@@ -560,8 +565,9 @@ func parsePortsOption(
 	}
 }
 
-// keywordOption tells an option without an argument by its keyword, the
-// first byte picking the one candidate before the prefix is compared.
+// keywordOption tells an option without an argument by its keyword.
+//
+// Longer spellings are checked before their prefixes.
 func keywordOption(s string) (OptKind, string, bool) {
 	if s == "" {
 		return 0, s, false
@@ -574,8 +580,14 @@ func keywordOption(s string) (OptKind, string, bool) {
 	case 'd':
 		keyword, kind = "diverted", OptDiverted
 	case 'e':
-		keyword, kind = "established", OptEstablished
+		if rest, ok := prefix(s, "established"); ok {
+			return OptEstablished, rest, true
+		}
+		keyword, kind = "estab", OptEstablished
 	case 'f':
+		if rest, ok := prefix(s, "fragment"); ok {
+			return OptFrag, rest, true
+		}
 		keyword, kind = "frag", OptFrag
 	case 'i':
 		keyword, kind = "in", OptIn

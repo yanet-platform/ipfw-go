@@ -130,6 +130,101 @@ func Test_ParseOptions_Table(t *testing.T) {
 		options []ipfw.Opt
 	}{
 		{name: "established", input: "established", n: 11, options: []ipfw.Opt{established}},
+		{name: "estab alias", input: "estab", n: 5, options: []ipfw.Opt{established}},
+		{
+			name:    "fragment alias",
+			input:   "fragment",
+			n:       8,
+			options: []ipfw.Opt{{Kind: ipfw.OptFrag}},
+		},
+		{
+			name:    "tcpflgs alias",
+			input:   "tcpflgs syn,!ack",
+			n:       16,
+			options: []ipfw.Opt{tcpFlags(ipfw.TCPSyn, ipfw.TCPAck)},
+		},
+		{
+			name:    "icmp6type alias",
+			input:   "icmp6type 128,129",
+			n:       17,
+			options: []ipfw.Opt{icmp6Types(128, 129)},
+		},
+		{
+			name: "aliases preserve lists negation grouping and the following option",
+			input: "{ not estab or fragment } not tcpflgs syn, !ack " +
+				"{ in or not icmp6type 128, 129 } out",
+			n: 84,
+			options: []ipfw.Opt{
+				notOpt(established),
+				{Or: true, Kind: ipfw.OptFrag},
+				notOpt(tcpFlags(ipfw.TCPSyn, ipfw.TCPAck)),
+				{Kind: ipfw.OptIn},
+				orOpt(notOpt(icmp6Types(128, 129))),
+				{Kind: ipfw.OptOut},
+			},
+		},
+		{
+			name:    "estab alias before a suffix",
+			input:   "estabx",
+			n:       5,
+			options: []ipfw.Opt{established},
+		},
+		{
+			name:    "fragment alias before a comment",
+			input:   "fragment // c",
+			n:       9,
+			options: []ipfw.Opt{{Kind: ipfw.OptFrag}},
+		},
+		{
+			name:    "tcpflgs alias before a newline",
+			input:   "tcpflgs syn\n",
+			n:       11,
+			options: []ipfw.Opt{tcpFlags(ipfw.TCPSyn, 0)},
+		},
+		{
+			name:    "icmp6types before an argument suffix",
+			input:   "icmp6types 128x",
+			n:       14,
+			options: []ipfw.Opt{icmp6Types(128)},
+		},
+		{
+			name:    "icmp6type alias before an argument suffix",
+			input:   "icmp6type 128x",
+			n:       13,
+			options: []ipfw.Opt{icmp6Types(128)},
+		},
+		{
+			name:  "tcpflgs alias without whitespace",
+			input: "tcpflgs",
+			n:     7,
+			err:   ipfw.ErrExpectedWhitespace,
+		},
+		{
+			name:    "tcpflgs alias invalid later flag preserves only the preceding option",
+			input:   "in tcpflgs syn,!bogus out",
+			n:       16,
+			err:     ipfw.ErrUnknownTCPFlag,
+			options: []ipfw.Opt{{Kind: ipfw.OptIn}},
+		},
+		{
+			name:  "icmp6type alias without whitespace",
+			input: "icmp6type",
+			n:     9,
+			err:   ipfw.ErrExpectedWhitespace,
+		},
+		{
+			name:  "icmp6type alias with a nonnumeric type",
+			input: "icmp6type bogus",
+			n:     10,
+			err:   ipfw.ErrExpectedU8,
+		},
+		{
+			name:    "icmp6type alias invalid later item preserves only the preceding option",
+			input:   "in icmp6type 128, 202 out",
+			n:       18,
+			err:     ipfw.ErrUnknownICMP6Type,
+			options: []ipfw.Opt{{Kind: ipfw.OptIn}},
+		},
 		{
 			name:    "established before a newline",
 			input:   "established\n",
@@ -874,14 +969,15 @@ func stateOption(rest string) (ipfw.Opt, int, error) {
 // verifies that parsing an option list with an or-group into a warmed-up
 // state allocates nothing.
 func Test_ParseOptions_Group_NoAllocs(t *testing.T) {
-	input := "{ not established or established } established\n"
+	input := "{ not established or established } established " +
+		"estab fragment tcpflgs syn,!ack icmp6type 128,129\n"
 	var state ipfw.ReduceState
 	_, _ = ipfw.ParseOptions(input, &state, nil)
 	ok := true
 	allocs := testing.AllocsPerRun(100, func() {
 		state.Reset()
 		n, err := ipfw.ParseOptions(input, &state, nil)
-		if err != nil || n != 46 {
+		if err != nil || n != len(input)-1 {
 			ok = false
 		}
 	})
@@ -907,6 +1003,11 @@ func zzOption(rest string) (ipfw.Opt, int, error) {
 
 func Fuzz_ParseOptions(f *testing.F) {
 	f.Add("established in { not out or zz 1 } dst-port 22,80 via table(t,:L)")
+	f.Add("{ not estab or fragment } tcpflgs syn,!ack icmp6type 128,129 in")
+	f.Add("tcpflgs")
+	f.Add("tcpflgs syn,!bogus")
+	f.Add("icmp6type")
+	f.Add("icmp6type 128,202")
 	f.Add("tcpflags syn,!ack icmptypes 0,8 keep-state :f proto 6 zz")
 	f.Add("{ not icmptypes 0,7,31 or icmp6types 0,5,150,201 } in")
 	f.Add("in icmptypes 7,32")
