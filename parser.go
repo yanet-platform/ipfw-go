@@ -479,10 +479,10 @@ func parseTable(s string) (Table, string, fail) {
 	table := Table{Name: name}
 	var err fail
 	switch {
-	case strings.HasPrefix(rest, "create"):
+	case hasPrefix(rest, "create"):
 		table.Kind = TableCreate
 		table.Type, rest, err = parseTableCreate(rest[len("create"):])
-	case strings.HasPrefix(rest, "add"):
+	case hasPrefix(rest, "add"):
 		table.Kind = TableAdd
 		rest, err = parseTableAdd(rest[len("add"):], &table)
 	default:

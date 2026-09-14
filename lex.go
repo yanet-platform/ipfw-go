@@ -1,7 +1,5 @@
 package ipfw
 
-import "strings"
-
 // fail is a parse failure inside a line, the zero value being success.
 type fail struct {
 	// Kind is what went wrong.
@@ -64,11 +62,26 @@ func isASCIISpace(c byte) bool {
 	return false
 }
 
+// prefix consumes the keyword at the start of the input.
+//
+// The bytes are compared one by one rather than through strings.HasPrefix:
+// a constant keyword still reaches runtime.memequal once the call is
+// inlined, and most keyword checks fail on the first byte.
 func prefix(s, p string) (string, bool) {
-	if !strings.HasPrefix(s, p) {
+	if len(s) < len(p) {
 		return s, false
 	}
+	for idx := 0; idx < len(p); idx++ {
+		if s[idx] != p[idx] {
+			return s, false
+		}
+	}
 	return s[len(p):], true
+}
+
+func hasPrefix(s, p string) bool {
+	_, ok := prefix(s, p)
+	return ok
 }
 
 func takeWhile(s string, f func(byte) bool) (string, string) {
