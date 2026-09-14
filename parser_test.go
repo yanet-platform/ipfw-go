@@ -3244,23 +3244,23 @@ func Test_Parser_Next_Options(t *testing.T) {
 			},
 		},
 		{
-			name:  "spaced icmptypes",
-			input: "add allow icmp from any to any icmptypes 3, 8, 11, 12\n",
+			name:  "spaced icmptypes numeric range followed by an option",
+			input: "add allow icmp from any to any icmptypes 0, 7, 8, 31 in\n",
 			state: ipfw.ReduceState{
 				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "icmp"}}},
 				Sources:      anyToAny,
 				Destinations: anyToAny,
-				Options:      []ipfw.Opt{icmpTypes(3, 8, 11, 12)},
+				Options:      []ipfw.Opt{icmpTypes(0, 7, 8, 31), {Kind: ipfw.OptIn}},
 			},
 		},
 		{
-			name:  "icmp6types",
-			input: "add allow ip from any to any icmp6types 135\n",
+			name:  "icmp6types numeric range followed by an option",
+			input: "add allow ip from any to any icmp6types 0,5,135,150,201 in\n",
 			state: ipfw.ReduceState{
 				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
 				Sources:      anyToAny,
 				Destinations: anyToAny,
-				Options:      []ipfw.Opt{icmp6Types(135)},
+				Options:      []ipfw.Opt{icmp6Types(0, 5, 135, 150, 201), {Kind: ipfw.OptIn}},
 			},
 		},
 		{
@@ -3349,8 +3349,9 @@ func Test_Parser_Next_Options(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			parser := ipfw.NewParser(tc.input)
 			var state ipfw.ReduceState
-			rec, err := ipfw.NewParser(tc.input).Next(&state)
+			rec, err := parser.Next(&state)
 			require.Nil(t, err)
 			require.Equal(t, ipfw.Record{
 				Line: 1,
@@ -3362,6 +3363,7 @@ func Test_Parser_Next_Options(t *testing.T) {
 				},
 			}, *rec)
 			require.Equal(t, tc.state, state)
+			next(t, parser, eof)
 		})
 	}
 }
@@ -3498,23 +3500,23 @@ func Test_Parser_Next_OptionErrors(t *testing.T) {
 			},
 		},
 		{
-			name:  "unknown icmp type",
-			input: "add allow icmp from any to any established icmptypes 7",
+			name:  "icmp type outside the range after a valid item",
+			input: "add allow icmp from any to any established icmptypes 7,32",
 			expected: ipfw.ParseError{
 				Kind:   ipfw.ErrUnknownICMPType,
 				Line:   1,
-				Column: 53,
-				Text:   "add allow icmp from any to any established icmptypes 7",
+				Column: 55,
+				Text:   "add allow icmp from any to any established icmptypes 7,32",
 			},
 		},
 		{
-			name:  "unknown icmp6 type",
-			input: "add allow ip from any to any established icmp6types 150",
+			name:  "icmp6 type outside the range after a valid item",
+			input: "add allow ip from any to any established icmp6types 150,202",
 			expected: ipfw.ParseError{
 				Kind:   ipfw.ErrUnknownICMP6Type,
 				Line:   1,
-				Column: 52,
-				Text:   "add allow ip from any to any established icmp6types 150",
+				Column: 56,
+				Text:   "add allow ip from any to any established icmp6types 150,202",
 			},
 		},
 		{
@@ -3702,7 +3704,10 @@ func Test_Parser_Next_OptionListFailsAtOption(t *testing.T) {
 // verifies that a line with ports and options parses into a warmed-up
 // state without allocating, the first option's dry run included.
 func Test_Parser_Next_OptionsNoAllocs(t *testing.T) {
-	src := "add pass tcp from any to any 22 established\nadd pass tcp from any to any established\n"
+	src := "add pass tcp from any to any 22 established\n" +
+		"add pass tcp from any to any established\n" +
+		"add pass icmp from any to any icmptypes 0,7,31 in\n" +
+		"add pass ip from any to any not icmp6types 0,5,150,201 in\n"
 	parser := ipfw.NewParser(src)
 	var state ipfw.ReduceState
 	for _, err := range parser.Records(&state) {
