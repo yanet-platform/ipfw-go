@@ -1,6 +1,25 @@
 # AGENTS.md
 
-Guidance for AI coding agents working on `ipfw`. Facts about the code, build and environment only. `.githooks/` is local and gitignored, depending on locally installed linters.
+Guidance for AI coding agents working on `ipfw`, including the required contribution workflow.
+`.githooks/` is local and gitignored, depending on locally installed linters.
+
+## Mandatory workflow: worktree → PR → cleanup
+
+- **Never commit directly to `main` or push to `main`.** Every change, including documentation and
+  agent instructions, reaches `main` only through a pull request.
+- Before the first edit, fetch `origin` and create a dedicated task branch from fresh `origin/main`
+  in a linked worktree under `/extra_vda1/esafronov/worktrees/`. Make all edits and commits there.
+  Use one branch and one PR per independently deliverable change.
+- Keep the primary checkout for inspection. Do not edit, commit, or switch branches there, and do
+  not move it. Preserve existing local changes, commits, and unrelated worktrees.
+- Before editing or committing, check the working directory, `git worktree list --porcelain`, and
+  `git branch --show-current`. Continue only in the task's linked worktree on its dedicated branch.
+- Push the task branch and open a PR against `main`. Follow the user's merge instructions and pass
+  the required checks before merging.
+- After confirming the PR is merged, remove its worktree and task branches locally and remotely.
+  First verify that the branch still matches the merged PR head and preserve any uncommitted,
+  untracked, or ignored files that are still needed. Never force-remove a dirty worktree or delete
+  unrelated worktrees or branches. Cleanup is part of completing a merged change.
 
 ## Project
 
@@ -65,13 +84,16 @@ The policy is `.agents/conventions/comments.md`: a brief of 1–2 lines, then, o
 
 ## Session protocol (TDD, one feature per session)
 
-1. Read the relevant public FreeBSD/macOS documentation and upstream source fresh: they are the spec unless `README.md` documents a deviation.
-2. Write the feature's tests first and watch them fail (a compile error is not a failing test — add the minimal stubs).
-3. Implement until `make test` is green, then `make lint`.
-4. Commit — one commit per feature.
+1. Create the task branch and linked worktree as required above, before editing any files.
+2. Read the relevant public FreeBSD/macOS documentation and upstream source fresh: they are the spec unless `README.md` documents a deviation.
+3. Write the feature's tests first and watch them fail (a compile error is not a failing test — add the minimal stubs).
+4. Implement until `make test` is green, then `make lint`.
+5. Commit on the task branch and open a PR — one commit and one PR per feature.
+6. After the PR is merged, complete the worktree and branch cleanup required above.
 
 ## Commits
 
-- One commit per feature, directly on `main`, only after `make lint` and `make test` are green. Do not amend or rewrite existing commits.
+- One commit per feature, on its dedicated branch in a linked worktree, only after `make lint` and
+  `make test` are green. Never commit on `main`. Do not amend or rewrite existing commits.
 - Subject: `feat|fix|perf|refactor|test|docs|chore(scope): brief` — lowercase brief, no trailing period; scope = package or area (`parser`, `lexer`, `action`, `target`, `opt`, `rulestate`, `vm`, `docs`). Tests of the change go in the same commit.
 - **No AI attribution anywhere**: no `Co-Authored-By`, no "Generated with" footers, in commits or files.
