@@ -735,3 +735,72 @@ type Log struct {
 	// Amount is the logamount value.
 	Amount uint32
 }
+
+// RuleBodyKind identifies the grammar that produced a retained instruction body.
+type RuleBodyKind uint8
+
+// The rule body grammars.
+const (
+	RuleBodyLegacy RuleBodyKind = iota
+	RuleBodyNative
+	RuleBodyCommentOnly
+)
+
+// ParsedRecord is one parser output retained by the caller: the record of
+// the line together with an owned copy of its rule body.
+type ParsedRecord struct {
+	// Record is the line's record.
+	Record Record
+	// Body is the rule body of an instruction record.
+	Body ReduceState
+	// BodyKind is the grammar that produced an instruction body.
+	BodyKind RuleBodyKind
+}
+
+// NewParsedRecord copies record and the body collected in state into one
+// owned value.
+func NewParsedRecord(record *Record, state *ReduceState) ParsedRecord {
+	return ParsedRecord{
+		Record:   *record,
+		Body:     state.Clone(),
+		BodyKind: parsedRuleBodyKind(record, state),
+	}
+}
+
+func parsedRuleBodyKind(record *Record, state *ReduceState) RuleBodyKind {
+	if record.Kind != RecordInstruction {
+		return RuleBodyLegacy
+	}
+	rest, ok := prefix(record.Text, "add")
+	if ok {
+		rest, ok = ws1(rest)
+	}
+	if ok {
+		if _, afterNumber, kind := parseU32(rest); kind == 0 {
+			if afterSpace, spaced := ws1(afterNumber); spaced {
+				rest = afterSpace
+			}
+		}
+		if hasPrefix(rest, "//") {
+			return RuleBodyCommentOnly
+		}
+	}
+	if isImplicitAnyBody(*state) {
+		return RuleBodyNative
+	}
+	return RuleBodyLegacy
+}
+
+func isImplicitAnyBody(body ReduceState) bool {
+	any := Target{Kind: TargetAny}
+	return len(body.IPProtos) == 0 && len(body.Protos) == 0 &&
+		len(body.Sources) == 1 && body.Sources[0] == any &&
+		len(body.Destinations) == 1 && body.Destinations[0] == any &&
+		len(body.SourcePorts) == 0 && len(body.DestinationPorts) == 0
+}
+
+// Clone returns a copy with every body slice owned by the copy.
+func (m ParsedRecord) Clone() ParsedRecord {
+	m.Body = m.Body.Clone()
+	return m
+}
