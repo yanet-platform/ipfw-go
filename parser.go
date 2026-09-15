@@ -72,6 +72,9 @@ func (m *Parser) Reset(src string) {
 // Next parses the next physical line, pushing the rule body into state.
 // The first `#` starts metadata before the grammar or hooks run.
 //
+// A State implementing ProtoResolver selects legacy syntax by recognizing the
+// first protocol. States without it prefer a complete legacy header when an
+// option start makes the grammar ambiguous.
 // The record belongs to the parser and is overwritten by the next call to
 // Next or Reset, copy it to keep it. Once the input is exhausted the record
 // is of kind RecordEOF. A line that does not parse is skipped as a whole and
@@ -370,31 +373,52 @@ const (
 	destinationSide
 )
 
-// parseRuleBody chooses the grammar, preferring a complete legacy header.
+// parseRuleBody chooses the grammar using the State's protocol knowledge when available.
 func (m *Parser) parseRuleBody(s string, state State) (string, fail) {
 	if s == "" || s[0] == '\n' || hasPrefix(s, "\r\n") {
 		return s, fail{Kind: ErrExpectedEitherIPOrProto, At: s}
 	}
-	// Only possible option starts need a header probe. A hook must wait
-	// until a complete legacy header has been ruled out.
-	optionStart := m.opts.OptionHook == nil && startsOptions(s, nil)
-	if m.opts.OptionHook != nil || optionStart {
-		_, err := parseBodyHeader(s, DiscardState{})
-		if err.Failed() && (optionStart || startsOptions(s, m.opts.OptionHook)) {
-			if err := state.OnSourceTarget(Target{Kind: TargetAny}); err != nil {
-				return s, failFrom(err, s)
-			}
-			if err := state.OnDestinationTarget(Target{Kind: TargetAny}); err != nil {
-				return s, failFrom(err, s)
-			}
-			return parseOptions(s, state, m.opts.OptionHook)
+	legacy := true
+	if resolver, ok := state.(ProtoResolver); ok {
+		legacy = startsProtocol(s, resolver)
+	} else {
+		// Only possible option starts need a header probe. A hook must wait
+		// until a complete legacy header has been ruled out.
+		optionStart := m.opts.OptionHook == nil && startsOptions(s, nil)
+		if m.opts.OptionHook != nil || optionStart {
+			_, err := parseBodyHeader(s, DiscardState{})
+			legacy = !err.Failed() || !optionStart && !startsOptions(s, m.opts.OptionHook)
 		}
 	}
-	return m.parseBody(s, state)
+	if legacy {
+		return m.parseBodyLegacy(s, state)
+	}
+	if err := state.OnSourceTarget(Target{Kind: TargetAny}); err != nil {
+		return s, failFrom(err, s)
+	}
+	if err := state.OnDestinationTarget(Target{Kind: TargetAny}); err != nil {
+		return s, failFrom(err, s)
+	}
+	return parseOptions(s, state, m.opts.OptionHook)
 }
 
-// parseBody parses `PROTO from SRC [PORT] to DST [PORT] [OPTIONS]`.
-func (m *Parser) parseBody(s string, state State) (string, fail) {
+// startsProtocol recognizes only the first group member without emitting tokens.
+func startsProtocol(s string, resolver ProtoResolver) bool {
+	opened, rest := openGroup(s, headerPosition)
+	rest, _ = protocolNot(rest)
+	proto, rest, kind := parseProto(rest)
+	if kind != 0 || !atTokenEnd(rest) && (!opened.Braced || rest[0] != '}') {
+		return false
+	}
+	if _, ok := protoIPKeyword(proto.Name); ok || proto.IsNumber() {
+		return true
+	}
+	_, ok := resolver.ResolveProto(proto.Name)
+	return ok
+}
+
+// parseBodyLegacy parses `PROTO from SRC [PORT] to DST [PORT] [OPTIONS]`.
+func (m *Parser) parseBodyLegacy(s string, state State) (string, fail) {
 	rest, err := parseBodyHeader(s, state)
 	if err.Failed() {
 		return s, err

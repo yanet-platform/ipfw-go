@@ -2867,7 +2867,7 @@ func Test_VM_Build_Errors(t *testing.T) {
 			environment: networksOnly,
 			line:        1,
 			text:        "add pass tcp from any to any",
-			cause:       ipfw.ErrUnresolvedProto,
+			cause:       ipfw.ErrUnknownOption,
 		},
 		{
 			name:        "unresolved protocol name",
@@ -2875,7 +2875,7 @@ func Test_VM_Build_Errors(t *testing.T) {
 			environment: resolving,
 			line:        1,
 			text:        "add pass gre from any to any",
-			cause:       ipfw.ErrUnresolvedProto,
+			cause:       ipfw.ErrUnknownOption,
 		},
 		{
 			name:        "hostname without a resolver",

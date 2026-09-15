@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -234,9 +235,13 @@ func Test_Resolver_CompatibilityNames(t *testing.T) {
 	require.Nil(t, record)
 	require.NotNil(t, err)
 	require.Equal(t, ipfw.ParseError{
-		Kind: ipfw.ErrUnresolvedProto, Line: 1, Column: 9, Text: input,
+		Kind: ipfw.ErrExpectedNewlineOrEOF, Line: 1, Column: 11, Text: input,
 	}, *err)
-	require.Equal(t, ipfw.ReduceVMState[net4, net6]{}, state)
+	require.Equal(t, ipfw.ReduceVMState[net4, net6]{
+		Sources:      []ipfw.TargetMatch[net4, net6]{{Kind: ipfw.TargetAny}},
+		Destinations: []ipfw.TargetMatch[net4, net6]{{Kind: ipfw.TargetAny}},
+		Options:      []ipfw.Opt{{Kind: ipfw.OptIn}},
+	}, state)
 	next(t, parser, eof)
 }
 
@@ -246,6 +251,121 @@ type exampleProtoResolver map[string]uint8
 func (m exampleProtoResolver) ResolveProto(name string) (uint8, bool) {
 	number, ok := m[name]
 	return number, ok
+}
+
+// verifies that the first resolved protocol commits the rule to the legacy grammar.
+func Test_Resolver_GrammarSelection(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		input  string
+		kind   ipfw.ErrorKind
+		column int
+		protos []ipfw.ProtoNumberMatch
+	}{
+		{
+			name: "known option-shaped protocol needs from", input: "add allow in proto tcp",
+			kind: ipfw.ErrExpectedFrom, column: 13,
+			protos: []ipfw.ProtoNumberMatch{{Number: 6}},
+		},
+		{
+			name:  "unknown later group member cannot select options",
+			input: "add allow { not in or out }", kind: ipfw.ErrUnresolvedProto, column: 22,
+			protos: []ipfw.ProtoNumberMatch{{Neg: true, Number: 6}},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			parser := ipfw.NewParser(ruleset(test.input + "\n# after\n"))
+			var sink ipfw.ReduceVMState[net4, net6]
+			registry := exampleProtoResolver{"in": 6, "tcp": 6}
+			resolver := ipfw.NewResolver(&sink, ipfw.Environment[net4, net6]{
+				Protos: registry,
+			})
+			record, err := parser.Next(&grammarResolvingState{State: resolver, ProtoResolver: registry})
+			require.Nil(t, record)
+			require.Equal(t, &ipfw.ParseError{
+				Kind: test.kind, Line: 1, Column: test.column, Text: test.input,
+			}, err)
+			require.Equal(t, ipfw.ReduceVMState[net4, net6]{Protos: test.protos}, sink)
+			next(t, parser, ipfw.Record{
+				Line: 2, Text: "# after", Kind: ipfw.RecordComment, Comment: " after",
+			})
+			next(t, parser, eof)
+		})
+	}
+}
+
+// verifies that a consuming sink's error cannot be mistaken for an unknown protocol.
+func Test_Resolver_GrammarSelection_SinkError(t *testing.T) {
+	const input = "add allow in"
+	var sink grammarRejectingSink
+	state := ipfw.NewResolver(&sink, ipfw.Environment[net4, net6]{
+		Protos: exampleProtoResolver{"in": 6},
+	})
+	parser := ipfw.NewParser(input)
+	record, err := parser.Next(state)
+	require.Nil(t, record)
+	require.Equal(t, &ipfw.ParseError{
+		Kind: ipfw.ErrUnresolvedProto, Line: 1, Column: 10, Text: input,
+	}, err)
+	require.Equal(t, ipfw.ReduceVMState[net4, net6]{
+		Protos: []ipfw.ProtoNumberMatch{{Number: 6}},
+	}, sink.ReduceVMState)
+	next(t, parser, eof)
+}
+
+// verifies that compact protocol groups and punctuated option tokens select distinct grammars.
+func Test_Resolver_GrammarSelection_OptionHook(t *testing.T) {
+	option := ipfw.Opt{Kind: ipfw.OptCustom, Text: "tcp:note"}
+	for _, test := range []struct {
+		name    string
+		input   string
+		protos  []ipfw.ProtoNumberMatch
+		options []ipfw.Opt
+	}{
+		{name: "punctuated option", input: "add pass tcp:note", options: []ipfw.Opt{option}},
+		{
+			name: "grouped punctuated option", input: "add pass { tcp:note }",
+			options: []ipfw.Opt{option},
+		},
+		{
+			name: "compact protocol group", input: "add pass {tcp} from any to any",
+			protos: []ipfw.ProtoNumberMatch{{Number: 6}},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			parser := ipfw.NewParser(test.input,
+				ipfw.WithOptionHook(func(rest string) (ipfw.Opt, int, error) {
+					if strings.HasPrefix(rest, "tcp:note") {
+						return option, len("tcp:note"), nil
+					}
+					return ipfw.Opt{}, 0, nil
+				}))
+			var sink ipfw.ReduceVMState[net4, net6]
+			record, err := parser.Next(ipfw.NewResolver(&sink, everything))
+			require.Nil(t, err)
+			require.Equal(t, passAnyToAny(1, test.input), *record)
+			require.Equal(t, ipfw.ReduceVMState[net4, net6]{
+				Protos:       test.protos,
+				Sources:      []ipfw.TargetMatch[net4, net6]{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.TargetMatch[net4, net6]{{Kind: ipfw.TargetAny}},
+				Options:      test.options,
+			}, sink)
+			next(t, parser, eof)
+		})
+	}
+}
+
+// grammarRejectingSink records a protocol before rejecting it.
+type grammarRejectingSink struct {
+	ipfw.ReduceVMState[net4, net6]
+}
+
+// OnProto preserves its side effect when returning an unresolved-protocol error.
+func (m *grammarRejectingSink) OnProto(match ipfw.ProtoNumberMatch) error {
+	if err := m.ReduceVMState.OnProto(match); err != nil {
+		return err
+	}
+	return ipfw.ErrUnresolvedProto
 }
 
 // must4 parses IPv4 network text or panics.
@@ -617,8 +737,7 @@ func Test_Resolver_Targets(t *testing.T) {
 	}
 }
 
-// verifies that a name the resolvers cannot turn into a value, or network
-// text they reject, fails the line at the token with the kind of its family.
+// verifies that unknown names and invalid networks preserve positioned grammar errors.
 func Test_Resolver_Errors(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -642,19 +761,25 @@ func Test_Resolver_Errors(t *testing.T) {
 			name:      "protocol name without a resolver",
 			input:     "add allow tcp from any to any\n",
 			resolvers: networksOnly,
-			expected:  ipfw.ParseError{Kind: ipfw.ErrUnresolvedProto, Line: 1, Column: 10, Text: "add allow tcp from any to any"},
+			expected: ipfw.ParseError{
+				Kind: ipfw.ErrUnknownOption, Line: 1, Column: 10, Text: "add allow tcp from any to any",
+			},
 		},
 		{
 			name:      "unknown protocol name",
 			input:     "add allow gre from any to any\n",
 			resolvers: everything,
-			expected:  ipfw.ParseError{Kind: ipfw.ErrUnresolvedProto, Line: 1, Column: 10, Text: "add allow gre from any to any"},
+			expected: ipfw.ParseError{
+				Kind: ipfw.ErrUnknownOption, Line: 1, Column: 10, Text: "add allow gre from any to any",
+			},
 		},
 		{
 			name:      "protocol zero in body",
 			input:     "add allow 0 from any to any\n",
 			resolvers: everything,
-			expected:  ipfw.ParseError{Kind: ipfw.ErrUnresolvedProto, Line: 1, Column: 10, Text: "add allow 0 from any to any"},
+			expected: ipfw.ParseError{
+				Kind: ipfw.ErrUnknownOption, Line: 1, Column: 10, Text: "add allow 0 from any to any",
+			},
 		},
 		{
 			name:      "service name without a resolver",
@@ -728,24 +853,29 @@ func Test_ReduceVMState_Reset(t *testing.T) {
 	require.Equal(t, capacity, cap(state.Sources))
 }
 
-// verifies that a line exercising every resolver parses into a warmed-up
-// typed state without allocating.
+// verifies that both grammar paths parse into a warmed-up typed state without allocating.
 func Test_Resolver_NoAllocs(t *testing.T) {
-	src := "add allow tcp from { custom:first or host.example.com,192.0.2.1 } ssh to 198.51.100.0/24,203.0.113.0/24 domain-70 proto udp dst-port ssh\n"
-	parser := ipfw.NewParser(src)
-	var sink ipfw.ReduceVMState[net4, net6]
-	state := ipfw.NewResolver(&sink, everything)
-	_, _ = parser.Next(state)
-	ok := true
-	allocs := testing.AllocsPerRun(100, func() {
-		parser.Reset(src)
-		sink.Reset()
-		if _, err := parser.Next(state); err != nil {
-			ok = false
-		}
-	})
-	require.True(t, ok)
-	require.Zero(t, allocs)
+	for _, input := range []string{
+		"add allow tcp from { custom:first or host.example.com,192.0.2.1 } ssh to" +
+			" 198.51.100.0/24,203.0.113.0/24 domain-70 proto udp dst-port ssh\n",
+		"add allow { not in or out } proto tcp dst-port ssh\n",
+	} {
+		parser := ipfw.NewParser(input)
+		var sink ipfw.ReduceVMState[net4, net6]
+		state := ipfw.NewResolver(&sink, everything)
+		_, err := parser.Next(state)
+		require.Nil(t, err)
+		ok := true
+		allocs := testing.AllocsPerRun(100, func() {
+			parser.Reset(input)
+			sink.Reset()
+			if _, err := parser.Next(state); err != nil {
+				ok = false
+			}
+		})
+		require.True(t, ok)
+		require.Zero(t, allocs)
+	}
 }
 
 func ExampleNewResolver() {

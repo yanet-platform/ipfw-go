@@ -4999,6 +4999,118 @@ func Benchmark_Parser_Next_AnyToAny(b *testing.B) {
 	benchmarkNext(b, "add pass ip from any to any\n")
 }
 
+// Benchmark_Parser_Next_Grammar compares grammar selection with raw and resolving states.
+func Benchmark_Parser_Next_Grammar(b *testing.B) {
+	for _, test := range []struct {
+		name  string
+		input string
+		hook  ipfw.OptionHook
+	}{
+		{name: "LegacyIP", input: "add pass ip from any to any\n"},
+		{name: "LegacyTCP", input: "add pass tcp from any to any\n"},
+		{name: "LegacyGroup", input: "add pass { tcp or udp } from any to any\n"},
+		{name: "OptionIn", input: "add pass in\n"},
+		{name: "OptionProto", input: "add pass proto tcp\n"},
+		{name: "OptionGroup", input: "add pass { not in or out }\n"},
+		{
+			name: "HookLegacy", hook: zzOption,
+			input: "add pass ip from { 192.0.2.0/24 or 192.0.2.16/28 or 198.51.100.0/24 or" +
+				" 203.0.113.0/24 or 2001:db8::/32 } to { 192.0.2.1 or 198.51.100.1 or" +
+				" 203.0.113.1 or 2001:db8::1 or ::1 }\n",
+		},
+		{name: "HookOption", input: "add pass zz 17\n", hook: zzOption},
+		{name: "Ruleset", input: syntheticRuleset()},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			for _, mode := range []string{"Raw", "Resolver", "ForwardedResolver", "HiddenResolver"} {
+				b.Run(mode, func(b *testing.B) {
+					parser := ipfw.NewParser(test.input,
+						ipfw.WithLabels(), ipfw.WithOptionHook(test.hook))
+					var raw ipfw.ReduceState
+					var sink ipfw.ReduceVMState[net4, net6]
+					var state ipfw.State = &raw
+					reset := raw.Reset
+					if mode != "Raw" {
+						state = ipfw.NewResolver(&sink, ipfw.Environment[net4, net6]{
+							Networks: nets, Protos: fakeProtos{}, Services: fakeServices{},
+							Targets: newGrammarBenchmarkTargets(),
+						})
+						reset = sink.Reset
+						switch mode {
+						case "HiddenResolver":
+							state = &grammarOpaqueState{State: state}
+						case "ForwardedResolver":
+							state = &grammarResolvingState{State: state, ProtoResolver: fakeProtos{}}
+						}
+					}
+					for {
+						reset()
+						record, err := parser.Next(state)
+						if err != nil {
+							b.Fatal(err)
+						}
+						if record.Kind == ipfw.RecordEOF {
+							break
+						}
+					}
+					b.SetBytes(int64(len(test.input)))
+					b.ReportAllocs()
+					for b.Loop() {
+						parser.Reset(test.input)
+						for {
+							reset()
+							benchRecord, benchErr = parser.Next(state)
+							if benchErr != nil {
+								b.Fatal(benchErr)
+							}
+							if benchRecord.Kind == ipfw.RecordEOF {
+								break
+							}
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+// grammarOpaqueState forwards callbacks while hiding optional State capabilities.
+type grammarOpaqueState struct {
+	ipfw.State
+}
+
+// grammarResolvingState forwards protocol lookup with the same callback delegation.
+type grammarResolvingState struct {
+	ipfw.State
+	ipfw.ProtoResolver
+}
+
+// grammarBenchmarkTargets keeps target lookup independent of repeated network parsing.
+type grammarBenchmarkTargets struct {
+	Hosts4  []net4
+	Hosts6  []net6
+	Custom4 []net4
+}
+
+func newGrammarBenchmarkTargets() grammarBenchmarkTargets {
+	return grammarBenchmarkTargets{
+		Hosts4: []net4{must4("192.0.2.1/32")}, Hosts6: []net6{must6("2001:db8::1/128")},
+		Custom4: []net4{must4("192.0.2.0/24"), must4("198.51.100.0/24")},
+	}
+}
+
+// ResolveTarget resolves only names in the synthetic benchmark fixture.
+func (m grammarBenchmarkTargets) ResolveTarget(target ipfw.Target) ([]net4, []net6, error) {
+	switch target.Text {
+	case "host.example.com", "node-1.example.net":
+		return m.Hosts4, m.Hosts6, nil
+	case "custom:first":
+		return m.Custom4, nil, nil
+	default:
+		return nil, nil, ipfw.ErrUnresolvedTarget
+	}
+}
+
 func Benchmark_Parser_Next_TenNetworks(b *testing.B) {
 	benchmarkNext(b, "add pass ip from { 192.0.2.0/24 or 192.0.2.16/28 or 198.51.100.0/24 or"+
 		" 203.0.113.0/24 or 2001:db8::/32 } to { 192.0.2.1 or 198.51.100.1 or 203.0.113.1 or"+
