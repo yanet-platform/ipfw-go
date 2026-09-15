@@ -51,7 +51,11 @@ one line        raw tokens      names within       numbers and      checks
 at a time       of the body     an Environment     networks         packets
 ```
 
-Alongside the tokens the parser hands back a `Record` for the line, saying whether it held a rule, a table command, a label or a comment. The parser knows the grammar and nothing else. It never parses an address, never resolves a name, and every token it hands over is a sub-slice of the input, so a line costs no allocation at all. Turning text into values is the next layer's business, and evaluating packets the layer after that.
+Alongside the tokens the parser hands back a `Record` for the line, saying whether it held a rule,
+a table command, a label or a comment. The parser handles grammar and borrows every token from
+the input. It delegates name lookup and address parsing to the supplied `State`, so parsing into
+a warmed-up state costs no allocation. A resolving state also supplies the protocol knowledge
+used to choose between legacy and option-only rule bodies.
 
 ## Parsing
 
@@ -81,9 +85,28 @@ Rules can use existing options as the complete body by default, as in
 For example, `add 110 allow in proto tcp via vlan17` matches incoming TCP packets of either
 address family on `vlan17`. Without a legacy header, omitted protocols and addresses impose no
 restriction: the parser emits no `OnIPProto` or `OnProto` callbacks, then emits one `TargetAny`
-source and one `TargetAny` destination before the options. A complete `PROTO from SRC to DST`
-header takes precedence, so `add 160 allow in from any to any` keeps `in` as a protocol name.
+source and one `TargetAny` destination before the options.
 Ordinary actions still require a body, which may consist of a `//` comment.
+
+When the supplied `State` implements `ProtoResolver`, as `Resolver` does, the first protocol
+selects the grammar, following
+[FreeBSD's criterion](https://github.com/freebsd/freebsd-src/blob/a54f83544eea2a9804ac7940d35b26ffcb34dfb3/sbin/ipfw/ipfw2.c#L4937).
+An IP keyword, a numeric protocol or a resolved name commits to the legacy grammar, even if
+`from` is missing. An unknown first name selects options. An unknown later protocol in a
+group, or a rejected state callback, remains an error without trying another grammar.
+Thus `add allow in` requires a legacy header if the environment defines a protocol named `in`.
+Unknown initial names use option diagnostics, including when no protocol resolver is configured.
+For example, an unresolved `tcp` at the start produces `ErrUnknownOption`. Protocol names inside
+a selected legacy header or a `proto` option still produce `ErrUnresolvedProto` when unknown.
+
+A raw `State` such as `ReduceState` has no protocol registry. A complete
+`PROTO from SRC [PORT] to DST` header takes precedence over options. Otherwise a recognized
+option start selects options, and other starts select legacy parsing. Thus
+`add 160 allow in from any to any` keeps `in` as a protocol name, while `add allow tcp` reports
+an incomplete legacy header.
+
+Wrappers around a resolving state must forward `ResolveProto` along with the `State` callbacks
+to preserve grammar selection. Embedding only the `State` interface hides this capability.
 
 A line is the unit of the format, as in FreeBSD file input. No token crosses a newline: a brace group, an address list and an option list all end where their line does, and a group left open is an error rather than a continuation onto the next line. The exported sub-parsers hold to the same rule, so a command hook can pass one the line it was handed without trimming it first.
 

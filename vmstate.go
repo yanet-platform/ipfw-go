@@ -51,8 +51,10 @@ func (m NetworkParserFuncs[V4, V6]) Network6FromAddr(a netip.Addr) (V6, error) {
 }
 
 // ProtoResolver turns a protocol name into its number.
+// Next also uses it to choose a grammar when its State implements this interface.
 type ProtoResolver interface {
 	// ResolveProto reports the number of a protocol name, false when unknown.
+	// Grammar selection may ask about option names and resolve the first protocol twice.
 	ResolveProto(name string) (uint8, bool)
 }
 
@@ -152,7 +154,7 @@ type Environment[V4, V6 any] struct {
 // Resolver is the State that resolves every name of a rule body and hands
 // the typed tokens to a VMState.
 //
-// It makes one call per token, a hostname or custom target giving one call per
+// It makes one sink call per token, a hostname or custom target giving one call per
 // network it stands for.
 type Resolver[V4, V6 any] struct {
 	sink        VMState[V4, V6]
@@ -162,6 +164,14 @@ type Resolver[V4, V6 any] struct {
 // NewResolver returns a State resolving into sink within the environment.
 func NewResolver[V4, V6 any](sink VMState[V4, V6], environment Environment[V4, V6]) *Resolver[V4, V6] {
 	return &Resolver[V4, V6]{sink: sink, environment: environment}
+}
+
+// ResolveProto exposes the environment's protocol lookup to Next without emitting a token.
+func (m *Resolver[V4, V6]) ResolveProto(name string) (uint8, bool) {
+	if m.environment.Protos == nil {
+		return 0, false
+	}
+	return m.environment.Protos.ResolveProto(name)
 }
 
 // OnIPProto implements State.
@@ -232,10 +242,7 @@ func (m *Resolver[V4, V6]) resolveProto(proto Proto) (uint8, error) {
 	if proto.IsNumber() {
 		return proto.Number, nil
 	}
-	if m.environment.Protos == nil {
-		return 0, ErrUnresolvedProto
-	}
-	number, ok := m.environment.Protos.ResolveProto(proto.Name)
+	number, ok := m.ResolveProto(proto.Name)
 	if !ok {
 		return 0, ErrUnresolvedProto
 	}
