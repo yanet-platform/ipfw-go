@@ -370,8 +370,60 @@ const (
 	destinationSide
 )
 
-// parseBody parses `PROTO from SRC [PORT] to DST [PORT] [OPTIONS]`.
+// parseBody selects a complete legacy header before considering an option-only body.
 func (m *Parser) parseBody(s string, state State) (string, fail) {
+	if s == "" || s[0] == '\n' || hasPrefix(s, "\r\n") {
+		return s, fail{Kind: ErrExpectedEitherIPOrProto, At: s}
+	}
+	// Only possible option starts need a header probe. A hook must wait
+	// until a complete legacy header has been ruled out.
+	optionStart := m.opts.OptionHook == nil && startsOptions(s, nil)
+	if m.opts.OptionHook != nil || optionStart {
+		_, err := parseBodyHeader(s, DiscardState{})
+		if err.Failed() && (optionStart || startsOptions(s, m.opts.OptionHook)) {
+			if err := state.OnSourceTarget(Target{Kind: TargetAny}); err != nil {
+				return s, failFrom(err, s)
+			}
+			if err := state.OnDestinationTarget(Target{Kind: TargetAny}); err != nil {
+				return s, failFrom(err, s)
+			}
+			return parseOptions(s, state, m.opts.OptionHook)
+		}
+	}
+	rest, err := parseBodyHeader(s, state)
+	if err.Failed() {
+		return s, err
+	}
+	// Options come before destination ports, the first group tried over a
+	// discarding state to tell an option from a port without emitting it.
+	//
+	// `to any established` is an option, `to any domain` a port and `to any
+	// 22 established` both. A recognized option is reparsed into the state
+	// even when malformed, preserving its error. Only an unknown option
+	// falls back to ports. A token that is not a port leaves the input where
+	// the destination ended, a port the state refuses fails the line.
+	if buf, ok := ws1(rest); ok {
+		var ctx optionContext
+		_, err = parseOptionGroup(&ctx, buf, DiscardState{}, m.opts.OptionHook)
+		if !err.Failed() || err.Kind != ErrUnknownOption {
+			return parseOptions(buf, state, m.opts.OptionHook)
+		}
+		if buf, err = parsePorts(buf, state, destinationSide); !err.Failed() {
+			rest = buf
+		} else if !isPortSyntax(err.Kind) {
+			return s, err
+		}
+	}
+	if buf, ok := ws1(rest); ok {
+		if rest, err = parseOptions(buf, state, m.opts.OptionHook); err.Failed() {
+			return s, err
+		}
+	}
+	return rest, fail{}
+}
+
+// parseBodyHeader stops after the mandatory destination, before ports and options.
+func parseBodyHeader(s string, state State) (string, fail) {
 	rest, err := parseProtocols(s, state)
 	if err.Failed() {
 		return s, err
@@ -426,32 +478,22 @@ func (m *Parser) parseBody(s string, state State) (string, fail) {
 	if err.Failed() {
 		return s, err
 	}
-	// Options come before destination ports, the first group tried over a
-	// discarding state to tell an option from a port without emitting it.
-	//
-	// `to any established` is an option, `to any domain` a port and `to any
-	// 22 established` both. A recognized option is reparsed into the state
-	// even when malformed, preserving its error. Only an unknown option
-	// falls back to ports. A token that is not a port leaves the input where
-	// the destination ended, a port the state refuses fails the line.
-	if buf, ok := ws1(rest); ok {
-		var ctx optionContext
-		_, err = parseOptionGroup(&ctx, buf, DiscardState{}, m.opts.OptionHook)
-		if !err.Failed() || err.Kind != ErrUnknownOption {
-			return parseOptions(buf, state, m.opts.OptionHook)
-		}
-		if buf, err = parsePorts(buf, state, destinationSide); !err.Failed() {
-			rest = buf
-		} else if !isPortSyntax(err.Kind) {
-			return s, err
-		}
-	}
-	if buf, ok := ws1(rest); ok {
-		if rest, err = parseOptions(buf, state, m.opts.OptionHook); err.Failed() {
-			return s, err
-		}
-	}
 	return rest, fail{}
+}
+
+// startsOptions recognizes the first element even when a later group member is unknown.
+func startsOptions(s string, hook OptionHook) bool {
+	if hasPrefix(s, "//") {
+		return true
+	}
+	opened, rest := openGroup(s, trailingPosition)
+	place := topLevel
+	if opened.Braced {
+		place = groupFirst
+	}
+	var context optionContext
+	_, err := parseOption(&context, rest, DiscardState{}, hook, place)
+	return err.Kind != ErrUnknownOption
 }
 
 // parseInlineComment returns the text after `//` without its trailing
