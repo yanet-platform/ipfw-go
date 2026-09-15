@@ -302,8 +302,8 @@ func Test_ParseOptions_Table(t *testing.T) {
 		},
 		{name: "negated unknown option", input: "not foo", n: 4, err: ipfw.ErrUnknownOption},
 		{name: "not glued to a keyword", input: "notestablished", n: 0, err: ipfw.ErrUnknownOption},
-		{name: "not alone", input: "not", n: 0, err: ipfw.ErrUnknownOption},
-		{name: "nothing after not", input: "not ", n: 4, err: ipfw.ErrUnknownOption},
+		{name: "not alone", input: "not", n: 3, err: ipfw.ErrExpectedOpt},
+		{name: "nothing after not", input: "not ", n: 4, err: ipfw.ErrExpectedOpt},
 		{
 			name:    "group of two",
 			input:   "{ established or established }",
@@ -918,6 +918,132 @@ func Test_ParseOptions_Table(t *testing.T) {
 			require.Equal(t, tc.err, err)
 			require.Equal(t, tc.n, n)
 			require.Equal(t, ipfw.ReduceState{Options: tc.options}, state)
+		})
+	}
+}
+
+// verifies that exact lowercase not remains negation syntax and cannot be a custom option.
+func Test_ParseOptions_ReservedNot(t *testing.T) {
+	notFoo := ipfw.Opt{Kind: ipfw.OptCustom, Text: "notfoo"}
+	cases := []struct {
+		name      string
+		input     string
+		n         int
+		err       error
+		hookCalls int
+		state     ipfw.ReduceState
+	}{
+		{
+			name:  "bare keyword",
+			input: "not",
+			n:     3,
+			err:   ipfw.ErrExpectedOpt,
+		},
+		{
+			name:  "before LF",
+			input: "not\n",
+			n:     3,
+			err:   ipfw.ErrExpectedOpt,
+		},
+		{
+			name:  "before CRLF",
+			input: "not\r\n",
+			n:     3,
+			err:   ipfw.ErrExpectedOpt,
+		},
+		{
+			name:  "before inline comment",
+			input: "not// note",
+			n:     3,
+			err:   ipfw.ErrExpectedOpt,
+		},
+		{
+			name:  "singleton group",
+			input: "{ not}",
+			n:     5,
+			err:   ipfw.ErrExpectedOpt,
+		},
+		{
+			name:  "later group member",
+			input: "{ in or not}",
+			n:     11,
+			err:   ipfw.ErrExpectedOpt,
+			state: ipfw.ReduceState{
+				Options: []ipfw.Opt{{Kind: ipfw.OptIn}},
+			},
+		},
+		{
+			name:  "repeated negation",
+			input: "not not",
+			n:     4,
+			err:   ipfw.ErrExpectedOpt,
+		},
+		{
+			name:      "custom alias returning keyword",
+			input:     "alias",
+			err:       ipfw.ErrExpectedOpt,
+			hookCalls: 1,
+		},
+		{
+			name:      "negated custom alias returning keyword",
+			input:     "not alias",
+			n:         4,
+			err:       ipfw.ErrExpectedOpt,
+			hookCalls: 1,
+		},
+		{
+			name:      "keyword prefix",
+			input:     "notfoo",
+			n:         6,
+			hookCalls: 1,
+			state: ipfw.ReduceState{
+				Options: []ipfw.Opt{notFoo},
+			},
+		},
+		{
+			name:      "negated keyword prefix",
+			input:     "not notfoo",
+			n:         10,
+			hookCalls: 1,
+			state: ipfw.ReduceState{
+				Options: []ipfw.Opt{{Neg: true, Kind: ipfw.OptCustom, Text: "notfoo"}},
+			},
+		},
+		{
+			name:      "grouped negated keyword prefix",
+			input:     "{ in or not notfoo }",
+			n:         20,
+			hookCalls: 1,
+			state: ipfw.ReduceState{
+				Options: []ipfw.Opt{
+					{Kind: ipfw.OptIn},
+					{Neg: true, Or: true, Kind: ipfw.OptCustom, Text: "notfoo"},
+				},
+			},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			hookCalls := 0
+			hook := func(rest string) (ipfw.Opt, int, error) {
+				hookCalls++
+				switch {
+				case strings.HasPrefix(rest, "notfoo"):
+					return notFoo, len("notfoo"), nil
+				case strings.HasPrefix(rest, "alias"):
+					return ipfw.Opt{Kind: ipfw.OptCustom, Text: "not"}, len("alias"), nil
+				case strings.HasPrefix(rest, "not"):
+					return ipfw.Opt{Kind: ipfw.OptCustom, Text: "not"}, len("not"), nil
+				default:
+					return ipfw.Opt{}, 0, nil
+				}
+			}
+			var state ipfw.ReduceState
+			n, err := ipfw.ParseOptions(test.input, &state, hook)
+			require.Equal(t, test.err, err)
+			require.Equal(t, test.n, n)
+			require.Equal(t, test.hookCalls, hookCalls)
+			require.Equal(t, test.state, state)
 		})
 	}
 }

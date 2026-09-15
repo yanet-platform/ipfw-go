@@ -17,4 +17,6 @@ type CommandHook func(line string, state State) (Record, int, error)
 // so neither its payload nor the newline is included.
 // It returns the option, the number of bytes consumed and any error,
 // ErrUnknownOption declining the token.
+// Exact lowercase `not` is reserved for negation and is never passed to the
+// hook. A custom option whose text is `not` fails with ErrExpectedOpt.
 type OptionHook func(rest string) (Opt, int, error)

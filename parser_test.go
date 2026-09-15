@@ -2380,6 +2380,9 @@ func Test_Parser_Next_OptionOnlyErrors(t *testing.T) {
 	rejectingHook := func(string) (ipfw.Opt, int, error) {
 		return ipfw.Opt{}, 0, failure
 	}
+	claimingNot := func(string) (ipfw.Opt, int, error) {
+		return ipfw.Opt{Kind: ipfw.OptCustom, Text: "not"}, len("not"), nil
+	}
 	cases := []struct {
 		name     string
 		input    string
@@ -2478,6 +2481,21 @@ func Test_Parser_Next_OptionOnlyErrors(t *testing.T) {
 				Text:   "add 250 allow",
 			},
 			state: ipfw.ReduceState{},
+		},
+		{
+			name:  "reserved not never reaches the hook",
+			input: "add 251 allow not\n",
+			hook:  claimingNot,
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedOpt,
+				Line:   1,
+				Column: 17,
+				Text:   "add 251 allow not",
+			},
+			state: ipfw.ReduceState{
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+			},
 		},
 	}
 	for _, test := range cases {

@@ -165,9 +165,11 @@ func parseOption(
 	hook OptionHook,
 	place optionPlace,
 ) (string, fail) {
-	rest, neg := notWS1(s)
+	rest, neg, err := parseOptionNegation(s)
+	if err.Failed() {
+		return s, err
+	}
 	var buf string
-	var err fail
 	kind, n := argumentOption(rest)
 	arg := rest[n:]
 	if err = ctx.Validate(kind, place, rest); err.Failed() {
@@ -193,6 +195,39 @@ func parseOption(
 		return s, err
 	}
 	return buf, fail{}
+}
+
+// parseOptionNegation accepts at most one whole-token negation and requires
+// an option after it.
+func parseOptionNegation(s string) (string, bool, fail) {
+	rest, neg := optionNot(s)
+	if !neg {
+		return s, false, fail{}
+	}
+	if optionBoundary(rest) {
+		return s, false, fail{Kind: ErrExpectedOpt, At: rest}
+	}
+	if _, repeated := optionNot(rest); repeated {
+		return s, false, fail{Kind: ErrExpectedOpt, At: rest}
+	}
+	return rest, true, fail{}
+}
+
+// A whole `not` token starts option negation even without an operand,
+// so a dangling operator fails instead of reaching the custom hook.
+func optionNot(s string) (string, bool) {
+	rest, ok := notPrefix(s)
+	if !ok || !optionBoundary(rest) {
+		return s, false
+	}
+	if afterSpace, ok := ws1(rest); ok {
+		return afterSpace, true
+	}
+	return rest, true
+}
+
+func optionBoundary(s string) bool {
+	return s == "" || isASCIISpace(s[0]) || s[0] == '}' || s[0] == '|' || hasPrefix(s, "//")
 }
 
 // argumentOption tells an option with an argument by its keyword and
@@ -291,6 +326,9 @@ func parseCustomOption(
 	}
 	if n == 0 {
 		return s, fail{Kind: ErrUnknownOption, At: s}
+	}
+	if opt.Kind == OptCustom && opt.Text == "not" {
+		return s, fail{Kind: ErrExpectedOpt, At: s}
 	}
 	opt.Neg, opt.Or, opt.PortOr = neg, place == groupNext, false
 	if failure := ctx.Validate(opt.Kind, place, s); failure.Failed() {
