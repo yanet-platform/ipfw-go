@@ -232,6 +232,12 @@ func Test_ParseOptions_Table(t *testing.T) {
 			options: []ipfw.Opt{established},
 		},
 		{
+			name:    "trailing whitespace leaves CRLF and the next line untouched",
+			input:   "established \t\r\nout",
+			n:       13,
+			options: []ipfw.Opt{established},
+		},
+		{
 			name:    "whitespace before a comment is consumed",
 			input:   "established // c",
 			n:       12,
@@ -257,6 +263,7 @@ func Test_ParseOptions_Table(t *testing.T) {
 		},
 		{name: "empty input", input: "", n: 0},
 		{name: "newline alone", input: "\n", n: 0},
+		{name: "CRLF before another line", input: "\r\nout", n: 0},
 		{name: "comment alone", input: "// c", n: 0},
 		{name: "unknown option", input: "foo", n: 0, err: ipfw.ErrUnknownOption},
 		{name: "port is not an option", input: "22", n: 0, err: ipfw.ErrUnknownOption},
@@ -266,6 +273,20 @@ func Test_ParseOptions_Table(t *testing.T) {
 			n:       12,
 			err:     ipfw.ErrUnknownOption,
 			options: []ipfw.Opt{established},
+		},
+		{
+			name:    "lone carriage return after an option is rejected",
+			input:   "in \r",
+			n:       3,
+			err:     ipfw.ErrUnknownOption,
+			options: []ipfw.Opt{{Kind: ipfw.OptIn}},
+		},
+		{
+			name:    "unknown option before CRLF is rejected",
+			input:   "in bogus\r\n",
+			n:       3,
+			err:     ipfw.ErrUnknownOption,
+			options: []ipfw.Opt{{Kind: ipfw.OptIn}},
 		},
 		{
 			name:    "negated option",
@@ -348,6 +369,12 @@ func Test_ParseOptions_Table(t *testing.T) {
 			name:    "group of in and out",
 			input:   "{ in or out }",
 			n:       13,
+			options: []ipfw.Opt{{Kind: ipfw.OptIn}, {Or: true, Kind: ipfw.OptOut}},
+		},
+		{
+			name:    "group with trailing space leaves CRLF untouched",
+			input:   "{ in or out } \r\nfrag",
+			n:       14,
 			options: []ipfw.Opt{{Kind: ipfw.OptIn}, {Or: true, Kind: ipfw.OptOut}},
 		},
 		{

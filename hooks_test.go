@@ -837,7 +837,7 @@ func Test_OptionHook_Precedence(t *testing.T) {
 		return customOptions(rest)
 	}
 	input := "add allow tcp from any to any " +
-		"in established estab fragment tcpflgs syn,!ack icmp6type 128,129\n"
+		"in established estab fragment tcpflgs syn,!ack icmp6type 128,129 \t\r\n"
 	var state ipfw.ReduceState
 	_, err := ipfw.NewParser(input, ipfw.WithOptionHook(counting)).Next(&state)
 	require.Nil(t, err)
