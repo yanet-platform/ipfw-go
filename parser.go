@@ -246,7 +246,7 @@ func (m *Parser) parseInstruction(s string, state State, instruction *Instructio
 	if !ok {
 		return input, fail{Kind: ErrExpectedWhitespace, At: rest}
 	}
-	rest, err = m.parseBody(rest, state)
+	rest, err = m.parseRuleBody(rest, state)
 	if err.Failed() {
 		return input, err
 	}
@@ -370,8 +370,8 @@ const (
 	destinationSide
 )
 
-// parseBody selects a complete legacy header before considering an option-only body.
-func (m *Parser) parseBody(s string, state State) (string, fail) {
+// parseRuleBody chooses the grammar, preferring a complete legacy header.
+func (m *Parser) parseRuleBody(s string, state State) (string, fail) {
 	if s == "" || s[0] == '\n' || hasPrefix(s, "\r\n") {
 		return s, fail{Kind: ErrExpectedEitherIPOrProto, At: s}
 	}
@@ -390,6 +390,11 @@ func (m *Parser) parseBody(s string, state State) (string, fail) {
 			return parseOptions(s, state, m.opts.OptionHook)
 		}
 	}
+	return m.parseBody(s, state)
+}
+
+// parseBody parses `PROTO from SRC [PORT] to DST [PORT] [OPTIONS]`.
+func (m *Parser) parseBody(s string, state State) (string, fail) {
 	rest, err := parseBodyHeader(s, state)
 	if err.Failed() {
 		return s, err
