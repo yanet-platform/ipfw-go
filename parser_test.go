@@ -1135,7 +1135,7 @@ func Test_Parser_Next_LineNumbers(t *testing.T) {
 // verifies that CRLF preserves record text, error positions and advancement across physical lines.
 func Test_Parser_Next_CRLF(t *testing.T) {
 	t.Run("records", func(t *testing.T) {
-		source := ruleset("\n\t\tadd pass ip from any to any\r\n\t\t\r\n\t\t:L\r\n\t")
+		source := ruleset("\n\t\tadd pass ip from any to any \t\r\n\t\t\r\n\t\t:L\r\n\t")
 		parser := ipfw.NewParser(source, ipfw.WithLabels())
 		var state ipfw.ReduceState
 		rec, err := parser.Next(&state)
@@ -1144,6 +1144,33 @@ func Test_Parser_Next_CRLF(t *testing.T) {
 		require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), state)
 		next(t, parser, ipfw.Record{Line: 2, Kind: ipfw.RecordEmpty})
 		next(t, parser, ipfw.Record{Line: 3, Text: ":L", Kind: ipfw.RecordLabel, Label: "L"})
+		next(t, parser, eof)
+	})
+
+	t.Run("options", func(t *testing.T) {
+		source := ruleset("\n\t\tadd 115 allow ip from any to any in \t\r\n\t\t# after\n\t")
+		parser := ipfw.NewParser(source)
+		var state ipfw.ReduceState
+		record, err := parser.Next(&state)
+		require.Nil(t, err)
+		require.Equal(t, ipfw.Record{
+			Line: 1,
+			Text: "add 115 allow ip from any to any in",
+			Kind: ipfw.RecordInstruction,
+			Instruction: ipfw.Instruction{
+				Num:    115,
+				Action: ipfw.Action{Kind: ipfw.ActionPass},
+			},
+		}, *record)
+		require.Equal(t, ipfw.ReduceState{
+			IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+			Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+			Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+			Options:      []ipfw.Opt{{Kind: ipfw.OptIn}},
+		}, state)
+		next(t, parser, ipfw.Record{
+			Line: 2, Text: "# after", Kind: ipfw.RecordComment, Comment: " after",
+		})
 		next(t, parser, eof)
 	})
 
@@ -3887,7 +3914,7 @@ func Test_Parser_Next_OptionListFailsAtOption(t *testing.T) {
 // state without allocating, the first option's dry run included.
 func Test_Parser_Next_OptionsNoAllocs(t *testing.T) {
 	src := "add pass tcp from any to any 22 established\n" +
-		"add pass tcp from any to any established\n" +
+		"add pass tcp from any to any established \t\r\n" +
 		"add pass icmp from any to any icmptypes 0,7,31 in\n" +
 		"add pass ip from any to any not icmp6types 0,5,150,201 in\n" +
 		"add pass tcp from any to any estab\n" +

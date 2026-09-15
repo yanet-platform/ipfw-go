@@ -86,7 +86,7 @@ func parseOptions(s string, state State, hook OptionHook) (string, fail) {
 	rest := s
 	var ctx optionContext
 	var ok bool
-	for rest != "" && rest[0] != '\n' && !hasPrefix(rest, "//") {
+	for rest != "" && rest[0] != '\n' && !hasPrefix(rest, "\r\n") && !hasPrefix(rest, "//") {
 		buf, err := parseOptionGroup(&ctx, rest, state, hook)
 		if err.Failed() {
 			return s, err
