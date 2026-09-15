@@ -76,6 +76,15 @@ for {
 
 Every token keeps its text: a network is `Target{Kind: TargetNetwork4, Text: "192.0.2.0/24"}`, a service is `Port{Name: "ssh"}`. See `ExampleParser_Next`.
 
+Rules can use existing options as the complete body by default, as in
+[FreeBSD](https://github.com/freebsd/freebsd-src/blob/2350f75acb0da0271ccff1fb22381f7e8c5948f8/sbin/ipfw/ipfw.8#L1371).
+For example, `add 110 allow in proto tcp via vlan17` matches incoming TCP packets of either
+address family on `vlan17`. Without a legacy header, omitted protocols and addresses impose no
+restriction: the parser emits no `OnIPProto` or `OnProto` callbacks, then emits one `TargetAny`
+source and one `TargetAny` destination before the options. A complete `PROTO from SRC to DST`
+header takes precedence, so `add 160 allow in from any to any` keeps `in` as a protocol name.
+Ordinary actions still require a body, which may consist of a `//` comment.
+
 A line is the unit of the format, as in FreeBSD file input. No token crosses a newline: a brace group, an address list and an option list all end where their line does, and a group left open is an error rather than a continuation onto the next line. The exported sub-parsers hold to the same rule, so a command hook can pass one the line it was handed without trimming it first.
 
 The first `#` on a physical line starts a comment before the command is parsed, as in FreeBSD file

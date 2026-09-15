@@ -2221,6 +2221,395 @@ func Test_Parser_Next_AnyToAny(t *testing.T) {
 	require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), state)
 }
 
+// verifies that option-only bodies preserve complete records and emit implicit any targets.
+func Test_Parser_Next_OptionOnly(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		expected ipfw.Record
+		state    ipfw.ReduceState
+	}{
+		{
+			name:  "direction with LF",
+			input: "add 110 allow in\n",
+			expected: ipfw.Record{
+				Line: 1,
+				Text: "add 110 allow in",
+				Kind: ipfw.RecordInstruction,
+				Instruction: ipfw.Instruction{
+					Num:    110,
+					Action: ipfw.Action{Kind: ipfw.ActionPass},
+				},
+			},
+			state: ipfw.ReduceState{
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Options:      []ipfw.Opt{{Kind: ipfw.OptIn}},
+			},
+		},
+		{
+			name:  "protocol option at EOF",
+			input: "add 120 allow proto tcp",
+			expected: ipfw.Record{
+				Line: 1,
+				Text: "add 120 allow proto tcp",
+				Kind: ipfw.RecordInstruction,
+				Instruction: ipfw.Instruction{
+					Num:    120,
+					Action: ipfw.Action{Kind: ipfw.ActionPass},
+				},
+			},
+			state: ipfw.ReduceState{
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Options: []ipfw.Opt{
+					{Kind: ipfw.OptProto, Proto: ipfw.Proto{Name: "tcp"}},
+				},
+			},
+		},
+		{
+			name:  "interface with modifiers and both comments on CRLF",
+			input: "\tadd 130 allow log logamount 3 tag 7 via vlan17 // memo \t# metadata \t\r\n",
+			expected: ipfw.Record{
+				Line:    1,
+				Text:    "add 130 allow log logamount 3 tag 7 via vlan17 // memo \t# metadata",
+				Kind:    ipfw.RecordInstruction,
+				Comment: " metadata",
+				Instruction: ipfw.Instruction{
+					Num:           130,
+					Action:        ipfw.Action{Kind: ipfw.ActionPass},
+					Log:           ipfw.Log{Enabled: true, HasAmount: true, Amount: 3},
+					Tag:           7,
+					InlineComment: " memo",
+				},
+			},
+			state: ipfw.ReduceState{
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Options: []ipfw.Opt{
+					{Kind: ipfw.OptVia, Via: ipfw.Via{Kind: ipfw.ViaExact, Name: "vlan17"}},
+				},
+			},
+		},
+		{
+			name:  "group with negation",
+			input: "add 140 allow { not in or out }\n",
+			expected: ipfw.Record{
+				Line: 1,
+				Text: "add 140 allow { not in or out }",
+				Kind: ipfw.RecordInstruction,
+				Instruction: ipfw.Instruction{
+					Num:    140,
+					Action: ipfw.Action{Kind: ipfw.ActionPass},
+				},
+			},
+			state: ipfw.ReduceState{
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Options: []ipfw.Opt{
+					{Neg: true, Kind: ipfw.OptIn},
+					{Or: true, Kind: ipfw.OptOut},
+				},
+			},
+		},
+		{
+			name:  "comment body at EOF",
+			input: "add 150 allow // memo",
+			expected: ipfw.Record{
+				Line: 1,
+				Text: "add 150 allow // memo",
+				Kind: ipfw.RecordInstruction,
+				Instruction: ipfw.Instruction{
+					Num:           150,
+					Action:        ipfw.Action{Kind: ipfw.ActionPass},
+					InlineComment: " memo",
+				},
+			},
+			state: ipfw.ReduceState{
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+			},
+		},
+		{
+			name:  "complete legacy header takes precedence",
+			input: "add 160 allow in from any to any\n",
+			expected: ipfw.Record{
+				Line: 1,
+				Text: "add 160 allow in from any to any",
+				Kind: ipfw.RecordInstruction,
+				Instruction: ipfw.Instruction{
+					Num:    160,
+					Action: ipfw.Action{Kind: ipfw.ActionPass},
+				},
+			},
+			state: ipfw.ReduceState{
+				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "in"}}},
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+			},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			input := test.input
+			if strings.HasSuffix(input, "\n") {
+				input += "# after"
+			}
+			parser := ipfw.NewParser(input)
+			var state ipfw.ReduceState
+			record, err := parser.Next(&state)
+			require.Nil(t, err)
+			require.Equal(t, test.expected, *record)
+			require.Equal(t, test.state, state)
+			if strings.HasSuffix(test.input, "\n") {
+				next(t, parser, ipfw.Record{
+					Line:    2,
+					Text:    "# after",
+					Kind:    ipfw.RecordComment,
+					Comment: " after",
+				})
+			}
+			next(t, parser, eof)
+		})
+	}
+}
+
+// verifies that malformed option-only bodies retain exact errors, partial state and recovery.
+func Test_Parser_Next_OptionOnlyErrors(t *testing.T) {
+	failure := errors.New("custom option rejected")
+	rejectingHook := func(string) (ipfw.Opt, int, error) {
+		return ipfw.Opt{}, 0, failure
+	}
+	cases := []struct {
+		name     string
+		input    string
+		hook     ipfw.OptionHook
+		expected ipfw.ParseError
+		state    ipfw.ReduceState
+	}{
+		{
+			name:  "protocol option without an argument",
+			input: "add 210 allow proto\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 19,
+				Text:   "add 210 allow proto",
+			},
+			state: ipfw.ReduceState{
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+			},
+		},
+		{
+			name:  "interface table without a name",
+			input: "add 220 allow via table()\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedTableName,
+				Line:   1,
+				Column: 24,
+				Text:   "add 220 allow via table()",
+			},
+			state: ipfw.ReduceState{
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+			},
+		},
+		{
+			name:  "unknown first token preserves legacy failure",
+			input: "add 230 allow mystery\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 21,
+				Text:   "add 230 allow mystery",
+			},
+			state: ipfw.ReduceState{
+				Protos: []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "mystery"}}},
+			},
+		},
+		{
+			name:  "unknown later group member retains the first option",
+			input: "add 240 allow { in or mystery }\n",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrUnknownOption,
+				Line:   1,
+				Column: 22,
+				Text:   "add 240 allow { in or mystery }",
+			},
+			state: ipfw.ReduceState{
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Options:      []ipfw.Opt{{Kind: ipfw.OptIn}},
+			},
+		},
+		{
+			name:  "empty body at EOF never reaches the hook",
+			input: "add 250 allow ",
+			hook:  rejectingHook,
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedEitherIPOrProto,
+				Line:   1,
+				Column: 13,
+				Text:   "add 250 allow",
+			},
+			state: ipfw.ReduceState{},
+		},
+		{
+			name:  "empty body with LF never reaches the hook",
+			input: "add 250 allow \n",
+			hook:  rejectingHook,
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedEitherIPOrProto,
+				Line:   1,
+				Column: 13,
+				Text:   "add 250 allow",
+			},
+			state: ipfw.ReduceState{},
+		},
+		{
+			name:  "empty body with CRLF never reaches the hook",
+			input: "add 250 allow \r\n",
+			hook:  rejectingHook,
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedEitherIPOrProto,
+				Line:   1,
+				Column: 13,
+				Text:   "add 250 allow",
+			},
+			state: ipfw.ReduceState{},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			input := test.input
+			if strings.HasSuffix(input, "\n") {
+				input += "# after"
+			}
+			hookCalls := 0
+			hook := test.hook
+			if hook != nil {
+				hook = func(rest string) (ipfw.Opt, int, error) {
+					hookCalls++
+					return test.hook(rest)
+				}
+			}
+			parser := ipfw.NewParser(input, ipfw.WithOptionHook(hook))
+			var state ipfw.ReduceState
+			record, err := parser.Next(&state)
+			require.Nil(t, record)
+			require.Equal(t, &test.expected, err)
+			require.ErrorIs(t, err, test.expected.Kind)
+			require.Equal(t, test.state, state)
+			require.Zero(t, hookCalls)
+			if strings.HasSuffix(test.input, "\n") {
+				next(t, parser, ipfw.Record{
+					Line:    2,
+					Text:    "# after",
+					Kind:    ipfw.RecordComment,
+					Comment: " after",
+				})
+			}
+			next(t, parser, eof)
+		})
+	}
+}
+
+// verifies that rejected implicit targets and legacy protocols stop the selected grammar.
+func Test_Parser_Next_OptionOnlyStateError(t *testing.T) {
+	failure := errors.New("implicit destination rejected")
+	cases := []struct {
+		name  string
+		state commentRejectingState
+		kind  ipfw.ErrorKind
+		cause error
+		want  ipfw.ReduceState
+	}{
+		{
+			name:  "implicit source error kind",
+			state: commentRejectingState{SourceError: ipfw.ErrExpectedTarget},
+			kind:  ipfw.ErrExpectedTarget,
+			want:  ipfw.ReduceState{},
+		},
+		{
+			name:  "implicit destination error cause",
+			state: commentRejectingState{DestinationError: failure},
+			kind:  ipfw.ErrState,
+			cause: failure,
+			want: ipfw.ReduceState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetAny}},
+			},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			parser := ipfw.NewParser(ruleset(`
+				add 310 allow in proto tcp
+				# after
+			`))
+			record, err := parser.Next(&test.state)
+			require.Nil(t, record)
+			require.Equal(t, &ipfw.ParseError{
+				Kind:   test.kind,
+				Err:    test.cause,
+				Line:   1,
+				Column: 14,
+				Text:   "add 310 allow in proto tcp",
+			}, err)
+			require.ErrorIs(t, err, test.kind)
+			if test.cause != nil {
+				require.ErrorIs(t, err, test.cause)
+			}
+			require.Equal(t, test.want, test.state.ReduceState)
+			next(t, parser, ipfw.Record{
+				Line:    2,
+				Text:    "# after",
+				Kind:    ipfw.RecordComment,
+				Comment: " after",
+			})
+			next(t, parser, eof)
+		})
+	}
+	t.Run("legacy protocol error does not select options", func(t *testing.T) {
+		parser := ipfw.NewParser(ruleset(`
+			add 320 allow in from any to any
+			# after
+		`))
+		state := &bodyRejectingProtoState{Error: ipfw.ErrExpectedFrom}
+		record, err := parser.Next(state)
+		require.Nil(t, record)
+		require.Equal(t, &ipfw.ParseError{
+			Kind:   ipfw.ErrExpectedFrom,
+			Line:   1,
+			Column: 14,
+			Text:   "add 320 allow in from any to any",
+		}, err)
+		require.ErrorIs(t, err, ipfw.ErrExpectedFrom)
+		require.Equal(t, ipfw.ReduceState{}, state.ReduceState)
+		require.Equal(t, 1, state.ProtoCalls)
+		next(t, parser, ipfw.Record{
+			Line:    2,
+			Text:    "# after",
+			Kind:    ipfw.RecordComment,
+			Comment: " after",
+		})
+		next(t, parser, eof)
+	})
+}
+
+// bodyRejectingProtoState records protocol attempts and rejects the selected header.
+type bodyRejectingProtoState struct {
+	ipfw.ReduceState
+	Error      error
+	ProtoCalls int
+}
+
+// OnProto implements State.
+func (m *bodyRejectingProtoState) OnProto(ipfw.ProtoMatch) error {
+	m.ProtoCalls++
+	return m.Error
+}
+
 // verifies that me and me6 reach the state as targets without text, the
 // whole token telling me6 from me.
 func Test_Parser_Next_MeToMe6(t *testing.T) {
@@ -3920,7 +4309,9 @@ func Test_Parser_Next_OptionsNoAllocs(t *testing.T) {
 		"add pass tcp from any to any estab\n" +
 		"add pass ip from any to any fragment\n" +
 		"add pass tcp from any to any tcpflgs syn,!ack\n" +
-		"add pass ip from any to any not icmp6type 128,129 in\n"
+		"add pass ip from any to any not icmp6type 128,129 in\n" +
+		"add 410 allow in\n" +
+		"add 420 allow { not in or out } proto tcp via vlan17\n"
 	parser := ipfw.NewParser(src)
 	var state ipfw.ReduceState
 	for _, err := range parser.Records(&state) {

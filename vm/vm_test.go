@@ -288,6 +288,59 @@ func Test_VM_Check_IPMatchesProtocolZero(t *testing.T) {
 	require.Equal(t, pass, machine.Check(&vm.Context{}, packet))
 }
 
+// verifies that an option-only rule restricts direction, protocol and interface in both families.
+func Test_VM_Check_OptionOnly(t *testing.T) {
+	machine := build(t, "add 610 allow in proto tcp via vlan17", none)
+	cases := []struct {
+		name    string
+		packet  vm.Packet
+		context vm.Context
+		verdict ipfw.Action
+	}{
+		{
+			name:    "matching IPv4 TCP",
+			packet:  tcp4("192.0.2.1", "198.51.100.1"),
+			context: vm.Context{Direction: vm.In, IfName: "vlan17"},
+			verdict: pass,
+		},
+		{
+			name: "matching IPv6 TCP",
+			packet: vm.NewIPv6Packet(
+				netip.MustParseAddr("2001:db8::1"),
+				netip.MustParseAddr("2001:db8::2"),
+			).WithTCP(ipfw.TCPSyn, 40000, 443),
+			context: vm.Context{Direction: vm.In, IfName: "vlan17"},
+			verdict: pass,
+		},
+		{
+			name:    "outgoing TCP",
+			packet:  tcp4("192.0.2.1", "198.51.100.1"),
+			context: vm.Context{Direction: vm.Out, IfName: "vlan17"},
+			verdict: deny,
+		},
+		{
+			name: "incoming UDP",
+			packet: vm.NewIPv4Packet(
+				netip.MustParseAddr("192.0.2.1"),
+				netip.MustParseAddr("198.51.100.1"),
+			).WithUDP(40000, 443),
+			context: vm.Context{Direction: vm.In, IfName: "vlan17"},
+			verdict: deny,
+		},
+		{
+			name:    "TCP on another interface",
+			packet:  tcp4("192.0.2.1", "198.51.100.1"),
+			context: vm.Context{Direction: vm.In, IfName: "vlan18"},
+			verdict: deny,
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.verdict, machine.Check(&test.context, test.packet))
+		})
+	}
+}
+
 // verifies that nothing matching yields the default verdict, deny unless
 // configured, and that CheckTrace reports no termination then.
 func Test_VM_Check_DefaultVerdict(t *testing.T) {

@@ -2,6 +2,7 @@ package ipfw_test
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -771,31 +772,38 @@ func Test_OptionHook_Table(t *testing.T) {
 		name    string
 		input   string
 		hook    ipfw.OptionHook
+		number  uint32
+		protos  []ipfw.ProtoMatch
 		options []ipfw.Opt
 	}{
 		{
 			name:    "keyword then a known option",
 			input:   "add allow tcp from any to any setup in\n",
+			protos:  tcp,
 			options: []ipfw.Opt{setup, {Kind: ipfw.OptIn}},
 		},
 		{
 			name:    "keyword in a group",
 			input:   "add allow tcp from any to any { setup or in }\n",
+			protos:  tcp,
 			options: []ipfw.Opt{setup, {Or: true, Kind: ipfw.OptIn}},
 		},
 		{
 			name:    "negated keyword",
 			input:   "add allow tcp from any to any not setup\n",
+			protos:  tcp,
 			options: []ipfw.Opt{notOpt(setup)},
 		},
 		{
 			name:    "option with an argument",
 			input:   "add allow tcp from any to any uid root established\n",
+			protos:  tcp,
 			options: []ipfw.Opt{{Kind: ipfw.OptCustom, Text: "uid", Arg: "root"}, {Kind: ipfw.OptEstablished}},
 		},
 		{
 			name:    "keyword alone is an option, not a port",
 			input:   "add allow tcp from any to any setup\n",
+			protos:  tcp,
 			options: []ipfw.Opt{setup},
 		},
 		{
@@ -806,7 +814,14 @@ func Test_OptionHook_Table(t *testing.T) {
 				opt.PortOr = true
 				return opt, len("setup"), nil
 			},
+			protos:  tcp,
 			options: []ipfw.Opt{dstPort(22), dstPort(80)},
+		},
+		{
+			name:    "option-only body",
+			input:   "add 510 allow setup in\n",
+			number:  510,
+			options: []ipfw.Opt{setup, {Kind: ipfw.OptIn}},
 		},
 	}
 	for _, tc := range cases {
@@ -818,9 +833,17 @@ func Test_OptionHook_Table(t *testing.T) {
 			var state ipfw.ReduceState
 			rec, err := ipfw.NewParser(tc.input, ipfw.WithOptionHook(hook)).Next(&state)
 			require.Nil(t, err)
-			require.Equal(t, passAnyToAny(1, strings.TrimSuffix(tc.input, "\n")), *rec)
+			require.Equal(t, ipfw.Record{
+				Line: 1,
+				Text: strings.TrimSuffix(tc.input, "\n"),
+				Kind: ipfw.RecordInstruction,
+				Instruction: ipfw.Instruction{
+					Num:    tc.number,
+					Action: ipfw.Action{Kind: ipfw.ActionPass},
+				},
+			}, *rec)
 			require.Equal(t, ipfw.ReduceState{
-				Protos:       tcp,
+				Protos:       tc.protos,
 				Sources:      anyToAny,
 				Destinations: anyToAny,
 				Options:      tc.options,
@@ -989,11 +1012,14 @@ func Test_OptionHook_HashCommentErrors(t *testing.T) {
 // becoming an ErrState.
 func Test_OptionHook_Errors(t *testing.T) {
 	boom := errors.New("boom")
+	wrapped := fmt.Errorf("custom option rejected: %w", boom)
 	cases := []struct {
 		name     string
 		input    string
 		hook     ipfw.OptionHook
 		expected ipfw.ParseError
+		cause    error
+		state    ipfw.ReduceState
 	}{
 		{
 			name:  "declined token",
@@ -1005,6 +1031,12 @@ func Test_OptionHook_Errors(t *testing.T) {
 				Column: 42,
 				Text:   "add allow tcp from any to any established foo",
 			},
+			state: ipfw.ReduceState{
+				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Options:      []ipfw.Opt{{Kind: ipfw.OptEstablished}},
+			},
 		},
 		{
 			name:  "error kind from the hook",
@@ -1015,6 +1047,12 @@ func Test_OptionHook_Errors(t *testing.T) {
 				Line:   1,
 				Column: 45,
 				Text:   "add allow tcp from any to any established uid",
+			},
+			state: ipfw.ReduceState{
+				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Options:      []ipfw.Opt{{Kind: ipfw.OptEstablished}},
 			},
 		},
 		{
@@ -1030,11 +1068,74 @@ func Test_OptionHook_Errors(t *testing.T) {
 				Column: 44,
 				Text:   "add allow tcp from any to any established zz",
 			},
+			cause: boom,
+			state: ipfw.ReduceState{
+				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Options:      []ipfw.Opt{{Kind: ipfw.OptEstablished}},
+			},
+		},
+		{
+			name:  "initial custom option error kind",
+			input: "add 520 allow uid invalid",
+			hook: func(string) (ipfw.Opt, int, error) {
+				return ipfw.Opt{}, len("uid "), ipfw.ErrExpectedOpt
+			},
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedOpt,
+				Line:   1,
+				Column: 18,
+				Text:   "add 520 allow uid invalid",
+			},
+			state: ipfw.ReduceState{
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+			},
+		},
+		{
+			name:  "initial custom option wrapped cause",
+			input: "add 530 allow uid invalid",
+			hook: func(string) (ipfw.Opt, int, error) {
+				return ipfw.Opt{}, len("uid "), wrapped
+			},
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrState,
+				Err:    wrapped,
+				Line:   1,
+				Column: 18,
+				Text:   "add 530 allow uid invalid",
+			},
+			cause: boom,
+			state: ipfw.ReduceState{
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+			},
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			nextError(t, ipfw.NewParser(tc.input, ipfw.WithOptionHook(tc.hook)), tc.expected)
+			input := tc.input
+			if !strings.HasSuffix(input, "\n") {
+				input += "\n"
+			}
+			parser := ipfw.NewParser(input+"# after", ipfw.WithOptionHook(tc.hook))
+			var state ipfw.ReduceState
+			record, err := parser.Next(&state)
+			require.Nil(t, record)
+			require.Equal(t, &tc.expected, err)
+			require.ErrorIs(t, err, tc.expected.Kind)
+			if tc.cause != nil {
+				require.ErrorIs(t, err, tc.cause)
+			}
+			require.Equal(t, tc.state, state)
+			next(t, parser, ipfw.Record{
+				Line:    2,
+				Text:    "# after",
+				Kind:    ipfw.RecordComment,
+				Comment: " after",
+			})
+			next(t, parser, eof)
 		})
 	}
 }
