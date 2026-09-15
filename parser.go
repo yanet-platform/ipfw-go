@@ -516,6 +516,11 @@ func startsOptions(s string, hook OptionHook) bool {
 		return true
 	}
 	opened, rest := openGroup(s, trailingPosition)
+	if opened.Braced {
+		if _, _, err := parseOptionNegation(rest); err.Failed() {
+			return false
+		}
+	}
 	place := topLevel
 	if opened.Braced {
 		place = groupFirst
