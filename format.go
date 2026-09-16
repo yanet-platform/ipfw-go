@@ -829,24 +829,18 @@ func appendOptions(
 		}
 		var err error
 		customStart := len(dst)
-		if protectCustom {
-			dst = append(dst, 0, 0)
-		}
 		if dst, err = appendOpt(dst, opt, custom); err != nil {
 			return dst, err
 		}
-		if protectCustom {
-			customText := dst[customStart+2:]
-			if isExactNot(customText) {
-				if next != len(opts) {
-					return dst, ErrInvalidName
-				}
-				copy(dst[customStart:], customText)
-				dst = dst[:len(dst)-2]
-			} else {
-				dst[customStart], dst[customStart+1] = '{', ' '
-				dst = append(dst, " }"...)
-			}
+		if opt.Kind == OptCustom && !opt.Neg && isExactNot(dst[customStart:]) &&
+			(inGroup || next != len(opts)) {
+			return dst, ErrInvalidName
+		}
+		if protectCustom && !isExactNot(dst[customStart:]) {
+			customEnd := len(dst)
+			dst = append(dst, 0, 0, ' ', '}')
+			copy(dst[customStart+2:customEnd+2], dst[customStart:customEnd])
+			dst[customStart], dst[customStart+1] = '{', ' '
 		}
 		for continuation := idx + 1; continuation < next; continuation++ {
 			if err = validatePortContinuation(opt, opts[continuation], inGroup); err != nil {

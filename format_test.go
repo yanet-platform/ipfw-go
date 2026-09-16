@@ -98,7 +98,10 @@ func Test_ParsedRecord_OwnsRecordAndBody(t *testing.T) {
 	require.Nil(t, err)
 	parsed := ipfw.NewParsedRecord(rec, &state)
 
-	parser.Reset("add deny ip from any to any\n")
+	parser.Reset(
+		"add deny { ip6 or sctp or icmp } from { me or me6 } 53" +
+			" to { me or me6 } 443 out\n",
+	)
 	state.Reset()
 	rec, err = parser.Next(&state)
 	require.Nil(t, err)
@@ -150,13 +153,27 @@ func Test_ReduceState_Clone(t *testing.T) {
 	state := fullBodyState()
 	clone := state.Clone()
 
+	state.IPProtos[0].Neg = true
 	state.Protos[0].Neg = true
-	state.Options = append(state.Options, ipfw.Opt{Kind: ipfw.OptOut})
+	state.Sources[0] = ipfw.Target{Kind: ipfw.TargetAny}
+	state.Destinations[0] = ipfw.Target{Kind: ipfw.TargetMe}
+	state.SourcePorts[0].Neg = true
+	state.DestinationPorts[0].Neg = true
+	state.Options[0] = ipfw.Opt{Kind: ipfw.OptOut}
 	require.Equal(t, fullBodyState(), clone)
 
 	require.True(t, ipfw.ReduceState{}.IsEmpty())
-	require.False(t, state.IsEmpty())
-	require.False(t, clone.IsEmpty())
+	for _, nonEmpty := range []ipfw.ReduceState{
+		{IPProtos: []ipfw.ProtoIPMatch{{}}},
+		{Protos: []ipfw.ProtoMatch{{}}},
+		{Sources: []ipfw.Target{{}}},
+		{Destinations: []ipfw.Target{{}}},
+		{SourcePorts: []ipfw.PortMatch{{}}},
+		{DestinationPorts: []ipfw.PortMatch{{}}},
+		{Options: []ipfw.Opt{{}}},
+	} {
+		require.False(t, nonEmpty.IsEmpty())
+	}
 	state.Reset()
 	require.True(t, state.IsEmpty())
 }
@@ -356,6 +373,7 @@ func Test_Formatter_AppendRecord_Actions(t *testing.T) {
 		{"add 100 pass ip from any to any", "add 100 pass ip from any to any"},
 		{"add 0007 pass ip from any to any", "add 7 pass ip from any to any"},
 		{"add pass log ip from any to any", "add pass log ip from any to any"},
+		{"add pass log logamount 0 ip from any to any", "add pass log logamount 0 ip from any to any"},
 		{"add pass log logamount 500 ip from any to any", "add pass log logamount 500 ip from any to any"},
 		{"add pass tag 5 ip from any to any", "add pass tag 5 ip from any to any"},
 		{
@@ -480,6 +498,7 @@ func Test_Formatter_AppendRecord_TargetPatternWrap(t *testing.T) {
 // under one negation, ranges, names with escapes and leading zeros folded.
 func Test_Formatter_AppendRecord_Ports(t *testing.T) {
 	cases := [][2]string{
+		{"add pass tcp from any 0 to any", "add pass tcp from any 0 to any"},
 		{"add pass tcp from any 22 to any", "add pass tcp from any 22 to any"},
 		{"add pass tcp from any 1024-65535 to any", "add pass tcp from any 1024-65535 to any"},
 		{"add pass tcp from any 22,80,443 to any", "add pass tcp from any 22,80,443 to any"},
@@ -718,9 +737,8 @@ func Test_Formatter_AppendRuleset_Normalizes(t *testing.T) {
 	require.Equal(t, ":L\n", string(dst), "a final record without a newline still gets one")
 }
 
-// requireSectionReparses cuts the section between after and the first
-// occurrence of until out of line and requires the sub-parser to consume it
-// wholly into the expected state.
+// requireSectionReparses formats a line, cuts out one section, and requires
+// the sub-parser to consume it wholly into the expected state.
 func requireSectionReparses(
 	t *testing.T,
 	line, after, until string,
@@ -728,6 +746,9 @@ func requireSectionReparses(
 	expected ipfw.ReduceState,
 ) {
 	t.Helper()
+	formatted, err := ipfw.NewFormatter().Record(parseOne(t, line))
+	require.NoError(t, err)
+	line = formatted
 	rest, ok := strings.CutPrefix(line, after)
 	require.True(t, ok, "the line must start with %q", after)
 	fragment := rest
@@ -1137,6 +1158,15 @@ func Test_Formatter_AppendRecord_InvalidValues(t *testing.T) {
 			err: ipfw.ErrUnexpectedBody,
 		},
 		{
+			name: "port range upper name with a stray number",
+			mutate: func(record *ipfw.ParsedRecord) {
+				record.Body.SourcePorts = []ipfw.PortMatch{
+					{Lo: ipfw.Port{Number: 22}, Hi: ipfw.Port{Name: "ssh", Number: 22}},
+				}
+			},
+			err: ipfw.ErrUnexpectedBody,
+		},
+		{
 			name: "port name with a bad escape",
 			mutate: func(record *ipfw.ParsedRecord) {
 				record.Body.SourcePorts = []ipfw.PortMatch{
@@ -1224,6 +1254,67 @@ func Test_Formatter_AppendRecord_InvalidValues(t *testing.T) {
 			err: ipfw.ErrBrokenOrChain,
 		},
 		{
+			name: "port-list continuation with a different kind",
+			mutate: func(record *ipfw.ParsedRecord) {
+				record.Body.Options = []ipfw.Opt{
+					{Kind: ipfw.OptDestinationPort, Ports: portRangeNumber(22)},
+					{
+						Or:     true,
+						PortOr: true,
+						Kind:   ipfw.OptSourcePort,
+						Ports:  portRangeNumber(80),
+					},
+				}
+			},
+			err: ipfw.ErrBrokenOrChain,
+		},
+		{
+			name: "port-list continuation with different negation",
+			mutate: func(record *ipfw.ParsedRecord) {
+				record.Body.Options = []ipfw.Opt{
+					{Kind: ipfw.OptDestinationPort, Ports: portRangeNumber(22)},
+					{
+						Neg:    true,
+						Or:     true,
+						PortOr: true,
+						Kind:   ipfw.OptDestinationPort,
+						Ports:  portRangeNumber(80),
+					},
+				}
+			},
+			err: ipfw.ErrBrokenOrChain,
+		},
+		{
+			name: "port-list continuation without its expanded or flag",
+			mutate: func(record *ipfw.ParsedRecord) {
+				record.Body.Options = []ipfw.Opt{
+					{Kind: ipfw.OptDestinationPort, Ports: portRangeNumber(22)},
+					{
+						PortOr: true,
+						Kind:   ipfw.OptDestinationPort,
+						Ports:  portRangeNumber(80),
+					},
+				}
+			},
+			err: ipfw.ErrBrokenOrChain,
+		},
+		{
+			name: "port-list continuation with a stray argument",
+			mutate: func(record *ipfw.ParsedRecord) {
+				record.Body.Options = []ipfw.Opt{
+					{Kind: ipfw.OptDestinationPort, Ports: portRangeNumber(22)},
+					{
+						Or:     true,
+						PortOr: true,
+						Kind:   ipfw.OptDestinationPort,
+						Text:   "x",
+						Ports:  portRangeNumber(80),
+					},
+				}
+			},
+			err: ipfw.ErrUnexpectedBody,
+		},
+		{
 			name: "keep-state in an option group",
 			mutate: func(record *ipfw.ParsedRecord) {
 				record.Body.Options = []ipfw.Opt{
@@ -1288,6 +1379,56 @@ func Test_Formatter_AppendRecord_InvalidValues(t *testing.T) {
 			err: ipfw.ErrUnexpectedBody,
 		},
 		{
+			name: "keyword option with a custom argument",
+			mutate: func(record *ipfw.ParsedRecord) {
+				record.Body.Options = []ipfw.Opt{{Kind: ipfw.OptIn, Arg: "x"}}
+			},
+			err: ipfw.ErrUnexpectedBody,
+		},
+		{
+			name: "keyword option with ports",
+			mutate: func(record *ipfw.ParsedRecord) {
+				record.Body.Options = []ipfw.Opt{{Kind: ipfw.OptIn, Ports: portRangeNumber(22)}}
+			},
+			err: ipfw.ErrUnexpectedBody,
+		},
+		{
+			name: "keyword option with a protocol",
+			mutate: func(record *ipfw.ParsedRecord) {
+				record.Body.Options = []ipfw.Opt{
+					{Kind: ipfw.OptIn, Proto: ipfw.Proto{Name: "tcp"}},
+				}
+			},
+			err: ipfw.ErrUnexpectedBody,
+		},
+		{
+			name: "keyword option with ICMP types",
+			mutate: func(record *ipfw.ParsedRecord) {
+				opt := icmpTypes(8)
+				opt.Kind = ipfw.OptIn
+				record.Body.Options = []ipfw.Opt{opt}
+			},
+			err: ipfw.ErrUnexpectedBody,
+		},
+		{
+			name: "keyword option with TCP flags",
+			mutate: func(record *ipfw.ParsedRecord) {
+				opt := tcpFlags(ipfw.TCPSyn, 0)
+				opt.Kind = ipfw.OptIn
+				record.Body.Options = []ipfw.Opt{opt}
+			},
+			err: ipfw.ErrUnexpectedBody,
+		},
+		{
+			name: "keyword option with a via argument",
+			mutate: func(record *ipfw.ParsedRecord) {
+				opt := viaExact("eth0")
+				opt.Kind = ipfw.OptIn
+				record.Body.Options = []ipfw.Opt{opt}
+			},
+			err: ipfw.ErrUnexpectedBody,
+		},
+		{
 			name: "port option with a proto",
 			mutate: func(record *ipfw.ParsedRecord) {
 				record.Body.Options = []ipfw.Opt{
@@ -1339,9 +1480,16 @@ func Test_Formatter_AppendRecord_InvalidValues(t *testing.T) {
 			err: ipfw.ErrInvalidTCPFlags,
 		},
 		{
-			name: "tcpflags with an unknown bit",
+			name: "tcpflags set with an unknown bit",
 			mutate: func(record *ipfw.ParsedRecord) {
-				record.Body.Options = []ipfw.Opt{tcpFlags(ipfw.TCPFlag(1<<6), ipfw.TCPFlag(1<<6))}
+				record.Body.Options = []ipfw.Opt{tcpFlags(ipfw.TCPFlag(1<<6), 0)}
+			},
+			err: ipfw.ErrInvalidTCPFlags,
+		},
+		{
+			name: "tcpflags clear with an unknown bit",
+			mutate: func(record *ipfw.ParsedRecord) {
+				record.Body.Options = []ipfw.Opt{tcpFlags(0, ipfw.TCPFlag(1<<6))}
 			},
 			err: ipfw.ErrInvalidTCPFlags,
 		},
@@ -1424,6 +1572,20 @@ func Test_Formatter_AppendRecord_InvalidValues(t *testing.T) {
 					Name: "t",
 					Kind: ipfw.TableCreate,
 					Key:  ipfw.TableKey{Kind: ipfw.TableKeyNetwork4, Text: "192.0.2.1"},
+				}
+			},
+			err: ipfw.ErrUnexpectedBody,
+		},
+		{
+			name: "create with a value",
+			mutate: func(record *ipfw.ParsedRecord) {
+				record.Record.Kind = ipfw.RecordTable
+				record.Record.Instruction = ipfw.Instruction{}
+				record.Body = ipfw.ReduceState{}
+				record.Record.Table = ipfw.Table{
+					Name:  "t",
+					Kind:  ipfw.TableCreate,
+					Value: "x",
 				}
 			},
 			err: ipfw.ErrUnexpectedBody,
@@ -1512,9 +1674,10 @@ func Test_Formatter_AppendRecord_InvalidValues(t *testing.T) {
 // error of the appender surfacing untouched, and reads back through a
 // matching option hook.
 func Test_Formatter_CustomOptAppender(t *testing.T) {
+	appenderErr := errors.New("boom")
 	appendCustom := func(dst []byte, opt ipfw.Opt) ([]byte, error) {
 		if opt.Arg == "boom" {
-			return dst, errors.New("boom")
+			return dst, appenderErr
 		}
 		dst = append(dst, opt.Text...)
 		dst = append(dst, ' ')
@@ -1561,9 +1724,13 @@ func Test_Formatter_CustomOptAppender(t *testing.T) {
 
 	record.Body.Options = []ipfw.Opt{{Kind: ipfw.OptCustom, Text: "myopt", Arg: "boom"}}
 	_, err = ipfw.NewFormatter(ipfw.WithCustomOptAppender(appendCustom)).Record(record)
-	require.ErrorContains(t, err, "boom")
+	require.ErrorIs(t, err, appenderErr)
 
 	record.Body.Options = []ipfw.Opt{{Kind: ipfw.OptCustom, Text: "myopt", Arg: "#metadata"}}
+	_, err = ipfw.NewFormatter(ipfw.WithCustomOptAppender(appendCustom)).Record(record)
+	require.ErrorIs(t, err, ipfw.ErrInvalidName)
+
+	record.Body.Options = []ipfw.Opt{{Kind: ipfw.OptCustom, Text: "myopt", Arg: "two\nlines"}}
 	_, err = ipfw.NewFormatter(ipfw.WithCustomOptAppender(appendCustom)).Record(record)
 	require.ErrorIs(t, err, ipfw.ErrInvalidName)
 
@@ -1580,6 +1747,41 @@ func Test_Formatter_CustomOptAppender(t *testing.T) {
 	}
 	_, err = ipfw.NewFormatter(ipfw.WithCustomOptAppender(emptyCustom)).Record(record)
 	require.ErrorIs(t, err, ipfw.ErrInvalidName)
+}
+
+// verifies that an exact custom `not` is rejected where following grammar
+// punctuation would read it back as negation.
+func Test_Formatter_CustomOptBareNotPlacement(t *testing.T) {
+	appender := func(dst []byte, opt ipfw.Opt) ([]byte, error) {
+		return append(dst, opt.Text...), nil
+	}
+	cases := []struct {
+		name    string
+		options []ipfw.Opt
+	}{
+		{
+			name: "before another option",
+			options: []ipfw.Opt{
+				{Kind: ipfw.OptCustom, Text: "not"},
+				{Kind: ipfw.OptIn},
+			},
+		},
+		{
+			name: "at the end of a group",
+			options: []ipfw.Opt{
+				{Kind: ipfw.OptIn},
+				{Or: true, Kind: ipfw.OptCustom, Text: "not"},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			record := instructionRecord()
+			record.Body.Options = tc.options
+			_, err := ipfw.NewFormatter(ipfw.WithCustomOptAppender(appender)).Record(record)
+			require.ErrorIs(t, err, ipfw.ErrInvalidName)
+		})
+	}
 }
 
 // verifies that native custom options stay protected from header and legacy grammar prefixes.
@@ -2196,6 +2398,8 @@ func Fuzz_Formatter_Record(f *testing.F) {
 		record := seedRecord(seed)
 		text, err := ipfw.NewFormatter().Record(record)
 		if err != nil {
+			var kind ipfw.ErrorKind
+			require.ErrorAs(t, err, &kind)
 			return
 		}
 		var state ipfw.ReduceState
@@ -2284,11 +2488,50 @@ func Test_Formatter_Append_NoAllocs(t *testing.T) {
 	require.Len(t, whole, len(canonical))
 }
 
+// verifies that protected custom options use no scratch capacity beyond
+// their exact final record length.
+func Test_Formatter_Append_CustomNoAllocs(t *testing.T) {
+	appender := func(dst []byte, opt ipfw.Opt) ([]byte, error) {
+		return append(dst, opt.Text...), nil
+	}
+	formatter := ipfw.NewFormatter(ipfw.WithCustomOptAppender(appender))
+	for _, tc := range []struct {
+		name   string
+		custom string
+		text   string
+	}{
+		{name: "bare not", custom: "not", text: "add pass not"},
+		{name: "protected prefix", custom: "logger", text: "add pass { logger }"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			record := instructionRecord()
+			record.BodyKind = ipfw.RuleBodyNative
+			record.Body.IPProtos = nil
+			record.Body.Options = []ipfw.Opt{{Kind: ipfw.OptCustom, Text: tc.custom}}
+			text, err := formatter.Record(record)
+			require.NoError(t, err)
+			require.Equal(t, tc.text, text)
+
+			ok := true
+			storage := make([]byte, len(text))
+			var buf []byte
+			allocs := testing.AllocsPerRun(100, func() {
+				buf, err = formatter.AppendRecord(storage[:0], record)
+				if err != nil {
+					ok = false
+				}
+			})
+			require.True(t, ok)
+			require.Zero(t, allocs)
+			require.Equal(t, text, string(buf))
+		})
+	}
+}
+
 // The benchmark results are sunk here so the compiler keeps the work.
 var (
-	benchText    []byte
-	benchFmtErr  error
-	benchRecords []ipfw.ParsedRecord
+	benchText   []byte
+	benchFmtErr error
 )
 
 func Benchmark_Formatter_AppendRecord_SimpleRule(b *testing.B) {
@@ -2305,10 +2548,14 @@ func Benchmark_Formatter_AppendRecord_SimpleRule(b *testing.B) {
 		buf, benchFmtErr = formatter.AppendRecord(buf[:0], record)
 		benchText = buf
 	}
+	if benchFmtErr != nil {
+		b.Fatal(benchFmtErr)
+	}
 }
 
 func Benchmark_Formatter_AppendRuleset_Synthetic(b *testing.B) {
 	var state ipfw.ReduceState
+	var records []ipfw.ParsedRecord
 	parser := ipfw.NewParser(syntheticRuleset(), ipfw.WithLabels())
 	for {
 		state.Reset()
@@ -2319,10 +2566,10 @@ func Benchmark_Formatter_AppendRuleset_Synthetic(b *testing.B) {
 		if rec.Kind == ipfw.RecordEOF {
 			break
 		}
-		benchRecords = append(benchRecords, ipfw.NewParsedRecord(rec, &state))
+		records = append(records, ipfw.NewParsedRecord(rec, &state))
 	}
 	formatter := ipfw.NewFormatter()
-	canonical, err := formatter.AppendRuleset(nil, benchRecords)
+	canonical, err := formatter.AppendRuleset(nil, records)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -2330,8 +2577,11 @@ func Benchmark_Formatter_AppendRuleset_Synthetic(b *testing.B) {
 	b.SetBytes(int64(len(canonical)))
 	b.ReportAllocs()
 	for b.Loop() {
-		buf, benchFmtErr = formatter.AppendRuleset(buf[:0], benchRecords)
+		buf, benchFmtErr = formatter.AppendRuleset(buf[:0], records)
 		benchText = buf
+	}
+	if benchFmtErr != nil {
+		b.Fatal(benchFmtErr)
 	}
 }
 
