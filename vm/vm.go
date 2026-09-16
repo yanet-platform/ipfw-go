@@ -633,7 +633,8 @@ func (m *VM[V4, V6]) Check(ctx *Context, pkt Packet) ipfw.Action {
 // forward: a tablearg with no target, or one at or before the rule,
 // falls through.
 func (m *VM[V4, V6]) CheckTrace(ctx *Context, pkt Packet, tracer Tracer) (ipfw.Action, bool) {
-	fields := readFields(pkt)
+	var fields packetFields
+	fields.Read(pkt)
 	program := &m.program
 	rules := program.Rules()
 	pc := 0
@@ -674,6 +675,9 @@ type packetFields struct {
 	Version IPVersion
 	// Protocol is the transport protocol number.
 	Protocol uint8
+	// SourceFamily is the family of the source address, DestinationFamily
+	// that of the destination.
+	SourceFamily, DestinationFamily IPVersion
 	// Source is the source address.
 	Source netip.Addr
 	// Destination is the destination address.
@@ -705,14 +709,31 @@ type packetFields struct {
 	ports, tcp, icmp, fragmentation bool
 }
 
-// readFields takes the fields every rule looks at from the packet.
-func readFields(pkt Packet) packetFields {
-	return packetFields{
-		Version:     pkt.Version(),
-		Protocol:    pkt.Protocol(),
-		Source:      pkt.SourceAddr(),
-		Destination: pkt.DestinationAddr(),
+// Read takes the fields every rule looks at from the packet.
+//
+// The fields are filled in place: they are wide enough that returning them
+// would copy the whole struct into the caller's frame once per check. The
+// family of each address is decided here as well, so that a target tells an
+// address of its own family from any other without looking at the address.
+func (m *packetFields) Read(pkt Packet) {
+	m.Version = pkt.Version()
+	m.Protocol = pkt.Protocol()
+	m.Source = pkt.SourceAddr()
+	m.Destination = pkt.DestinationAddr()
+	m.SourceFamily = addrFamily(m.Source)
+	m.DestinationFamily = addrFamily(m.Destination)
+}
+
+// addrFamily is the family of an address, the zero value being neither,
+// which is what an invalid address is.
+func addrFamily(addr netip.Addr) IPVersion {
+	switch {
+	case addr.Is4():
+		return IPv4
+	case addr.Is6():
+		return IPv6
 	}
+	return 0
 }
 
 // ReadPorts takes the ports on first use.
@@ -776,10 +797,22 @@ func (m *VM[V4, V6]) matches(
 			return false, noTarget
 		}
 	}
-	if !m.matchTargets(program.Sources(rule.Sources), ctx, fields.Source) {
+	// The family of the address picks the scan of its side, a branch here
+	// rather than one inside the loop of every target.
+	sources := program.Sources(rule.Sources)
+	if fields.SourceFamily == IPv6 {
+		if !m.matchTargets6(sources, ctx, fields.Source) {
+			return false, noTarget
+		}
+	} else if !m.matchTargets4(sources, ctx, fields.Source, fields.SourceFamily) {
 		return false, noTarget
 	}
-	if !m.matchTargets(program.Destinations(rule.Destinations), ctx, fields.Destination) {
+	destinations := program.Destinations(rule.Destinations)
+	if fields.DestinationFamily == IPv6 {
+		if !m.matchTargets6(destinations, ctx, fields.Destination) {
+			return false, noTarget
+		}
+	} else if !m.matchTargets4(destinations, ctx, fields.Destination, fields.DestinationFamily) {
 		return false, noTarget
 	}
 	if !rule.SourcePorts.Empty() {
@@ -1012,23 +1045,45 @@ func matchProtos(matches []ipfw.ProtoNumberMatch, protocol uint8) bool {
 	return false
 }
 
-// matchTargets reports whether the address is one of the targets, none
-// matching nothing.
+// matchTargets4 reports whether the address, which is IPv4 or of no family
+// at all, is one of the targets, none matching nothing.
 //
 // The consecutive targets of one pattern are alternatives: the address is in
 // any of them, or in none when the pattern is negated. A side left empty by a
-// name standing for nothing is a rule that never matches.
-func (m *VM[V4, V6]) matchTargets(
+// name standing for nothing is a rule that never matches. An address of no
+// family is in no network, which family tells apart.
+//
+// The scan is written once per family, matchTargets6 being the other one, so
+// that its loop tests the networks of one family and skips those of the other
+// on their kind alone. That keeps a call out of the loop where a long scan
+// spends most of its time, while the wider IPv6 network, which the call has
+// to put in four registers, stays out of the way of the IPv4 one.
+func (m *VM[V4, V6]) matchTargets4(
 	targets []ipfw.TargetMatch[V4, V6],
 	ctx *Context,
 	addr netip.Addr,
+	family IPVersion,
 ) bool {
 	idx := 0
 	for idx < len(targets) {
 		first := &targets[idx]
-		hit := m.matchTarget(first, ctx, addr)
-		for idx++; idx < len(targets) && targets[idx].Pattern == first.Pattern; idx++ {
-			hit = hit || m.matchTarget(&targets[idx], ctx, addr)
+		hit := false
+		for {
+			target := &targets[idx]
+			switch target.Kind {
+			case ipfw.TargetNetwork4:
+				hit = hit || family == IPv4 && target.Net4.ContainsAddr(addr)
+			case ipfw.TargetNetwork6:
+				// An IPv6 network holds no address this scan is given.
+			case ipfw.TargetAny:
+				hit = true
+			default:
+				hit = hit || m.matchNamedTarget(target, ctx, addr, family)
+			}
+			idx++
+			if idx == len(targets) || targets[idx].Pattern != first.Pattern {
+				break
+			}
 		}
 		if hit != first.Neg {
 			return true
@@ -1037,28 +1092,59 @@ func (m *VM[V4, V6]) matchTargets(
 	return false
 }
 
-// matchTarget reports whether the address is the target's.
-//
-// me and me6 are the context's addresses of the packet's family, a
-// missing table holds nothing.
-func (m *VM[V4, V6]) matchTarget(
-	target *ipfw.TargetMatch[V4, V6],
+// matchTargets6 is matchTargets4 for an address that is an IPv6 one.
+func (m *VM[V4, V6]) matchTargets6(
+	targets []ipfw.TargetMatch[V4, V6],
 	ctx *Context,
 	addr netip.Addr,
 ) bool {
+	idx := 0
+	for idx < len(targets) {
+		first := &targets[idx]
+		hit := false
+		for {
+			target := &targets[idx]
+			switch target.Kind {
+			case ipfw.TargetNetwork6:
+				hit = hit || target.Net6.ContainsAddr(addr)
+			case ipfw.TargetNetwork4:
+				// An IPv4 network holds no address this scan is given.
+			case ipfw.TargetAny:
+				hit = true
+			default:
+				hit = hit || m.matchNamedTarget(target, ctx, addr, IPv6)
+			}
+			idx++
+			if idx == len(targets) || targets[idx].Pattern != first.Pattern {
+				break
+			}
+		}
+		if hit != first.Neg {
+			return true
+		}
+	}
+	return false
+}
+
+// matchNamedTarget reports whether the address is the target's, for the
+// kinds a scan meets rarely, family being the one the check found the
+// address to belong to.
+//
+// me and me6 are the context's addresses of the packet's family, a
+// missing table holds nothing.
+func (m *VM[V4, V6]) matchNamedTarget(
+	target *ipfw.TargetMatch[V4, V6],
+	ctx *Context,
+	addr netip.Addr,
+	family IPVersion,
+) bool {
 	switch target.Kind {
-	case ipfw.TargetAny:
-		return true
 	case ipfw.TargetMe:
-		return addr.Is4() && slices.Contains(ctx.LocalAddrs, addr)
+		return family == IPv4 && slices.Contains(ctx.LocalAddrs, addr)
 	case ipfw.TargetMe6:
-		return addr.Is6() && slices.Contains(ctx.LocalAddrs, addr)
+		return family == IPv6 && slices.Contains(ctx.LocalAddrs, addr)
 	case ipfw.TargetTable:
 		return m.tables.LookupNetwork(target.Name, addr)
-	case ipfw.TargetNetwork4:
-		return addr.Is4() && target.Net4.ContainsAddr(addr)
-	case ipfw.TargetNetwork6:
-		return addr.Is6() && target.Net6.ContainsAddr(addr)
 	}
 	return false
 }

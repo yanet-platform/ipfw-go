@@ -138,6 +138,17 @@ func tcp4(src, dst string) vm.Packet {
 	return vm.NewIPv4Packet(netip.MustParseAddr(src), netip.MustParseAddr(dst)).WithTCP(ipfw.TCPSyn, 50000, 22)
 }
 
+// raw6 is an IPv6 packet laid out by hand, for the addresses the builder
+// rejects on purpose, such as an IPv4-mapped one.
+func raw6(src, dst string) vm.RawIPv6Packet {
+	packet := make(vm.RawIPv6Packet, 64)
+	packet[0] = 6 << 4
+	from, to := netip.MustParseAddr(src).As16(), netip.MustParseAddr(dst).As16()
+	copy(packet[8:24], from[:])
+	copy(packet[24:40], to[:])
+	return packet
+}
+
 // verifies the compat matchers over two-rule rulesets: the protocol, the
 // source, the destination and both, for IPv4 and IPv6 packets.
 func Test_VM_Check_Compat(t *testing.T) {
@@ -1936,6 +1947,97 @@ func Test_VM_Check_Me(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.verdict, machine.Check(tc.ctx, tc.packet))
+		})
+	}
+}
+
+// verifies that the family of an address decides which targets can match
+// it, an address of neither family matching none of them but `any`.
+//
+// A check takes the family of the addresses once and every target of the
+// rules is tested against it, so an IPv4-mapped address, which is an IPv6
+// one, and the invalid address of a truncated packet have to be rejected
+// exactly where a family test at each target rejects them.
+func Test_VM_Check_AddressFamily(t *testing.T) {
+	// The invalid address is among the local ones, so only its family keeps
+	// `me` and `me6` from matching it.
+	local := &vm.Context{LocalAddrs: []netip.Addr{{}, netip.MustParseAddr("192.0.2.1")}}
+	mapped := raw6("::ffff:192.0.2.1", "2001:db8::1")
+	truncated := vm.RawIPv4Packet{0x45}
+	cases := []struct {
+		name    string
+		rules   string
+		packet  vm.Packet
+		verdict ipfw.Action
+	}{
+		{
+			name: "mapped source is no IPv4 address",
+			rules: `
+				add pass ip from 192.0.2.0/24 to any
+				add deny ip from any to any
+			`,
+			packet:  mapped,
+			verdict: deny,
+		},
+		{
+			name: "mapped source is an IPv6 address",
+			rules: `
+				add pass ip from ::ffff:0:0/96 to any
+				add deny ip from any to any
+			`,
+			packet:  mapped,
+			verdict: pass,
+		},
+		{
+			name: "invalid source is no IPv4 address",
+			rules: `
+				add pass ip from 0.0.0.0/0 to any
+				add deny ip from any to any
+			`,
+			packet:  truncated,
+			verdict: deny,
+		},
+		{
+			name: "invalid source is no IPv6 address",
+			rules: `
+				add pass ip from ::/0 to any
+				add deny ip from any to any
+			`,
+			packet:  truncated,
+			verdict: deny,
+		},
+		{
+			name: "invalid source is not me",
+			rules: `
+				add pass ip from me to any
+				add deny ip from any to any
+			`,
+			packet:  truncated,
+			verdict: deny,
+		},
+		{
+			name: "invalid source is not me6",
+			rules: `
+				add pass ip from me6 to any
+				add deny ip from any to any
+			`,
+			packet:  truncated,
+			verdict: deny,
+		},
+		{
+			name: "invalid source is any",
+			rules: `
+				add pass ip from any to any
+				add deny ip from any to any
+			`,
+			packet:  truncated,
+			verdict: pass,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			machine := build(t, ruleset(tc.rules), none)
+			require.Equal(t, tc.verdict, machine.Check(local, tc.packet))
 		})
 	}
 }
