@@ -46,7 +46,7 @@ func Test_CommandHook_CompatibilitySeam(t *testing.T) {
 					{Neg: true, Lo: ipfw.Port{Number: 443}, Hi: ipfw.Port{Number: 443}},
 					{Neg: true, Lo: ipfw.Port{Number: 8443}, Hi: ipfw.Port{Number: 8443}},
 				},
-				Options: []ipfw.Opt{{Kind: ipfw.OptIn}, {Or: true, Neg: true, Kind: ipfw.OptOut}},
+				Options: []ipfw.Opt{{Kind: ipfw.OptIn}, {Neg: true, Pattern: 1, Kind: ipfw.OptOut}},
 			},
 		},
 		{
@@ -335,8 +335,8 @@ func Test_CommandHook_SubparserRemainders(t *testing.T) {
 			},
 			state: ipfw.ReduceState{Options: []ipfw.Opt{
 				{Kind: ipfw.OptIn},
-				{Or: true, Neg: true, Kind: ipfw.OptOut},
-				{Kind: ipfw.OptComment, Text: " after"},
+				{Neg: true, Pattern: 1, Kind: ipfw.OptOut},
+				{Block: 1, Kind: ipfw.OptComment, Text: " after"},
 			}},
 		},
 	}
@@ -778,13 +778,13 @@ func Test_OptionHook_Table(t *testing.T) {
 			name:    "keyword then a known option",
 			input:   "add allow tcp from any to any setup in\n",
 			protos:  tcp,
-			options: []ipfw.Opt{setup, {Kind: ipfw.OptIn}},
+			options: []ipfw.Opt{setup, {Block: 1, Kind: ipfw.OptIn}},
 		},
 		{
 			name:    "keyword in a group",
 			input:   "add allow tcp from any to any { setup or in }\n",
 			protos:  tcp,
-			options: []ipfw.Opt{setup, {Or: true, Kind: ipfw.OptIn}},
+			options: []ipfw.Opt{setup, {Pattern: 1, Kind: ipfw.OptIn}},
 		},
 		{
 			name:    "negated keyword",
@@ -793,10 +793,13 @@ func Test_OptionHook_Table(t *testing.T) {
 			options: []ipfw.Opt{notOpt(setup)},
 		},
 		{
-			name:    "option with an argument",
-			input:   "add allow tcp from any to any uid root established\n",
-			protos:  tcp,
-			options: []ipfw.Opt{{Kind: ipfw.OptCustom, Text: "uid", Arg: "root"}, {Kind: ipfw.OptEstablished}},
+			name:   "option with an argument",
+			input:  "add allow tcp from any to any uid root established\n",
+			protos: tcp,
+			options: []ipfw.Opt{
+				{Kind: ipfw.OptCustom, Text: "uid", Arg: "root"},
+				{Block: 1, Kind: ipfw.OptEstablished},
+			},
 		},
 		{
 			name:    "keyword alone is an option, not a port",
@@ -805,21 +808,19 @@ func Test_OptionHook_Table(t *testing.T) {
 			options: []ipfw.Opt{setup},
 		},
 		{
-			name:  "hook-provided port option cannot continue the preceding list",
+			name:  "hook-provided port option cannot join the preceding list",
 			input: "add allow tcp from any to any dst-port 22 setup\n",
 			hook: func(string) (ipfw.Opt, int, error) {
-				opt := dstPort(80)
-				opt.PortOr = true
-				return opt, len("setup"), nil
+				return at(0, 0, dstPort(80)), len("setup"), nil
 			},
 			protos:  tcp,
-			options: []ipfw.Opt{dstPort(22), dstPort(80)},
+			options: []ipfw.Opt{dstPort(22), at(1, 0, dstPort(80))},
 		},
 		{
 			name:    "option-only body",
 			input:   "add 510 allow setup in\n",
 			number:  510,
-			options: []ipfw.Opt{setup, {Kind: ipfw.OptIn}},
+			options: []ipfw.Opt{setup, {Block: 1, Kind: ipfw.OptIn}},
 		},
 	}
 	for _, tc := range cases {
@@ -869,12 +870,12 @@ func Test_OptionHook_Precedence(t *testing.T) {
 		Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
 		Options: []ipfw.Opt{
 			{Kind: ipfw.OptIn},
-			{Kind: ipfw.OptEstablished},
-			{Kind: ipfw.OptEstablished},
-			{Kind: ipfw.OptFrag},
-			tcpFlags(ipfw.TCPSyn, ipfw.TCPAck),
-			icmp6Types(128, 129),
-			{Neg: true, Kind: ipfw.OptComment, Text: " setup"},
+			{Block: 1, Kind: ipfw.OptEstablished},
+			{Block: 2, Kind: ipfw.OptEstablished},
+			{Block: 3, Kind: ipfw.OptFrag},
+			at(4, 0, tcpFlags(ipfw.TCPSyn, ipfw.TCPAck)),
+			at(5, 0, icmp6Types(128, 129)),
+			{Neg: true, Block: 6, Kind: ipfw.OptComment, Text: " setup"},
 		},
 	}, state)
 
@@ -1156,7 +1157,7 @@ func Test_ParseOptions_Hook(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 8, n)
 	require.Equal(t, ipfw.ReduceState{
-		Options: []ipfw.Opt{{Kind: ipfw.OptCustom, Text: "setup"}, {Kind: ipfw.OptIn}},
+		Options: []ipfw.Opt{{Kind: ipfw.OptCustom, Text: "setup"}, {Block: 1, Kind: ipfw.OptIn}},
 	}, state)
 }
 

@@ -189,14 +189,15 @@ func (m *program[V4, V6]) Mark() rule {
 // the rule, so that a commented rule keeps an empty run of options.
 //
 // A comment holds for every packet, so dropping it changes no verdict unless
-// it is negated or belongs to an or-group, joined to the option before it or
-// followed by one joined to it.
+// it is negated or shares its or-block with another option. The options of a
+// block are contiguous, so a neighbour tells.
 func (m *program[V4, V6]) DropComments(open rule) {
 	options := m.options[open.Options.Start:]
 	kept := 0
 	for idx, opt := range options {
-		joined := idx+1 < len(options) && options[idx+1].Or
-		if opt.Kind == ipfw.OptComment && !opt.Neg && !opt.Or && !joined {
+		alone := (idx == 0 || options[idx-1].Block != opt.Block) &&
+			(idx+1 == len(options) || options[idx+1].Block != opt.Block)
+		if opt.Kind == ipfw.OptComment && !opt.Neg && alone {
 			continue
 		}
 		options[kept] = opt
@@ -875,52 +876,68 @@ func matchPorts(matches []ipfw.PortNumberMatch, port uint16) bool {
 // noTarget is the tablearg target of a rule whose options named none.
 const noTarget = -1
 
-// matchOptions folds the options left to right after combining each port list.
+// matchOptions folds the options as ipfw(8) does: every or-block has to hold,
+// a block holds when one of its match patterns does, and a pattern holds when
+// one of its members matches, its negation aside.
 //
-// A port list is tested before its negation and outer group membership are
-// applied. A successful term skips its remaining alternatives, while a failed
-// completed term rejects the rule. The target comes from the last successful
-// table lookup that was evaluated.
+// A block that holds skips its remaining patterns and a pattern that matched
+// its remaining members, as the kernel skips the rest of an or-block and of a
+// list. The target comes from the last successful table lookup evaluated.
 func (m *VM[V4, V6]) matchOptions(
 	options []ipfw.Opt,
 	ctx *Context,
 	pkt Packet,
 	fields *packetFields,
 ) (bool, int) {
-	term, target := true, noTarget
-	for idx := 0; idx < len(options); idx++ {
-		opt := &options[idx]
-		if opt.Or && term {
-			continue
-		}
-		if !opt.Or && !term {
-			return false, noTarget
-		}
-		raw, found := m.matchOption(opt, ctx, pkt, fields)
-		if found != noTarget ||
-			(raw && opt.Kind == ipfw.OptVia && opt.Via.Kind == ipfw.ViaTable) {
-			target = found
-		}
-		portList := opt.Kind == ipfw.OptSourcePort || opt.Kind == ipfw.OptDestinationPort
-		for portList && idx+1 < len(options) {
-			next := &options[idx+1]
-			if !next.PortOr || next.Kind != opt.Kind {
+	target := noTarget
+	for idx := 0; idx < len(options); {
+		first := &options[idx]
+		matched, found := m.matchOption(first, ctx, pkt, fields)
+		target = lookupTarget(first, matched, found, target)
+		// The members after the first are a list, most often of ports, which
+		// are compared in place as the kernel scans the ports of one
+		// instruction, without a call per member.
+		more := false
+		end := idx + 1
+		for ; end < len(options) && options[end].Block == first.Block; end++ {
+			opt := &options[end]
+			if opt.Pattern != first.Pattern {
+				more = true
 				break
 			}
-			idx++
-			if raw {
-				continue
+			switch {
+			case matched:
+			case opt.Kind == ipfw.OptSourcePort:
+				fields.ReadPorts(pkt)
+				matched = fields.HasSourcePort && inRange(fields.SourcePort, opt.Ports)
+			case opt.Kind == ipfw.OptDestinationPort:
+				fields.ReadPorts(pkt)
+				matched = fields.HasDestinationPort && inRange(fields.DestinationPort, opt.Ports)
+			default:
+				matched, found = m.matchOption(opt, ctx, pkt, fields)
+				target = lookupTarget(opt, matched, found, target)
 			}
-			raw, _ = m.matchOption(next, ctx, pkt, fields)
 		}
-		hit := raw != opt.Neg
-		if opt.Or {
-			term = term || hit
-			continue
+		if matched != first.Neg {
+			for more && end < len(options) && options[end].Block == first.Block {
+				end++
+			}
+		} else if !more {
+			return false, noTarget
 		}
-		term = hit
+		idx = end
 	}
-	return term, target
+	return true, target
+}
+
+// lookupTarget is the tablearg target after the option was evaluated: the
+// one it found, or none when it is a table lookup that matched without one,
+// so that the last successful lookup decides.
+func lookupTarget(opt *ipfw.Opt, matched bool, found, target int) int {
+	if found != noTarget || matched && opt.Kind == ipfw.OptVia && opt.Via.Kind == ipfw.ViaTable {
+		return found
+	}
+	return target
 }
 
 // matchOption reports whether the option, its negation aside, holds for

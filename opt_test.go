@@ -71,15 +71,9 @@ func notOpt(opt ipfw.Opt) ipfw.Opt {
 	return opt
 }
 
-// orOpt is the option joined to the previous one.
-func orOpt(opt ipfw.Opt) ipfw.Opt {
-	opt.Or = true
-	return opt
-}
-
-// portOr joins the port range to the previous range of the same option.
-func portOr(opt ipfw.Opt) ipfw.Opt {
-	opt.PortOr = true
+// at is the option placed in the or-block and the match pattern.
+func at(block, pattern uint16, opt ipfw.Opt) ipfw.Opt {
+	opt.Block, opt.Pattern = block, pattern
 	return opt
 }
 
@@ -162,11 +156,11 @@ func Test_ParseOptions_Table(t *testing.T) {
 			n: 84,
 			options: []ipfw.Opt{
 				notOpt(established),
-				{Or: true, Kind: ipfw.OptFrag},
-				notOpt(tcpFlags(ipfw.TCPSyn, ipfw.TCPAck)),
-				{Kind: ipfw.OptIn},
-				orOpt(notOpt(icmp6Types(128, 129))),
-				{Kind: ipfw.OptOut},
+				{Pattern: 1, Kind: ipfw.OptFrag},
+				at(1, 0, notOpt(tcpFlags(ipfw.TCPSyn, ipfw.TCPAck))),
+				{Block: 2, Kind: ipfw.OptIn},
+				at(2, 1, notOpt(icmp6Types(128, 129))),
+				{Block: 3, Kind: ipfw.OptOut},
 			},
 		},
 		{
@@ -179,7 +173,7 @@ func Test_ParseOptions_Table(t *testing.T) {
 			name:    "fragment alias before a comment",
 			input:   "fragment // c",
 			n:       13,
-			options: []ipfw.Opt{{Kind: ipfw.OptFrag}, comment(" c")},
+			options: []ipfw.Opt{{Kind: ipfw.OptFrag}, at(1, 0, comment(" c"))},
 		},
 		{
 			name:    "tcpflgs alias before a newline",
@@ -247,7 +241,7 @@ func Test_ParseOptions_Table(t *testing.T) {
 			name:    "comment after an option",
 			input:   "established // c",
 			n:       16,
-			options: []ipfw.Opt{established, comment(" c")},
+			options: []ipfw.Opt{established, at(1, 0, comment(" c"))},
 		},
 		{
 			name:    "comment takes the options after it",
@@ -286,7 +280,7 @@ func Test_ParseOptions_Table(t *testing.T) {
 			err:   ipfw.ErrExpectedOr,
 			options: []ipfw.Opt{
 				{Kind: ipfw.OptIn},
-				{Or: true, Kind: ipfw.OptComment, Text: " c }"},
+				{Pattern: 1, Kind: ipfw.OptComment, Text: " c }"},
 			},
 		},
 		{name: "lone slash", input: "/ c", n: 0, err: ipfw.ErrUnknownOption},
@@ -300,7 +294,7 @@ func Test_ParseOptions_Table(t *testing.T) {
 			name:    "two options",
 			input:   "established established\n",
 			n:       23,
-			options: []ipfw.Opt{established, established},
+			options: []ipfw.Opt{established, at(1, 0, established)},
 		},
 		{
 			name:    "keyword matches by prefix",
@@ -345,7 +339,7 @@ func Test_ParseOptions_Table(t *testing.T) {
 			name:    "negation applies to its option only",
 			input:   "not established established",
 			n:       27,
-			options: []ipfw.Opt{{Neg: true, Kind: ipfw.OptEstablished}, established},
+			options: []ipfw.Opt{{Neg: true, Kind: ipfw.OptEstablished}, at(1, 0, established)},
 		},
 		{name: "negated unknown option", input: "not foo", n: 4, err: ipfw.ErrUnknownOption},
 		{name: "not glued to a keyword", input: "notestablished", n: 0, err: ipfw.ErrUnknownOption},
@@ -355,19 +349,19 @@ func Test_ParseOptions_Table(t *testing.T) {
 			name:    "group of two",
 			input:   "{ established or established }",
 			n:       30,
-			options: []ipfw.Opt{established, {Or: true, Kind: ipfw.OptEstablished}},
+			options: []ipfw.Opt{established, {Pattern: 1, Kind: ipfw.OptEstablished}},
 		},
 		{
 			name:    "group of two with the pipe",
 			input:   "{ established | established }",
 			n:       29,
-			options: []ipfw.Opt{established, {Or: true, Kind: ipfw.OptEstablished}},
+			options: []ipfw.Opt{established, {Pattern: 1, Kind: ipfw.OptEstablished}},
 		},
 		{
 			name:    "tight group",
 			input:   "{established or established}",
 			n:       28,
-			options: []ipfw.Opt{established, {Or: true, Kind: ipfw.OptEstablished}},
+			options: []ipfw.Opt{established, {Pattern: 1, Kind: ipfw.OptEstablished}},
 		},
 		{
 			name:  "group then a plain option",
@@ -375,8 +369,8 @@ func Test_ParseOptions_Table(t *testing.T) {
 			n:     46,
 			options: []ipfw.Opt{
 				{Neg: true, Kind: ipfw.OptEstablished},
-				{Or: true, Kind: ipfw.OptEstablished},
-				established,
+				{Pattern: 1, Kind: ipfw.OptEstablished},
+				at(1, 0, established),
 			},
 		},
 		{
@@ -410,19 +404,19 @@ func Test_ParseOptions_Table(t *testing.T) {
 			name:    "in then out",
 			input:   "in out",
 			n:       6,
-			options: []ipfw.Opt{{Kind: ipfw.OptIn}, {Kind: ipfw.OptOut}},
+			options: []ipfw.Opt{{Kind: ipfw.OptIn}, {Block: 1, Kind: ipfw.OptOut}},
 		},
 		{
 			name:    "group of in and out",
 			input:   "{ in or out }",
 			n:       13,
-			options: []ipfw.Opt{{Kind: ipfw.OptIn}, {Or: true, Kind: ipfw.OptOut}},
+			options: []ipfw.Opt{{Kind: ipfw.OptIn}, {Pattern: 1, Kind: ipfw.OptOut}},
 		},
 		{
 			name:    "group with trailing space leaves CRLF untouched",
 			input:   "{ in or out } \r\nfrag",
 			n:       14,
-			options: []ipfw.Opt{{Kind: ipfw.OptIn}, {Or: true, Kind: ipfw.OptOut}},
+			options: []ipfw.Opt{{Kind: ipfw.OptIn}, {Pattern: 1, Kind: ipfw.OptOut}},
 		},
 		{
 			name:    "frag",
@@ -452,7 +446,7 @@ func Test_ParseOptions_Table(t *testing.T) {
 			name:    "antispoof then in",
 			input:   "antispoof in",
 			n:       12,
-			options: []ipfw.Opt{{Kind: ipfw.OptAntiSpoof}, {Kind: ipfw.OptIn}},
+			options: []ipfw.Opt{{Kind: ipfw.OptAntiSpoof}, {Block: 1, Kind: ipfw.OptIn}},
 		},
 		{
 			name:    "destination port option",
@@ -467,22 +461,20 @@ func Test_ParseOptions_Table(t *testing.T) {
 			options: []ipfw.Opt{srcPort(179)},
 		},
 		{
-			name:    "second port keeps OR and marks list continuation",
+			name:    "second port shares the pattern of the list",
 			input:   "dst-port 22,80",
 			n:       14,
-			options: []ipfw.Opt{dstPort(22), portOr(orOpt(dstPort(80)))},
+			options: []ipfw.Opt{dstPort(22), dstPort(80)},
 		},
 		{
-			name:  "second range keeps OR and marks list continuation",
+			name:  "second range shares the pattern of the list",
 			input: "dst-port 22,1024-65535",
 			n:     22,
 			options: []ipfw.Opt{
 				dstPort(22),
 				{
-					Or:     true,
-					PortOr: true,
-					Kind:   ipfw.OptDestinationPort,
-					Ports:  ipfw.PortRange{Lo: ipfw.Port{Number: 1024}, Hi: ipfw.Port{Number: 65535}},
+					Kind:  ipfw.OptDestinationPort,
+					Ports: ipfw.PortRange{Lo: ipfw.Port{Number: 1024}, Hi: ipfw.Port{Number: 65535}},
 				},
 			},
 		},
@@ -490,16 +482,16 @@ func Test_ParseOptions_Table(t *testing.T) {
 			name:    "negated port list at top level is atomic",
 			input:   "not dst-port 22,80",
 			n:       18,
-			options: []ipfw.Opt{notOpt(dstPort(22)), portOr(notOpt(dstPort(80)))},
+			options: []ipfw.Opt{notOpt(dstPort(22)), notOpt(dstPort(80))},
 		},
 		{
-			name:  "group-leading list separates continuation from next alternative",
+			name:  "group-leading list shares one pattern before the next alternative",
 			input: "{ dst-port 22,80 or in }",
 			n:     24,
 			options: []ipfw.Opt{
 				dstPort(22),
-				portOr(orOpt(dstPort(80))),
-				{Or: true, Kind: ipfw.OptIn},
+				dstPort(80),
+				{Pattern: 1, Kind: ipfw.OptIn},
 			},
 		},
 		{
@@ -508,18 +500,18 @@ func Test_ParseOptions_Table(t *testing.T) {
 			n:     28,
 			options: []ipfw.Opt{
 				notOpt(dstPort(22)),
-				portOr(notOpt(orOpt(dstPort(80)))),
-				{Or: true, Kind: ipfw.OptIn},
+				notOpt(dstPort(80)),
+				{Pattern: 1, Kind: ipfw.OptIn},
 			},
 		},
 		{
-			name:  "group-trailing list separates outer OR from continuation",
+			name:  "group-trailing list shares the pattern after the first alternative",
 			input: "{ in or dst-port 22,80 }",
 			n:     24,
 			options: []ipfw.Opt{
 				{Kind: ipfw.OptIn},
-				orOpt(dstPort(22)),
-				portOr(orOpt(dstPort(80))),
+				at(0, 1, dstPort(22)),
+				at(0, 1, dstPort(80)),
 			},
 		},
 		{
@@ -528,8 +520,8 @@ func Test_ParseOptions_Table(t *testing.T) {
 			n:     28,
 			options: []ipfw.Opt{
 				{Kind: ipfw.OptIn},
-				notOpt(orOpt(dstPort(22))),
-				portOr(notOpt(orOpt(dstPort(80)))),
+				at(0, 1, notOpt(dstPort(22))),
+				at(0, 1, notOpt(dstPort(80))),
 			},
 		},
 		{
@@ -538,8 +530,38 @@ func Test_ParseOptions_Table(t *testing.T) {
 			n:     37,
 			options: []ipfw.Opt{
 				notOpt(dstPort(22)),
-				portOr(notOpt(orOpt(dstPort(80)))),
-				orOpt(dstPort(81)),
+				notOpt(dstPort(80)),
+				at(0, 1, dstPort(81)),
+			},
+		},
+		{
+			name:  "blocks count up and patterns restart in every block",
+			input: "in { out or frag } not established { via eth0 or dst-port 22,80 }",
+			n:     65,
+			options: []ipfw.Opt{
+				{Kind: ipfw.OptIn},
+				{Block: 1, Kind: ipfw.OptOut},
+				{Block: 1, Pattern: 1, Kind: ipfw.OptFrag},
+				{Neg: true, Block: 2, Kind: ipfw.OptEstablished},
+				at(3, 0, viaExact("eth0")),
+				at(3, 1, dstPort(22)),
+				at(3, 1, dstPort(80)),
+			},
+		},
+		{
+			name:  "lists in separate blocks keep their own patterns",
+			input: "dst-port 22,80 not src-port 1024-65535,8080",
+			n:     43,
+			options: []ipfw.Opt{
+				dstPort(22),
+				dstPort(80),
+				{
+					Neg:   true,
+					Block: 1,
+					Kind:  ipfw.OptSourcePort,
+					Ports: ipfw.PortRange{Lo: ipfw.Port{Number: 1024}, Hi: ipfw.Port{Number: 65535}},
+				},
+				at(1, 0, notOpt(srcPort(8080))),
 			},
 		},
 		{
@@ -570,7 +592,7 @@ func Test_ParseOptions_Table(t *testing.T) {
 			name:    "port option with a spaced list",
 			input:   "dst-port 22, 80",
 			n:       15,
-			options: []ipfw.Opt{dstPort(22), portOr(orOpt(dstPort(80)))},
+			options: []ipfw.Opt{dstPort(22), dstPort(80)},
 		},
 		{
 			name:    "proto by name",
@@ -618,14 +640,14 @@ func Test_ParseOptions_Table(t *testing.T) {
 			name:    "keep-state then in",
 			input:   "keep-state in",
 			n:       13,
-			options: []ipfw.Opt{{Kind: ipfw.OptKeepState}, {Kind: ipfw.OptIn}},
+			options: []ipfw.Opt{{Kind: ipfw.OptKeepState}, {Block: 1, Kind: ipfw.OptIn}},
 		},
 		{
 			name:    "duplicate keep-state",
 			input:   "in keep-state keep-state out",
 			n:       14,
 			err:     ipfw.ErrDuplicateDynamicState,
-			options: []ipfw.Opt{{Kind: ipfw.OptIn}, {Kind: ipfw.OptKeepState}},
+			options: []ipfw.Opt{{Kind: ipfw.OptIn}, {Block: 1, Kind: ipfw.OptKeepState}},
 		},
 		{
 			name:  "keep-state first in a group",
@@ -669,7 +691,7 @@ func Test_ParseOptions_Table(t *testing.T) {
 			name:    "icmptypes numeric range followed by an option",
 			input:   "icmptypes 0,7,31 in",
 			n:       19,
-			options: []ipfw.Opt{icmpTypes(0, 7, 31), {Kind: ipfw.OptIn}},
+			options: []ipfw.Opt{icmpTypes(0, 7, 31), {Block: 1, Kind: ipfw.OptIn}},
 		},
 		{
 			name:  "icmptypes at the uint8 maximum",
@@ -730,7 +752,7 @@ func Test_ParseOptions_Table(t *testing.T) {
 			name:    "icmp6types numeric range followed by an option",
 			input:   "icmp6types 0,5,150,201 in",
 			n:       25,
-			options: []ipfw.Opt{icmp6Types(0, 5, 150, 201), {Kind: ipfw.OptIn}},
+			options: []ipfw.Opt{icmp6Types(0, 5, 150, 201), {Block: 1, Kind: ipfw.OptIn}},
 		},
 		{
 			name:  "icmp6types at the uint8 maximum",
@@ -861,7 +883,7 @@ func Test_ParseOptions_Table(t *testing.T) {
 			name:    "via then in",
 			input:   "via eth0 in",
 			n:       11,
-			options: []ipfw.Opt{viaExact("eth0"), {Kind: ipfw.OptIn}},
+			options: []ipfw.Opt{viaExact("eth0"), {Block: 1, Kind: ipfw.OptIn}},
 		},
 		{
 			name:  "group of via masks",
@@ -869,8 +891,8 @@ func Test_ParseOptions_Table(t *testing.T) {
 			n:     48,
 			options: []ipfw.Opt{
 				viaMask("vlan1??"),
-				orOpt(viaMask("vlan2???")),
-				orOpt(viaMask("eth??3???")),
+				at(0, 1, viaMask("vlan2???")),
+				at(0, 2, viaMask("eth??3???")),
 			},
 		},
 		{
@@ -925,7 +947,7 @@ func Test_ParseOptions_Table(t *testing.T) {
 			name:    "via table then in",
 			input:   "via table(t) in",
 			n:       15,
-			options: []ipfw.Opt{viaTable("t", ""), {Kind: ipfw.OptIn}},
+			options: []ipfw.Opt{viaTable("t", ""), {Block: 1, Kind: ipfw.OptIn}},
 		},
 		{
 			name:  "via table with an empty name",

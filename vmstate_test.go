@@ -195,8 +195,8 @@ func Test_Resolver_CompatibilityNames(t *testing.T) {
 				Neg: true, Kind: ipfw.OptDestinationPort,
 				Ports: ipfw.PortRange{Lo: ipfw.Port{Name: "ssh"}, Hi: ipfw.Port{Name: "ssh"}},
 			},
-			{Kind: ipfw.OptProto, Proto: ipfw.Proto{Name: "tcp"}},
-			{Or: true, Kind: ipfw.OptIn},
+			{Block: 1, Kind: ipfw.OptProto, Proto: ipfw.Proto{Name: "tcp"}},
+			{Block: 1, Pattern: 1, Kind: ipfw.OptIn},
 		},
 	}, raw)
 	next(t, parser, eof)
@@ -220,8 +220,8 @@ func Test_Resolver_CompatibilityNames(t *testing.T) {
 				Neg: true, Kind: ipfw.OptDestinationPort,
 				Ports: ipfw.PortRange{Lo: ipfw.Port{Number: 22}, Hi: ipfw.Port{Number: 22}},
 			},
-			{Kind: ipfw.OptProto, Proto: ipfw.Proto{Number: 6}},
-			{Or: true, Kind: ipfw.OptIn},
+			{Block: 1, Kind: ipfw.OptProto, Proto: ipfw.Proto{Number: 6}},
+			{Block: 1, Pattern: 1, Kind: ipfw.OptIn},
 		},
 	}, state)
 	next(t, parser, eof)
@@ -597,10 +597,8 @@ func Test_Resolver_Names(t *testing.T) {
 						Ports: ipfw.PortRange{Lo: ipfw.Port{Number: 22}, Hi: ipfw.Port{Number: 22}},
 					},
 					{
-						Or:     true,
-						PortOr: true,
-						Kind:   ipfw.OptDestinationPort,
-						Ports:  ipfw.PortRange{Lo: ipfw.Port{Number: 53}, Hi: ipfw.Port{Number: 70}},
+						Kind:  ipfw.OptDestinationPort,
+						Ports: ipfw.PortRange{Lo: ipfw.Port{Number: 53}, Hi: ipfw.Port{Number: 70}},
 					},
 				},
 			},

@@ -244,6 +244,7 @@ func (m *Parser) parseInstruction(s string, state State, instruction *Instructio
 			instruction.Num, s = num, afterWS
 		}
 	}
+	var ctx optionContext
 	if rest, ok := prefix(s, "//"); ok && (rest == "" || isASCIISpace(rest[0])) {
 		instruction.Action.Kind = ActionCount
 		// An omitted body counts every packet, including both address families.
@@ -253,7 +254,7 @@ func (m *Parser) parseInstruction(s string, state State, instruction *Instructio
 		if err := state.OnDestinationTarget(Target{Kind: TargetAny}); err != nil {
 			return input, failFrom(err, s)
 		}
-		buf, err := parseCommentOption(s, state, false, topLevel)
+		buf, err := parseCommentOption(s, state, false, ctx.Place(false))
 		if err.Failed() {
 			return input, err
 		}
@@ -276,7 +277,7 @@ func (m *Parser) parseInstruction(s string, state State, instruction *Instructio
 		}
 	}
 	if instruction.Action.Kind == ActionCheckState {
-		if rest, err = parseTrailingComment(rest, state); err.Failed() {
+		if rest, err = parseTrailingComment(&ctx, rest, state); err.Failed() {
 			return input, err
 		}
 		return rest, fail{}
@@ -285,11 +286,11 @@ func (m *Parser) parseInstruction(s string, state State, instruction *Instructio
 	if !ok {
 		return input, fail{Kind: ErrExpectedWhitespace, At: rest}
 	}
-	rest, err = m.parseRuleBody(rest, state)
+	rest, err = m.parseRuleBody(&ctx, rest, state)
 	if err.Failed() {
 		return input, err
 	}
-	if rest, err = parseTrailingComment(rest, state); err.Failed() {
+	if rest, err = parseTrailingComment(&ctx, rest, state); err.Failed() {
 		return input, err
 	}
 	return rest, fail{}
@@ -411,8 +412,9 @@ const (
 	destinationSide
 )
 
-// parseRuleBody chooses the grammar by the proto checker when there is one.
-func (m *Parser) parseRuleBody(s string, state State) (string, fail) {
+// parseRuleBody chooses the grammar by the proto checker when there is one,
+// numbering the or-blocks of the options on from the context.
+func (m *Parser) parseRuleBody(ctx *optionContext, s string, state State) (string, fail) {
 	if s == "" || s[0] == '\n' || hasPrefix(s, "\r\n") {
 		return s, fail{Kind: ErrExpectedEitherIPOrProto, At: s}
 	}
@@ -429,7 +431,7 @@ func (m *Parser) parseRuleBody(s string, state State) (string, fail) {
 		}
 	}
 	if legacy {
-		return m.parseBodyLegacy(s, state)
+		return m.parseBodyLegacy(ctx, s, state)
 	}
 	if err := state.OnSourceTarget(Target{Kind: TargetAny}); err != nil {
 		return s, failFrom(err, s)
@@ -437,7 +439,7 @@ func (m *Parser) parseRuleBody(s string, state State) (string, fail) {
 	if err := state.OnDestinationTarget(Target{Kind: TargetAny}); err != nil {
 		return s, failFrom(err, s)
 	}
-	return parseOptions(s, state, m.opts.OptionHook)
+	return parseOptions(ctx, s, state, m.opts.OptionHook)
 }
 
 // startsProtocol recognizes only the first group member without emitting tokens.
@@ -455,7 +457,7 @@ func startsProtocol(s string, checker ProtoChecker) bool {
 }
 
 // parseBodyLegacy parses `PROTO from SRC [PORT] to DST [PORT] [OPTIONS]`.
-func (m *Parser) parseBodyLegacy(s string, state State) (string, fail) {
+func (m *Parser) parseBodyLegacy(ctx *optionContext, s string, state State) (string, fail) {
 	rest, err := parseBodyHeader(s, state)
 	if err.Failed() {
 		return s, err
@@ -471,12 +473,12 @@ func (m *Parser) parseBodyLegacy(s string, state State) (string, fail) {
 	if buf, ok := ws1(rest); ok {
 		// A comment is never a port, and trying it would scan the rest of the line twice.
 		if hasPrefix(buf, "//") {
-			return parseOptions(buf, state, m.opts.OptionHook)
+			return parseOptions(ctx, buf, state, m.opts.OptionHook)
 		}
-		var ctx optionContext
-		_, err = parseOptionGroup(&ctx, buf, DiscardState{}, m.opts.OptionHook)
+		var probe optionContext
+		_, err = parseOptionGroup(&probe, buf, DiscardState{}, m.opts.OptionHook)
 		if !err.Failed() || err.Kind != ErrUnknownOption {
-			return parseOptions(buf, state, m.opts.OptionHook)
+			return parseOptions(ctx, buf, state, m.opts.OptionHook)
 		}
 		if buf, err = parsePorts(buf, state, destinationSide); !err.Failed() {
 			rest = buf
@@ -485,7 +487,7 @@ func (m *Parser) parseBodyLegacy(s string, state State) (string, fail) {
 		}
 	}
 	if buf, ok := ws1(rest); ok {
-		if rest, err = parseOptions(buf, state, m.opts.OptionHook); err.Failed() {
+		if rest, err = parseOptions(ctx, buf, state, m.opts.OptionHook); err.Failed() {
 			return s, err
 		}
 	}
@@ -554,12 +556,8 @@ func parseBodyHeader(s string, state State) (string, fail) {
 // startsOptions recognizes the first element even when a later group member is unknown.
 func startsOptions(s string, hook OptionHook) bool {
 	opened, rest := openGroup(s, trailingPosition)
-	place := topLevel
-	if opened.Braced {
-		place = groupFirst
-	}
 	var context optionContext
-	_, err := parseOption(&context, rest, DiscardState{}, hook, place)
+	_, err := parseOption(&context, rest, DiscardState{}, hook, context.Place(opened.Braced))
 	return err.Kind != ErrUnknownOption
 }
 
@@ -567,13 +565,18 @@ func startsOptions(s string, hook OptionHook) bool {
 // whitespace an option list starts with, leaving any other input untouched.
 //
 // Such a comment follows check-state, whose rule has no body, or sits right
-// against the last token of a body.
-func parseTrailingComment(s string, state State) (string, fail) {
+// against the last token of a body, and is the next or-block of the context.
+func parseTrailingComment(ctx *optionContext, s string, state State) (string, fail) {
 	buf := ws0(s)
 	if !hasPrefix(buf, "//") {
 		return s, fail{}
 	}
-	return parseCommentOption(buf, state, false, topLevel)
+	rest, err := parseCommentOption(buf, state, false, ctx.Place(false))
+	if err.Failed() {
+		return s, err
+	}
+	ctx.EndBlock()
+	return rest, fail{}
 }
 
 // parseTable parses `NAME create|add …` after `table `.

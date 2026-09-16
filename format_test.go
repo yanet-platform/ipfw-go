@@ -590,7 +590,7 @@ func Test_Formatter_AppendRecord_Options(t *testing.T) {
 		},
 		{
 			"add pass tcp from any to any { not dst-port 22,80 }",
-			"add pass tcp from any to any { not dst-port 22,80 }",
+			"add pass tcp from any to any not dst-port 22,80",
 		},
 		{
 			"add pass tcp from any to any { in or dst-port 22,80 }",
@@ -814,8 +814,8 @@ func Test_Formatter_Sections_Reparses(t *testing.T) {
 		ipfw.ReduceState{
 			Options: []ipfw.Opt{
 				{Kind: ipfw.OptDestinationPort, Ports: portRangeNumber(22)},
-				{Or: true, Kind: ipfw.OptDestinationPort, Ports: portRangeNumber(80)},
-				{Kind: ipfw.OptIn},
+				{Pattern: 1, Kind: ipfw.OptDestinationPort, Ports: portRangeNumber(80)},
+				{Block: 1, Kind: ipfw.OptIn},
 			},
 		},
 	)
@@ -1241,77 +1241,77 @@ func Test_Formatter_AppendRecord_InvalidValues(t *testing.T) {
 			err: ipfw.ErrInvalidName,
 		},
 		{
-			name: "option or-continuation without a predecessor",
+			name: "option alternative without a predecessor",
 			mutate: func(record *ipfw.ParsedRecord) {
-				record.Body.Options = []ipfw.Opt{{Or: true, Kind: ipfw.OptIn}}
+				record.Body.Options = []ipfw.Opt{{Pattern: 1, Kind: ipfw.OptIn}}
 			},
 			err: ipfw.ErrBrokenOrChain,
 		},
 		{
-			name: "port-list continuation without a predecessor",
+			name: "option list starting past the first or-block",
 			mutate: func(record *ipfw.ParsedRecord) {
 				record.Body.Options = []ipfw.Opt{
-					{PortOr: true, Kind: ipfw.OptDestinationPort, Ports: portRangeNumber(22)},
+					{Block: 1, Kind: ipfw.OptDestinationPort, Ports: portRangeNumber(22)},
 				}
 			},
 			err: ipfw.ErrBrokenOrChain,
 		},
 		{
-			name: "port-list continuation with a different kind",
+			name: "port-list member of a different kind",
 			mutate: func(record *ipfw.ParsedRecord) {
 				record.Body.Options = []ipfw.Opt{
 					{Kind: ipfw.OptDestinationPort, Ports: portRangeNumber(22)},
 					{
-						Or:     true,
-						PortOr: true,
-						Kind:   ipfw.OptSourcePort,
-						Ports:  portRangeNumber(80),
+						Kind:  ipfw.OptSourcePort,
+						Ports: portRangeNumber(80),
 					},
 				}
 			},
 			err: ipfw.ErrBrokenOrChain,
 		},
 		{
-			name: "port-list continuation with different negation",
+			name: "port-list member with different negation",
 			mutate: func(record *ipfw.ParsedRecord) {
 				record.Body.Options = []ipfw.Opt{
 					{Kind: ipfw.OptDestinationPort, Ports: portRangeNumber(22)},
 					{
-						Neg:    true,
-						Or:     true,
-						PortOr: true,
-						Kind:   ipfw.OptDestinationPort,
-						Ports:  portRangeNumber(80),
+						Neg:   true,
+						Kind:  ipfw.OptDestinationPort,
+						Ports: portRangeNumber(80),
 					},
+				}
+			},
+			err: ipfw.ErrInconsistentNegation,
+		},
+		{
+			name: "or-block numbers skipping one",
+			mutate: func(record *ipfw.ParsedRecord) {
+				record.Body.Options = []ipfw.Opt{
+					{Kind: ipfw.OptIn},
+					{Block: 2, Kind: ipfw.OptEstablished},
 				}
 			},
 			err: ipfw.ErrBrokenOrChain,
 		},
 		{
-			name: "port-list continuation without its expanded or flag",
+			name: "match pattern numbers skipping one",
 			mutate: func(record *ipfw.ParsedRecord) {
 				record.Body.Options = []ipfw.Opt{
-					{Kind: ipfw.OptDestinationPort, Ports: portRangeNumber(22)},
-					{
-						PortOr: true,
-						Kind:   ipfw.OptDestinationPort,
-						Ports:  portRangeNumber(80),
-					},
+					{Kind: ipfw.OptIn},
+					{Pattern: 2, Kind: ipfw.OptOut},
 				}
 			},
 			err: ipfw.ErrBrokenOrChain,
 		},
 		{
-			name: "port-list continuation with a stray argument",
+			name: "port-list member with a stray argument",
 			mutate: func(record *ipfw.ParsedRecord) {
 				record.Body.Options = []ipfw.Opt{
 					{Kind: ipfw.OptDestinationPort, Ports: portRangeNumber(22)},
 					{
-						Or:     true,
-						PortOr: true,
-						Kind:   ipfw.OptDestinationPort,
-						Text:   "x",
-						Ports:  portRangeNumber(80),
+						Kind:  ipfw.OptDestinationPort,
+						Text:  "x",
+						Ports: portRangeNumber(80),
 					},
 				}
 			},
@@ -1322,7 +1322,7 @@ func Test_Formatter_AppendRecord_InvalidValues(t *testing.T) {
 			mutate: func(record *ipfw.ParsedRecord) {
 				record.Body.Options = []ipfw.Opt{
 					{Kind: ipfw.OptIn},
-					{Or: true, Kind: ipfw.OptKeepState},
+					{Pattern: 1, Kind: ipfw.OptKeepState},
 				}
 			},
 			err: ipfw.ErrDynamicStateInGroup,
@@ -1332,15 +1332,18 @@ func Test_Formatter_AppendRecord_InvalidValues(t *testing.T) {
 			mutate: func(record *ipfw.ParsedRecord) {
 				record.Body.Options = []ipfw.Opt{
 					{Kind: ipfw.OptKeepState},
-					{Kind: ipfw.OptKeepState, Text: "flow"},
+					{Block: 1, Kind: ipfw.OptKeepState, Text: "flow"},
 				}
 			},
 			err: ipfw.ErrDuplicateDynamicState,
 		},
 		{
-			name: "comment option as a port continuation",
+			name: "comment option as a list member",
 			mutate: func(record *ipfw.ParsedRecord) {
-				record.Body.Options = []ipfw.Opt{{PortOr: true, Kind: ipfw.OptComment, Text: " c"}}
+				record.Body.Options = []ipfw.Opt{
+					{Kind: ipfw.OptIn},
+					{Kind: ipfw.OptComment, Text: " c"},
+				}
 			},
 			err: ipfw.ErrBrokenOrChain,
 		},
@@ -1714,7 +1717,7 @@ func Test_Formatter_CustomOptAppender(t *testing.T) {
 
 	record.Body.Options = []ipfw.Opt{
 		{Neg: true, Kind: ipfw.OptCustom, Text: "myopt", Arg: "42"},
-		{Or: true, Kind: ipfw.OptCustom, Text: "myopt", Arg: "7"},
+		{Pattern: 1, Kind: ipfw.OptCustom, Text: "myopt", Arg: "7"},
 	}
 	text, err = ipfw.NewFormatter(ipfw.WithCustomOptAppender(appendCustom)).Record(record)
 	require.NoError(t, err)
@@ -1815,14 +1818,14 @@ func Test_Formatter_CustomOptBareNotPlacement(t *testing.T) {
 			name: "before another option",
 			options: []ipfw.Opt{
 				{Kind: ipfw.OptCustom, Text: "not"},
-				{Kind: ipfw.OptIn},
+				{Block: 1, Kind: ipfw.OptIn},
 			},
 		},
 		{
 			name: "at the end of a group",
 			options: []ipfw.Opt{
 				{Kind: ipfw.OptIn},
-				{Or: true, Kind: ipfw.OptCustom, Text: "not"},
+				{Pattern: 1, Kind: ipfw.OptCustom, Text: "not"},
 			},
 		},
 	}
@@ -2352,10 +2355,8 @@ func validSeedRecord(seed string) (ipfw.ParsedRecord, bool) {
 		record.Body.Options = []ipfw.Opt{
 			{Kind: ipfw.OptDestinationPort, Ports: portRangeNumber(22)},
 			{
-				Or:     true,
-				PortOr: true,
-				Kind:   ipfw.OptDestinationPort,
-				Ports:  portRangeNumber(80),
+				Kind:  ipfw.OptDestinationPort,
+				Ports: portRangeNumber(80),
 			},
 		}
 	case "valid/tcpflags-overlap":
@@ -2404,11 +2405,12 @@ func seedPortMatch(rng *seedRNG) ipfw.PortMatch {
 // seedOpt draws one pseudo-random option.
 func seedOpt(rng *seedRNG) ipfw.Opt {
 	opt := ipfw.Opt{
-		Neg:  rng.bool(),
-		Or:   rng.bool(),
-		Kind: ipfw.OptKind(rng.byte() % 18),
-		Text: rng.maybeText(),
-		Arg:  rng.maybeText(),
+		Neg:     rng.bool(),
+		Block:   uint16(rng.byte() % 3),
+		Pattern: uint16(rng.byte() % 3),
+		Kind:    ipfw.OptKind(rng.byte() % 18),
+		Text:    rng.maybeText(),
+		Arg:     rng.maybeText(),
 	}
 	opt.Ports = ipfw.PortRange{
 		Lo: ipfw.Port{Name: rng.maybeText(), Number: uint16(rng.byte())},

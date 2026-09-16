@@ -317,7 +317,7 @@ func isCommentOnlyInstruction(instruction Instruction, body ReduceState) bool {
 }
 
 func isPlainComment(opt Opt) bool {
-	return opt.Kind == OptComment && !opt.Neg && !opt.Or && !opt.PortOr
+	return opt.Kind == OptComment && !opt.Neg && opt.Block == 0 && opt.Pattern == 0
 }
 
 func validateCommentOptionText(comment string) error {
@@ -777,7 +777,8 @@ func isPortNameText(text string) bool {
 	return text != ""
 }
 
-// appendOptions writes option runs with their original grouping semantics.
+// appendOptions writes the or-blocks of the options, a block of several match
+// patterns braced and the members of a list joined by commas.
 //
 // A leading native custom option is braced against header and legacy grammar
 // probes. Exact `not` stays bare because braces would turn it into negation.
@@ -787,16 +788,14 @@ func appendOptions(
 	custom CustomOptAppender,
 	protectFirstCustom bool,
 ) ([]byte, error) {
-	if len(opts) > 0 && opts[0].Or {
-		return dst, ErrBrokenOrChain
+	if err := validateOptionPlaces(opts); err != nil {
+		return dst, err
 	}
 	commentIndex := len(opts)
 	if commentIndex > 0 {
-		comment := opts[commentIndex-1]
-		if comment.Kind == OptComment && !comment.Or {
-			if comment.PortOr {
-				return dst, ErrBrokenOrChain
-			}
+		comment := &opts[commentIndex-1]
+		if comment.Kind == OptComment &&
+			(commentIndex == 1 || opts[commentIndex-2].Block != comment.Block) {
 			commentIndex--
 		}
 	}
@@ -804,27 +803,23 @@ func appendOptions(
 	if err := validateStateOptions(options); err != nil {
 		return dst, err
 	}
-	open := false
 	lastCustomIsNot := false
 	for idx := 0; idx < len(options); {
 		opt := options[idx]
-		if opt.PortOr {
-			return dst, ErrBrokenOrChain
-		}
-		next := nextOptionHead(options, idx)
-		singlePortGroup := idx+1 < next && opt.Neg && options[idx+1].Or
-		inGroup := opt.Or || next < len(options) && options[next].Or || singlePortGroup
+		next := nextOptionPattern(options, idx)
+		lastInBlock := next == len(options) || options[next].Block != opt.Block
+		inGroup := opt.Pattern > 0 || !lastInBlock
 		customSyntax := opt.Kind == OptCustom || opt.Kind == OptComment
 		protectCustom := protectFirstCustom && idx == 0 && customSyntax && !inGroup
-		if opt.Or {
+		switch {
+		case opt.Pattern > 0:
 			dst = append(dst, " or "...)
-		} else if next < len(options) && options[next].Or || singlePortGroup {
+		case inGroup:
 			if idx > 0 {
 				dst = append(dst, ' ')
 			}
 			dst = append(dst, "{ "...)
-			open = true
-		} else if idx > 0 {
+		case idx > 0:
 			dst = append(dst, ' ')
 		}
 		var err error
@@ -843,21 +838,20 @@ func appendOptions(
 			copy(dst[customStart+2:customEnd+2], dst[customStart:customEnd])
 			dst[customStart], dst[customStart+1] = '{', ' '
 		}
-		for continuation := idx + 1; continuation < next; continuation++ {
-			if err = validatePortContinuation(opt, options[continuation], inGroup); err != nil {
+		for member := idx + 1; member < next; member++ {
+			if err = validateListMember(opt, options[member]); err != nil {
 				return dst, err
 			}
 			dst = append(dst, ',')
 			if dst, err = appendPortMatch(dst, PortMatch{
-				Lo: options[continuation].Ports.Lo,
-				Hi: options[continuation].Ports.Hi,
+				Lo: options[member].Ports.Lo,
+				Hi: options[member].Ports.Hi,
 			}, false); err != nil {
 				return dst, err
 			}
 		}
-		if open && (next == len(options) || !options[next].Or) {
+		if inGroup && lastInBlock {
 			dst = append(dst, " }"...)
-			open = false
 		}
 		idx = next
 	}
@@ -877,38 +871,59 @@ func appendOptions(
 	return dst, nil
 }
 
-func nextOptionHead(opts []Opt, idx int) int {
+// validateOptionPlaces requires the places the parser gives: the or-blocks
+// numbered in order from zero, and the match patterns of every block too.
+func validateOptionPlaces(opts []Opt) error {
+	for idx := range opts {
+		opt := &opts[idx]
+		if idx == 0 {
+			if opt.Block != 0 || opt.Pattern != 0 {
+				return ErrBrokenOrChain
+			}
+			continue
+		}
+		prev := &opts[idx-1]
+		sameBlock := opt.Block == prev.Block &&
+			(opt.Pattern == prev.Pattern || opt.Pattern == prev.Pattern+1)
+		nextBlock := opt.Block == prev.Block+1 && opt.Pattern == 0
+		if !sameBlock && !nextBlock {
+			return ErrBrokenOrChain
+		}
+	}
+	return nil
+}
+
+// nextOptionPattern returns the index past the match pattern starting at idx.
+func nextOptionPattern(opts []Opt, idx int) int {
+	head := &opts[idx]
 	idx++
-	for idx < len(opts) && opts[idx].PortOr {
+	for idx < len(opts) && opts[idx].Block == head.Block && opts[idx].Pattern == head.Pattern {
 		idx++
 	}
 	return idx
 }
 
-// validatePortContinuation checks the expanded flags produced for a port list.
-func validatePortContinuation(head, continuation Opt, inGroup bool) error {
-	if head.Kind != OptSourcePort && head.Kind != OptDestinationPort ||
-		continuation.Kind != head.Kind || continuation.Neg != head.Neg {
+// validateListMember checks a member after the first of a match pattern,
+// which only a port list has.
+func validateListMember(head, member Opt) error {
+	if head.Kind != OptSourcePort && head.Kind != OptDestinationPort || member.Kind != head.Kind {
 		return ErrBrokenOrChain
 	}
-	if continuation.Or != (!head.Neg || inGroup) {
-		return ErrBrokenOrChain
+	if member.Neg != head.Neg {
+		return ErrInconsistentNegation
 	}
-	if err := requireZeroOptArgs(continuation); err != nil {
-		return err
-	}
-	return nil
+	return requireZeroOptArgs(member)
 }
 
 // validateStateOptions enforces the parser's placement and uniqueness rules for keep-state.
 func validateStateOptions(opts []Opt) error {
 	seen := false
-	for idx := 0; idx < len(opts); idx = nextOptionHead(opts, idx) {
-		if opts[idx].Kind != OptKeepState {
+	for idx := range opts {
+		opt := &opts[idx]
+		if opt.Kind != OptKeepState {
 			continue
 		}
-		next := nextOptionHead(opts, idx)
-		if opts[idx].Or || next < len(opts) && opts[next].Or {
+		if opt.Pattern > 0 || idx+1 < len(opts) && opts[idx+1].Block == opt.Block {
 			return ErrDynamicStateInGroup
 		}
 		if seen {
@@ -922,9 +937,6 @@ func validateStateOptions(opts []Opt) error {
 // appendOpt writes one option with its negation and the argument of its
 // kind.
 func appendOpt(dst []byte, opt Opt, custom CustomOptAppender, customSyntax bool) ([]byte, error) {
-	if opt.PortOr {
-		return dst, ErrBrokenOrChain
-	}
 	if opt.Neg {
 		dst = append(dst, "not "...)
 	}

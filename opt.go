@@ -73,11 +73,13 @@ func (m OptKind) String() string {
 // ParseOptions parses the trailing option list of a rule body into state.
 //
 // The hook takes the keywords the grammar does not know, nil leaving them
-// unknown. It returns the number of bytes consumed, or on failure its
-// offset together with the error, an ErrorKind unless the state returned
+// unknown. The or-blocks are numbered from zero, so the options of one rule
+// go through one call. It returns the number of bytes consumed, or on failure
+// its offset together with the error, an ErrorKind unless the state returned
 // something else.
 func ParseOptions(s string, state State, hook OptionHook) (int, error) {
-	rest, err := parseOptions(s, state, hook)
+	var ctx optionContext
+	rest, err := parseOptions(&ctx, s, state, hook)
 	return consumed(s, rest, err)
 }
 
@@ -85,13 +87,12 @@ func ParseOptions(s string, state State, hook OptionHook) (int, error) {
 // line.
 //
 // Every option is handed to the state as it is read, so the ones before a
-// failure stay in the state.
-func parseOptions(s string, state State, hook OptionHook) (string, fail) {
+// failure stay in the state. The or-blocks are numbered on from the context.
+func parseOptions(ctx *optionContext, s string, state State, hook OptionHook) (string, fail) {
 	rest := s
-	var ctx optionContext
 	var ok bool
 	for rest != "" && rest[0] != '\n' && !hasPrefix(rest, "\r\n") {
-		buf, err := parseOptionGroup(&ctx, rest, state, hook)
+		buf, err := parseOptionGroup(ctx, rest, state, hook)
 		if err.Failed() {
 			return s, err
 		}
@@ -102,11 +103,61 @@ func parseOptions(s string, state State, hook OptionHook) (string, fail) {
 	return rest, fail{}
 }
 
-// optionPlace distinguishes a top-level option from members of an or-group.
-type optionPlace uint8
+// optionPlace is where an option stands in its option list, which every
+// option it gives the state carries: the match pattern in the low sixteen
+// bits, the or-block in the next sixteen and whether the block is braced.
+//
+// One word takes one register through the option parsers, whose other
+// arguments already fill most of the nine the ABI passes in registers.
+type optionPlace uint64
 
+// placeBraced marks a place inside a `{ … }` group.
+const placeBraced optionPlace = 1 << 32
+
+// Braced reports whether the place is inside a `{ … }` group.
+func (m optionPlace) Braced() bool {
+	return m&placeBraced != 0
+}
+
+// Block is the or-block of the place.
+func (m optionPlace) Block() uint16 {
+	return uint16(m >> 16)
+}
+
+// Pattern is the match pattern of the place within its block.
+func (m optionPlace) Pattern() uint16 {
+	return uint16(m)
+}
+
+// NextPattern returns the place of the next match pattern of the block.
+func (m optionPlace) NextPattern() optionPlace {
+	return m&^0xffff | optionPlace(uint16(m)+1)
+}
+
+// Opt returns an option of the kind standing in the place.
+func (m optionPlace) Opt(neg bool, kind OptKind) Opt {
+	return Opt{Neg: neg, Block: m.Block(), Pattern: m.Pattern(), Kind: kind}
+}
+
+// optionContext is what the options of one rule share: the or-blocks given
+// so far and whether one of them created state.
 type optionContext struct {
+	blocks           uint16
 	dynamicStateSeen bool
+}
+
+// Place returns the place of the first match pattern of the next or-block.
+func (m *optionContext) Place(braced bool) optionPlace {
+	place := optionPlace(m.blocks) << 16
+	if braced {
+		place |= placeBraced
+	}
+	return place
+}
+
+// EndBlock moves on to the next or-block.
+func (m *optionContext) EndBlock() {
+	m.blocks++
 }
 
 // Validate rejects a dynamic state option in an OR group or after one
@@ -115,7 +166,7 @@ func (m *optionContext) Validate(kind OptKind, place optionPlace, at string) fai
 	if kind != OptKeepState {
 		return fail{}
 	}
-	if place != topLevel {
+	if place.Braced() {
 		return fail{Kind: ErrDynamicStateInGroup, At: at}
 	}
 	if m.dynamicStateSeen {
@@ -125,14 +176,8 @@ func (m *optionContext) Validate(kind OptKind, place optionPlace, at string) fai
 	return fail{}
 }
 
-const (
-	topLevel optionPlace = iota
-	groupFirst
-	groupNext
-)
-
-// parseOptionGroup parses one option or a `{ a or b … }` group of them,
-// every member after the first carrying the Or flag.
+// parseOptionGroup parses one option or a `{ a or b … }` group of them as
+// the next or-block, every member a match pattern of its own.
 func parseOptionGroup(
 	ctx *optionContext,
 	s string,
@@ -140,10 +185,7 @@ func parseOptionGroup(
 	hook OptionHook,
 ) (string, fail) {
 	g, rest := openGroup(s, trailingPosition)
-	place := topLevel
-	if g.Braced {
-		place = groupFirst
-	}
+	place := ctx.Place(g.Braced)
 	for {
 		buf, err := parseOption(ctx, rest, state, hook, place)
 		if err.Failed() {
@@ -154,9 +196,10 @@ func parseOptionGroup(
 			return s, err
 		}
 		if !more {
+			ctx.EndBlock()
 			return rest, fail{}
 		}
-		place = groupNext
+		place = place.NextPattern()
 	}
 }
 
@@ -271,15 +314,14 @@ func parseKeywordOption(
 	if !ok {
 		return parseCustomOption(ctx, s, state, hook, neg, place)
 	}
-	opt := Opt{Neg: neg, Or: place == groupNext, Kind: kind}
-	if err := failFrom(state.OnOption(opt), s); err.Failed() {
+	if err := failFrom(state.OnOption(place.Opt(neg, kind)), s); err.Failed() {
 		return s, err
 	}
 	return rest, fail{}
 }
 
 // parseCustomOption hands an unknown keyword to the hook, reserving the
-// grouping flags for the parser to set on what the hook returns.
+// negation and the place for the parser to set on what the hook returns.
 //
 // The hook runs during the speculative pass over the options as well, so
 // it must be free of side effects.
@@ -302,7 +344,7 @@ func parseCustomOption(
 	if n == 0 {
 		return s, fail{Kind: ErrUnknownOption, At: s}
 	}
-	opt.Neg, opt.Or, opt.PortOr = neg, place == groupNext, false
+	opt.Neg, opt.Block, opt.Pattern = neg, place.Block(), place.Pattern()
 	if failure := ctx.Validate(opt.Kind, place, s); failure.Failed() {
 		return s, failure
 	}
@@ -325,12 +367,8 @@ func parseCommentOption(s string, state State, neg bool, place optionPlace) (str
 	} else if end > 0 && text[end-1] == '\r' {
 		end--
 	}
-	opt := Opt{
-		Neg:  neg,
-		Or:   place == groupNext,
-		Kind: OptComment,
-		Text: trimRightSpace(text[:end]),
-	}
+	opt := place.Opt(neg, OptComment)
+	opt.Text = trimRightSpace(text[:end])
 	if err := failFrom(state.OnOption(opt), s); err.Failed() {
 		return s, err
 	}
@@ -366,7 +404,8 @@ func parseTypesOption(s string, state State, kind OptKind, neg bool, place optio
 			break
 		}
 	}
-	opt := Opt{Neg: neg, Or: place == groupNext, Kind: kind, Types: types}
+	opt := place.Opt(neg, kind)
+	opt.Types = types
 	if err := failFrom(state.OnOption(opt), rest); err.Failed() {
 		return s, err
 	}
@@ -395,7 +434,8 @@ func unknownTypeKind(kind OptKind) ErrorKind {
 // parseKeepStateOption parses the optional ` :flow` after `keep-state`.
 func parseKeepStateOption(s string, state State, neg bool, place optionPlace) (string, fail) {
 	flow, rest, _ := parseFlowName(s)
-	opt := Opt{Neg: neg, Or: place == groupNext, Kind: OptKeepState, Text: flow}
+	opt := place.Opt(neg, OptKeepState)
+	opt.Text = flow
 	if err := failFrom(state.OnOption(opt), s); err.Failed() {
 		return s, err
 	}
@@ -412,7 +452,8 @@ func parseProtoOption(s string, state State, neg bool, place optionPlace) (strin
 	if kind != 0 {
 		return s, fail{Kind: kind, At: rest}
 	}
-	opt := Opt{Neg: neg, Or: place == groupNext, Kind: OptProto, Proto: proto}
+	opt := place.Opt(neg, OptProto)
+	opt.Proto = proto
 	if err := failFrom(state.OnOption(opt), rest); err.Failed() {
 		return s, err
 	}
@@ -449,7 +490,8 @@ func parseTCPFlagsOption(s string, state State, neg bool, place optionPlace) (st
 			break
 		}
 	}
-	opt := Opt{Neg: neg, Or: place == groupNext, Kind: OptTCPFlags, TCPFlags: flags}
+	opt := place.Opt(neg, OptTCPFlags)
+	opt.TCPFlags = flags
 	if err := failFrom(state.OnOption(opt), rest); err.Failed() {
 		return s, err
 	}
@@ -489,7 +531,8 @@ func parseViaOption(s string, state State, neg bool, place optionPlace) (string,
 	if err.Failed() {
 		return s, err
 	}
-	opt := Opt{Neg: neg, Or: place == groupNext, Kind: OptVia, Via: via}
+	opt := place.Opt(neg, OptVia)
+	opt.Via = via
 	if err = failFrom(state.OnOption(opt), rest); err.Failed() {
 		return s, err
 	}
@@ -557,9 +600,8 @@ func isTableValueByte(c byte) bool {
 // parsePortsOption parses the port list after `src-port` or `dst-port`,
 // one callback per range.
 //
-// Every range keeps the expanded flags expected by streaming consumers. List
-// membership is also marked separately, so consumers can apply negation and
-// outer group membership once after testing all ranges.
+// The ranges are the members of one match pattern, sharing its place and
+// its negation, as one ipfw(8) instruction holds them all.
 func parsePortsOption(
 	s string,
 	state State,
@@ -571,25 +613,16 @@ func parsePortsOption(
 	if !ok {
 		return s, fail{Kind: ErrExpectedWhitespace, At: rest}
 	}
-	or := place == groupNext
-	first := true
 	for {
 		portRange, buf, err := parsePortRange(rest)
 		if err.Failed() {
 			return s, err
 		}
-		opt := Opt{
-			Neg:    neg,
-			Or:     or,
-			PortOr: !first,
-			Kind:   kind,
-			Ports:  portRange,
-		}
+		opt := place.Opt(neg, kind)
+		opt.Ports = portRange
 		if err = failFrom(state.OnOption(opt), rest); err.Failed() {
 			return s, err
 		}
-		first = false
-		or = !neg || place != topLevel
 		if buf, ok = prefix(buf, ","); !ok {
 			return buf, fail{}
 		}
@@ -640,14 +673,17 @@ func keywordOption(s string) (OptKind, string, bool) {
 
 // Opt is one rule option with the argument of its kind.
 type Opt struct {
-	// Neg is the `not` prefix.
+	// Neg is the `not` prefix, shared by the members of a pattern.
 	Neg bool
-	// Or joins the option with the previous one into an or-group.
-	Or bool
-	// PortOr marks the port range as a continuation of the previous option.
-	// Consumers combine continuations before applying negation and group
-	// membership.
-	PortOr bool
+	// Block is the index, from zero, of the or-block the option belongs to
+	// within its option list: an option on its own is a block of one, and
+	// every block has to hold. The options of a block are contiguous, and a
+	// command hook handing options to the state itself numbers them so.
+	Block uint16
+	// Pattern is the index, from zero, of the match pattern the option
+	// belongs to within its block: the alternatives of a `{ a or b }` group
+	// count up, the members of a list share one, and so does their `not`.
+	Pattern uint16
 	// Kind is the option.
 	Kind OptKind
 	// Text is the comment after `//`, the keep-state flow name or the custom
