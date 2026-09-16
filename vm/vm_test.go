@@ -21,10 +21,8 @@ type (
 
 // nets plugs xnetip into the VM.
 var nets = ipfw.NetworkParserFuncs[net4, net6]{
-	Parse4:    xnetip.ParseNetwork4,
-	Parse6:    xnetip.ParseNetwork6,
-	FromAddr4: xnetip.Network4FromAddr,
-	FromAddr6: xnetip.Network6FromAddr,
+	Parse4: xnetip.ParseNetwork4,
+	Parse6: xnetip.ParseNetwork6,
 }
 
 // fakeProtos resolves the three protocol names the tests use.
@@ -3345,10 +3343,8 @@ func ExampleBuild() {
 	machine, err := vm.Build(ipfw.NewParser(ruleset), vm.Config[xnetip.Network4, xnetip.Network6]{
 		Environment: ipfw.Environment[xnetip.Network4, xnetip.Network6]{
 			Networks: ipfw.NetworkParserFuncs[xnetip.Network4, xnetip.Network6]{
-				Parse4:    xnetip.ParseNetwork4,
-				Parse6:    xnetip.ParseNetwork6,
-				FromAddr4: xnetip.Network4FromAddr,
-				FromAddr6: xnetip.Network6FromAddr,
+				Parse4: xnetip.ParseNetwork4,
+				Parse6: xnetip.ParseNetwork6,
 			},
 		},
 	})

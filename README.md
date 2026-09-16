@@ -183,10 +183,8 @@ Plugging [xnetip](https://github.com/yanet-platform/xnetip) in is one literal:
 ```go
 env := ipfw.Environment[xnetip.Network4, xnetip.Network6]{
 	Networks: ipfw.NetworkParserFuncs[xnetip.Network4, xnetip.Network6]{
-		Parse4:    xnetip.ParseNetwork4,
-		Parse6:    xnetip.ParseNetwork6,
-		FromAddr4: xnetip.Network4FromAddr,
-		FromAddr6: xnetip.Network6FromAddr,
+		Parse4: xnetip.ParseNetwork4,
+		Parse6: xnetip.ParseNetwork6,
 	},
 	Protos:   protocols, // ipfw.ProtoResolver, e.g. /etc/protocols
 	Services: services,  // ipfw.ServiceResolver, e.g. /etc/services

@@ -58,10 +58,8 @@ func ExampleVM_CheckTrace() {
 	machine, err := vm.Build(ipfw.NewParser(ruleset), vm.Config[xnetip.Network4, xnetip.Network6]{
 		Environment: ipfw.Environment[xnetip.Network4, xnetip.Network6]{
 			Networks: ipfw.NetworkParserFuncs[xnetip.Network4, xnetip.Network6]{
-				Parse4:    xnetip.ParseNetwork4,
-				Parse6:    xnetip.ParseNetwork6,
-				FromAddr4: xnetip.Network4FromAddr,
-				FromAddr6: xnetip.Network6FromAddr,
+				Parse4: xnetip.ParseNetwork4,
+				Parse6: xnetip.ParseNetwork6,
 			},
 			Protos: protocols{"tcp": 6, "udp": 17},
 		},
