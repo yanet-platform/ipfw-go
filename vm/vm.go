@@ -340,6 +340,9 @@ func (m span) Empty() bool {
 
 // Build reads the whole ruleset from p into a VM, every name resolved
 // within the configured environment on the way in.
+//
+// The parser chooses the grammar of every rule body, so the ipfw(8) choice by
+// the first protocol needs a parser built with ipfw.WithProtoChecker.
 func Build[V4, V6 Network](p *ipfw.Parser, cfg Config[V4, V6]) (*VM[V4, V6], error) {
 	tables, verdict := cfg.Tables, cfg.DefaultVerdict
 	if tables == nil {

@@ -14,6 +14,9 @@ type parserOptions struct {
 	// OptionHook takes the option keywords the grammar does not know, nil
 	// rejecting them.
 	OptionHook OptionHook
+	// ProtoChecker chooses the grammar of a rule body, nil leaving it to the
+	// shape of the body.
+	ProtoChecker ProtoChecker
 }
 
 func newParserOptions() parserOptions {
@@ -45,6 +48,36 @@ func WithOptionHook(hook OptionHook) ParserOption {
 	}
 }
 
+// WithProtoChecker chooses the grammar of a rule body by its first protocol, as
+// ipfw(8) does.
+//
+// A protocol the checker knows, an IP version keyword or a protocol number
+// commits the body to a `PROTO from SRC to DST` header, any other first token
+// to a body of options only. The checker is asked about that first token alone,
+// which may be an option keyword. Without a checker the parser prefers a
+// complete legacy header whenever the body could be either.
+func WithProtoChecker(checker ProtoChecker) ParserOption {
+	return func(opts *parserOptions) {
+		opts.ProtoChecker = checker
+	}
+}
+
+// ProtoChecker tells a protocol name from any other token, which is what a
+// parser chooses the grammar of a rule body by.
+type ProtoChecker interface {
+	// IsProto reports whether name is a protocol.
+	IsProto(name string) bool
+}
+
+// ProtoCheckerFunc is a ProtoChecker made of a function, so a protocol table
+// plugs in without an adapter type.
+type ProtoCheckerFunc func(name string) bool
+
+// IsProto implements ProtoChecker.
+func (m ProtoCheckerFunc) IsProto(name string) bool {
+	return m(name)
+}
+
 // Parser reads a ruleset line by line.
 type Parser struct {
 	rest   string
@@ -53,8 +86,8 @@ type Parser struct {
 	record Record
 }
 
-// NewParser returns a parser over src, with built-in labels disabled by default.
-// WithLabels enables label declarations and symbolic skipto jumps.
+// NewParser returns a parser over src. Without options labels are disabled and
+// the grammar of a rule body goes by its shape, see WithLabels and WithProtoChecker.
 func NewParser(src string, options ...ParserOption) *Parser {
 	opts := newParserOptions()
 	for _, option := range options {
@@ -72,9 +105,6 @@ func (m *Parser) Reset(src string) {
 // Next parses the next physical line, pushing the rule body into state.
 // The first `#` starts metadata before the grammar or hooks run.
 //
-// A State implementing ProtoResolver selects legacy syntax by recognizing the
-// first protocol. States without it prefer a complete legacy header when an
-// option start makes the grammar ambiguous.
 // The record belongs to the parser and is overwritten by the next call to
 // Next or Reset, copy it to keep it. Once the input is exhausted the record
 // is of kind RecordEOF. A line that does not parse is skipped as a whole and
@@ -381,14 +411,14 @@ const (
 	destinationSide
 )
 
-// parseRuleBody chooses the grammar using the State's protocol knowledge when available.
+// parseRuleBody chooses the grammar by the proto checker when there is one.
 func (m *Parser) parseRuleBody(s string, state State) (string, fail) {
 	if s == "" || s[0] == '\n' || hasPrefix(s, "\r\n") {
 		return s, fail{Kind: ErrExpectedEitherIPOrProto, At: s}
 	}
 	legacy := true
-	if resolver, ok := state.(ProtoResolver); ok {
-		legacy = startsProtocol(s, resolver)
+	if m.opts.ProtoChecker != nil {
+		legacy = startsProtocol(s, m.opts.ProtoChecker)
 	} else {
 		// Only possible option starts need a header probe. A hook must wait
 		// until a complete legacy header has been ruled out.
@@ -411,7 +441,7 @@ func (m *Parser) parseRuleBody(s string, state State) (string, fail) {
 }
 
 // startsProtocol recognizes only the first group member without emitting tokens.
-func startsProtocol(s string, resolver ProtoResolver) bool {
+func startsProtocol(s string, checker ProtoChecker) bool {
 	opened, rest := openGroup(s, headerPosition)
 	rest, _ = protocolNot(rest)
 	proto, rest, kind := parseProto(rest)
@@ -421,8 +451,7 @@ func startsProtocol(s string, resolver ProtoResolver) bool {
 	if _, ok := protoIPKeyword(proto.Name); ok || proto.IsNumber() {
 		return true
 	}
-	_, ok := resolver.ResolveProto(proto.Name)
-	return ok
+	return checker.IsProto(proto.Name)
 }
 
 // parseBodyLegacy parses `PROTO from SRC [PORT] to DST [PORT] [OPTIONS]`.

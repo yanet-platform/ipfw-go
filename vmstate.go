@@ -30,10 +30,8 @@ func (m NetworkParserFuncs[V4, V6]) ParseNetwork6(s string) (V6, error) {
 }
 
 // ProtoResolver turns a protocol name into its number.
-// Next also uses it to choose a grammar when its State implements this interface.
 type ProtoResolver interface {
 	// ResolveProto reports the number of a protocol name, false when unknown.
-	// Grammar selection may ask about option names and resolve the first protocol twice.
 	ResolveProto(name string) (uint8, bool)
 }
 
@@ -145,14 +143,6 @@ func NewResolver[V4, V6 any](sink VMState[V4, V6], environment Environment[V4, V
 	return &Resolver[V4, V6]{sink: sink, environment: environment}
 }
 
-// ResolveProto exposes the environment's protocol lookup to Next without emitting a token.
-func (m *Resolver[V4, V6]) ResolveProto(name string) (uint8, bool) {
-	if m.environment.Protos == nil {
-		return 0, false
-	}
-	return m.environment.Protos.ResolveProto(name)
-}
-
 // OnIPProto implements State.
 func (m *Resolver[V4, V6]) OnIPProto(match ProtoIPMatch) error {
 	return m.sink.OnIPProto(match)
@@ -221,7 +211,10 @@ func (m *Resolver[V4, V6]) resolveProto(proto Proto) (uint8, error) {
 	if proto.IsNumber() {
 		return proto.Number, nil
 	}
-	number, ok := m.ResolveProto(proto.Name)
+	if m.environment.Protos == nil {
+		return 0, ErrUnresolvedProto
+	}
+	number, ok := m.environment.Protos.ResolveProto(proto.Name)
 	if !ok {
 		return 0, ErrUnresolvedProto
 	}
