@@ -7,7 +7,7 @@ import (
 
 // formatterOptions is what a FormatterOption configures.
 type formatterOptions struct {
-	// CustomOpt appends the text of an OptCustom option, nil rejecting it.
+	// CustomOpt appends custom option syntax, nil rejecting it.
 	CustomOpt CustomOptAppender
 }
 
@@ -18,14 +18,15 @@ func newFormatterOptions() formatterOptions {
 // FormatterOption configures a Formatter, see the With functions.
 type FormatterOption func(*formatterOptions)
 
-// CustomOptAppender writes the keyword and argument of one OptCustom option.
+// CustomOptAppender writes syntax the built-in formatter cannot reconstruct.
 //
-// Formatter writes negation and group punctuation. The appender may reconstruct
-// any remaining syntax an OptionHook consumed. It must append one line without
-// `#`, preserve the supplied prefix, and return that prefix unchanged on error.
+// Formatter writes negation and group punctuation. The appender handles
+// OptCustom and an OptComment returned by OptionHook when `//` would change
+// the option sequence. It must append one line without `#`, preserve the
+// supplied prefix, and return that prefix unchanged on error.
 type CustomOptAppender func(dst []byte, opt Opt) ([]byte, error)
 
-// WithCustomOptAppender hands OptCustom options to appender.
+// WithCustomOptAppender hands custom option syntax to appender.
 func WithCustomOptAppender(appender CustomOptAppender) FormatterOption {
 	return func(opts *formatterOptions) {
 		opts.CustomOpt = appender
@@ -208,14 +209,9 @@ func isTokenText(text string) bool {
 	return rest == ""
 }
 
-// appendInstruction writes the `add` line: the header, the body in grammar
-// order and the inline comment, one physical line.
 func (m *Formatter) appendInstruction(dst []byte, record ParsedRecord) ([]byte, error) {
 	instruction := record.Record.Instruction
 	body := record.Body
-	if instruction.Action.Kind == ActionCheckState && !body.IsEmpty() {
-		return dst, ErrUnexpectedBody
-	}
 	dst = append(dst, "add "...)
 	if instruction.Num != 0 {
 		dst = strconv.AppendUint(dst, uint64(instruction.Num), 10)
@@ -225,14 +221,11 @@ func (m *Formatter) appendInstruction(dst []byte, record ParsedRecord) ([]byte, 
 		if !isCommentOnlyInstruction(instruction, body) {
 			return dst, ErrUnexpectedBody
 		}
-		dst = append(dst, "//"...)
-		if instruction.InlineComment != "" && !isASCIISpace(instruction.InlineComment[0]) {
+		comment := body.Options[0]
+		if comment.Text != "" && !isASCIISpace(comment.Text[0]) {
 			return dst, ErrInvalidName
 		}
-		if err := validateInlineComment(instruction.InlineComment); err != nil {
-			return dst, err
-		}
-		return append(dst, instruction.InlineComment...), nil
+		return appendOpt(dst, comment, nil, false)
 	}
 	if record.BodyKind != RuleBodyLegacy && record.BodyKind != RuleBodyNative {
 		return dst, ErrUnexpectedBody
@@ -252,24 +245,30 @@ func (m *Formatter) appendInstruction(dst []byte, record ParsedRecord) ([]byte, 
 		if record.BodyKind != RuleBodyLegacy {
 			return dst, ErrUnexpectedBody
 		}
-		return appendInlineComment(dst, instruction.InlineComment)
+		options := body.Options
+		body.Options = nil
+		if !body.IsEmpty() || len(options) > 1 ||
+			len(options) == 1 && !isPlainComment(options[0]) {
+			return dst, ErrUnexpectedBody
+		}
+		if len(options) == 1 {
+			dst = append(dst, ' ')
+			return appendOptions(dst, options, m.opts.CustomOpt, false)
+		}
+		return dst, nil
 	}
 	if record.BodyKind == RuleBodyNative {
 		if !isImplicitAnyBody(body) {
 			return dst, ErrUnexpectedBody
 		}
 		if len(body.Options) == 0 {
-			if err = validateInlineComment(instruction.InlineComment); err != nil {
-				return dst, err
-			}
-			dst = append(dst, " //"...)
-			return append(dst, instruction.InlineComment...), nil
+			return dst, ErrUnexpectedBody
 		}
 		dst = append(dst, ' ')
 		if dst, err = appendOptions(dst, body.Options, m.opts.CustomOpt, true); err != nil {
 			return dst, err
 		}
-		return appendInlineComment(dst, instruction.InlineComment)
+		return dst, nil
 	}
 	if len(body.Sources) == 0 {
 		return dst, ErrMissingSource
@@ -307,33 +306,21 @@ func (m *Formatter) appendInstruction(dst []byte, record ParsedRecord) ([]byte, 
 			return dst, err
 		}
 	}
-	return appendInlineComment(dst, instruction.InlineComment)
+	return dst, nil
 }
 
 // isCommentOnlyInstruction recognizes the implicit body of an `add //` rule.
 func isCommentOnlyInstruction(instruction Instruction, body ReduceState) bool {
 	return instruction.Action == (Action{Kind: ActionCount}) && instruction.Log == (Log{}) &&
-		instruction.Tag == 0 && isImplicitAnyBody(body) && len(body.Options) == 0
+		instruction.Tag == 0 && isImplicitAnyBody(body) && len(body.Options) == 1 &&
+		isPlainComment(body.Options[0])
 }
 
-// appendInlineComment keeps the slashes adjacent when whitespace would turn a
-// trailing `not` into negation.
-func appendInlineComment(dst []byte, comment string) ([]byte, error) {
-	if comment == "" {
-		return dst, nil
-	}
-	if err := validateInlineComment(comment); err != nil {
-		return dst, err
-	}
-	if endsWithBareNot(dst) {
-		dst = append(dst, "//"...)
-	} else {
-		dst = append(dst, " //"...)
-	}
-	return append(dst, comment...), nil
+func isPlainComment(opt Opt) bool {
+	return opt.Kind == OptComment && !opt.Neg && !opt.Or && !opt.PortOr
 }
 
-func validateInlineComment(comment string) error {
+func validateCommentOptionText(comment string) error {
 	if strings.ContainsAny(comment, "\n#") || trimRightSpace(comment) != comment {
 		return ErrInvalidName
 	}
@@ -803,22 +790,35 @@ func appendOptions(
 	if len(opts) > 0 && opts[0].Or {
 		return dst, ErrBrokenOrChain
 	}
-	if err := validateStateOptions(opts); err != nil {
+	commentIndex := len(opts)
+	if commentIndex > 0 {
+		comment := opts[commentIndex-1]
+		if comment.Kind == OptComment && !comment.Or {
+			if comment.PortOr {
+				return dst, ErrBrokenOrChain
+			}
+			commentIndex--
+		}
+	}
+	options := opts[:commentIndex]
+	if err := validateStateOptions(options); err != nil {
 		return dst, err
 	}
 	open := false
-	for idx := 0; idx < len(opts); {
-		opt := opts[idx]
+	lastCustomIsNot := false
+	for idx := 0; idx < len(options); {
+		opt := options[idx]
 		if opt.PortOr {
 			return dst, ErrBrokenOrChain
 		}
-		next := nextOptionHead(opts, idx)
-		singlePortGroup := idx+1 < next && opt.Neg && opts[idx+1].Or
-		inGroup := opt.Or || next < len(opts) && opts[next].Or || singlePortGroup
-		protectCustom := protectFirstCustom && idx == 0 && opt.Kind == OptCustom && !inGroup
+		next := nextOptionHead(options, idx)
+		singlePortGroup := idx+1 < next && opt.Neg && options[idx+1].Or
+		inGroup := opt.Or || next < len(options) && options[next].Or || singlePortGroup
+		customSyntax := opt.Kind == OptCustom || opt.Kind == OptComment
+		protectCustom := protectFirstCustom && idx == 0 && customSyntax && !inGroup
 		if opt.Or {
 			dst = append(dst, " or "...)
-		} else if next < len(opts) && opts[next].Or || singlePortGroup {
+		} else if next < len(options) && options[next].Or || singlePortGroup {
 			if idx > 0 {
 				dst = append(dst, ' ')
 			}
@@ -829,13 +829,14 @@ func appendOptions(
 		}
 		var err error
 		customStart := len(dst)
-		if dst, err = appendOpt(dst, opt, custom); err != nil {
+		if dst, err = appendOpt(dst, opt, custom, customSyntax); err != nil {
 			return dst, err
 		}
-		if opt.Kind == OptCustom && !opt.Neg && isExactNot(dst[customStart:]) &&
-			(inGroup || next != len(opts)) {
+		customIsNot := customSyntax && !opt.Neg && isExactNot(dst[customStart:])
+		if customIsNot && (inGroup || next != len(options)) {
 			return dst, ErrInvalidName
 		}
+		lastCustomIsNot = customIsNot
 		if protectCustom && !isExactNot(dst[customStart:]) {
 			customEnd := len(dst)
 			dst = append(dst, 0, 0, ' ', '}')
@@ -843,22 +844,35 @@ func appendOptions(
 			dst[customStart], dst[customStart+1] = '{', ' '
 		}
 		for continuation := idx + 1; continuation < next; continuation++ {
-			if err = validatePortContinuation(opt, opts[continuation], inGroup); err != nil {
+			if err = validatePortContinuation(opt, options[continuation], inGroup); err != nil {
 				return dst, err
 			}
 			dst = append(dst, ',')
 			if dst, err = appendPortMatch(dst, PortMatch{
-				Lo: opts[continuation].Ports.Lo,
-				Hi: opts[continuation].Ports.Hi,
+				Lo: options[continuation].Ports.Lo,
+				Hi: options[continuation].Ports.Hi,
 			}, false); err != nil {
 				return dst, err
 			}
 		}
-		if open && (next == len(opts) || !opts[next].Or) {
+		if open && (next == len(options) || !options[next].Or) {
 			dst = append(dst, " }"...)
 			open = false
 		}
 		idx = next
+	}
+	if commentIndex < len(opts) {
+		comment := opts[commentIndex]
+		if len(options) > 0 {
+			if lastCustomIsNot {
+				if comment.Neg {
+					return dst, ErrInvalidName
+				}
+			} else {
+				dst = append(dst, ' ')
+			}
+		}
+		return appendOpt(dst, comment, custom, false)
 	}
 	return dst, nil
 }
@@ -907,14 +921,14 @@ func validateStateOptions(opts []Opt) error {
 
 // appendOpt writes one option with its negation and the argument of its
 // kind.
-func appendOpt(dst []byte, opt Opt, custom CustomOptAppender) ([]byte, error) {
+func appendOpt(dst []byte, opt Opt, custom CustomOptAppender, customSyntax bool) ([]byte, error) {
 	if opt.PortOr {
 		return dst, ErrBrokenOrChain
 	}
 	if opt.Neg {
 		dst = append(dst, "not "...)
 	}
-	if opt.Kind == OptCustom {
+	if customSyntax {
 		if custom == nil {
 			return dst, ErrMissingCustomOptAppender
 		}
@@ -928,13 +942,16 @@ func appendOpt(dst []byte, opt Opt, custom CustomOptAppender) ([]byte, error) {
 		}
 		return buf, nil
 	}
-	if opt.Kind == OptComment {
-		return dst, ErrUnknownOptionKind
-	}
 	if err := requireZeroOptArgs(opt); err != nil {
 		return dst, err
 	}
 	switch opt.Kind {
+	case OptComment:
+		if err := validateCommentOptionText(opt.Text); err != nil {
+			return dst, err
+		}
+		dst = append(dst, "//"...)
+		return append(dst, opt.Text...), nil
 	case OptSourcePort, OptDestinationPort:
 		dst = append(dst, opt.Kind.String()...)
 		dst = append(dst, ' ')
@@ -991,7 +1008,7 @@ func startsReservedOptionSyntax(text []byte) bool {
 // requireZeroOptArgs rejects the argument fields an option kind does not
 // take, which the parser never fills.
 func requireZeroOptArgs(opt Opt) error {
-	if opt.Kind != OptKeepState && opt.Text != "" {
+	if opt.Kind != OptKeepState && opt.Kind != OptComment && opt.Text != "" {
 		return ErrUnexpectedBody
 	}
 	if opt.Arg != "" {

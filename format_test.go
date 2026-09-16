@@ -385,6 +385,7 @@ func Test_Formatter_AppendRecord_Actions(t *testing.T) {
 		{"add skipto tablearg ip from any to any", "add skipto tablearg ip from any to any"},
 		{"add check-state", "add check-state"},
 		{"add check-state :flow", "add check-state :flow"},
+		{"add check-state //", "add check-state //"},
 		{"add check-state :flow // cached", "add check-state :flow // cached"},
 		{"add check-state log", "add check-state log"},
 		{"add 42 check-state :flow log logamount 10 tag 3", "add 42 check-state :flow log logamount 10 tag 3"},
@@ -631,7 +632,7 @@ func Test_Formatter_AppendRecord_Options(t *testing.T) {
 	}
 }
 
-// verifies the whole instruction line: header, body and inline comment in
+// verifies the whole instruction line: header, body and comment option in
 // grammar order on one line.
 func Test_Formatter_AppendRecord_Instruction(t *testing.T) {
 	cases := [][2]string{
@@ -652,10 +653,12 @@ func Test_Formatter_AppendRecord_Instruction(t *testing.T) {
 			"add pass ip from any to any  // c \t",
 			"add pass ip from any to any // c",
 		},
-		{"add pass ip from any to any //", "add pass ip from any to any"},
+		{"add pass ip from any to any //", "add pass ip from any to any //"},
 		{"add 110 allow in", "add 110 pass in"},
 		{"add allow proto tcp", "add pass proto tcp"},
 		{"add allow // memo", "add pass // memo"},
+		{"add allow //", "add pass //"},
+		{"add allow not // never", "add pass not // never"},
 		{"add count //x", "add count //x"},
 		{
 			"add pass ip from any to any#metadata",
@@ -944,16 +947,16 @@ func Test_Formatter_AppendRecord_InvalidValues(t *testing.T) {
 			err: ipfw.ErrUnexpectedBody,
 		},
 		{
-			name: "inline comment with a newline",
+			name: "comment option with a newline",
 			mutate: func(record *ipfw.ParsedRecord) {
-				record.Record.Instruction.InlineComment = "two\nlines"
+				record.Body.Options = []ipfw.Opt{{Kind: ipfw.OptComment, Text: "two\nlines"}}
 			},
 			err: ipfw.ErrInvalidName,
 		},
 		{
-			name: "inline comment with a hash",
+			name: "comment option with a hash",
 			mutate: func(record *ipfw.ParsedRecord) {
-				record.Record.Instruction.InlineComment = "before#after"
+				record.Body.Options = []ipfw.Opt{{Kind: ipfw.OptComment, Text: "before#after"}}
 			},
 			err: ipfw.ErrInvalidName,
 		},
@@ -1335,11 +1338,11 @@ func Test_Formatter_AppendRecord_InvalidValues(t *testing.T) {
 			err: ipfw.ErrDuplicateStateOption,
 		},
 		{
-			name: "comment option",
+			name: "comment option as a port continuation",
 			mutate: func(record *ipfw.ParsedRecord) {
-				record.Body.Options = []ipfw.Opt{{Kind: ipfw.OptComment, Text: " c"}}
+				record.Body.Options = []ipfw.Opt{{PortOr: true, Kind: ipfw.OptComment, Text: " c"}}
 			},
-			err: ipfw.ErrUnknownOptionKind,
+			err: ipfw.ErrBrokenOrChain,
 		},
 		{
 			name: "skipto tablearg with a number",
@@ -1747,6 +1750,55 @@ func Test_Formatter_CustomOptAppender(t *testing.T) {
 	}
 	_, err = ipfw.NewFormatter(ipfw.WithCustomOptAppender(emptyCustom)).Record(record)
 	require.ErrorIs(t, err, ipfw.ErrInvalidName)
+}
+
+// verifies that options of a known kind returned by a hook retain custom syntax in groups.
+func Test_Formatter_CustomOptAppender_HookComment(t *testing.T) {
+	hook := func(rest string) (ipfw.Opt, int, error) {
+		if strings.HasPrefix(rest, "note") {
+			return ipfw.Opt{Kind: ipfw.OptComment, Text: "note"}, len("note"), nil
+		}
+		return ipfw.Opt{}, 0, ipfw.ErrUnknownOption
+	}
+	appender := func(dst []byte, opt ipfw.Opt) ([]byte, error) {
+		return append(dst, opt.Text...), nil
+	}
+	cases := [][2]string{
+		{
+			"add pass ip from any to any { note or out }",
+			"add pass ip from any to any { note or out }",
+		},
+		{
+			"add pass ip from any to any { out or note }",
+			"add pass ip from any to any { out or note }",
+		},
+		{
+			"add pass ip from any to any note { out or out }",
+			"add pass ip from any to any note { out or out }",
+		},
+		{"add pass ip from any to any note note", "add pass ip from any to any note //note"},
+	}
+	for _, tc := range cases {
+		t.Run(tc[0], func(t *testing.T) {
+			var state ipfw.ReduceState
+			record, parseErr := ipfw.NewParser(tc[0]+"\n", ipfw.WithOptionHook(hook)).Next(&state)
+			require.Nil(t, parseErr)
+			parsed := ipfw.NewParsedRecord(record, &state)
+
+			_, err := ipfw.NewFormatter().Record(parsed)
+			require.ErrorIs(t, err, ipfw.ErrMissingCustomOptAppender)
+
+			text, err := ipfw.NewFormatter(ipfw.WithCustomOptAppender(appender)).Record(parsed)
+			require.NoError(t, err)
+			require.Equal(t, tc[1], text)
+
+			state.Reset()
+			reparsed, parseErr := ipfw.NewParser(text+"\n", ipfw.WithOptionHook(hook)).Next(&state)
+			require.Nil(t, parseErr)
+			require.Equal(t, parsed.Record.Instruction, reparsed.Instruction)
+			require.Equal(t, parsed.Body, emptyToNil(state))
+		})
+	}
 }
 
 // verifies that an exact custom `not` is rejected where following grammar
@@ -2230,9 +2282,8 @@ func seedRecord(seed []byte) ipfw.ParsedRecord {
 				Number: rng.uint32(),
 			},
 		},
-		Log:           ipfw.Log{Enabled: rng.bool(), HasAmount: rng.bool(), Amount: rng.uint32()},
-		Tag:           rng.uint32(),
-		InlineComment: rng.maybeText(),
+		Log: ipfw.Log{Enabled: rng.bool(), HasAmount: rng.bool(), Amount: rng.uint32()},
+		Tag: rng.uint32(),
 	}
 	for range rng.byte() % 4 {
 		if rng.bool() {
@@ -2278,13 +2329,13 @@ func validSeedRecord(seed string) (ipfw.ParsedRecord, bool) {
 		record.BodyKind = ipfw.RuleBodyNative
 		record.Body.IPProtos = nil
 		record.Body.Protos = nil
-		record.Record.Instruction.InlineComment = " memo"
+		record.Body.Options = []ipfw.Opt{{Kind: ipfw.OptComment, Text: " memo"}}
 	case "valid/comment-only":
 		record.BodyKind = ipfw.RuleBodyCommentOnly
 		record.Body.IPProtos = nil
 		record.Body.Protos = nil
 		record.Record.Instruction.Action = ipfw.Action{Kind: ipfw.ActionCount}
-		record.Record.Instruction.InlineComment = " memo"
+		record.Body.Options = []ipfw.Opt{{Kind: ipfw.OptComment, Text: " memo"}}
 	case "valid/target-patterns":
 		record.Body.Sources = []ipfw.Target{
 			{Kind: ipfw.TargetAny},
@@ -2304,10 +2355,11 @@ func validSeedRecord(seed string) (ipfw.ParsedRecord, bool) {
 		record.Body.Options = []ipfw.Opt{tcpFlags(ipfw.TCPSyn, ipfw.TCPSyn)}
 	case "valid/check-state-comment":
 		record.Record.Instruction = ipfw.Instruction{
-			Action:        ipfw.Action{Kind: ipfw.ActionCheckState},
-			InlineComment: " cached",
+			Action: ipfw.Action{Kind: ipfw.ActionCheckState},
 		}
-		record.Body = ipfw.ReduceState{}
+		record.Body = ipfw.ReduceState{
+			Options: []ipfw.Opt{{Kind: ipfw.OptComment, Text: " cached"}},
+		}
 	case "valid/table-hostname":
 		record.Record.Kind = ipfw.RecordTable
 		record.Record.Instruction = ipfw.Instruction{}
