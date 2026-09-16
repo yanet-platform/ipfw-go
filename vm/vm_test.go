@@ -2422,6 +2422,125 @@ func Test_VM_Check_CustomOption(t *testing.T) {
 	require.Equal(t, 41, parseErr.Column)
 }
 
+// verifies that options fold by the or-blocks and match patterns they carry,
+// whoever placed them: every block holds, one pattern of a block holds, and
+// the members of a pattern are alternatives under its negation.
+func Test_VM_Check_OptionPlaces(t *testing.T) {
+	port := func(neg bool, block, pattern, number uint16) ipfw.Opt {
+		return ipfw.Opt{
+			Neg:     neg,
+			Block:   block,
+			Pattern: pattern,
+			Kind:    ipfw.OptDestinationPort,
+			Ports:   ipfw.PortRange{Lo: ipfw.Port{Number: number}, Hi: ipfw.Port{Number: number}},
+		}
+	}
+	packet := func(dst uint16) vm.Packet {
+		return vm.NewIPv4Packet(
+			netip.MustParseAddr("192.0.2.1"),
+			netip.MustParseAddr("192.0.2.2"),
+		).WithTCP(ipfw.TCPSyn, 50000, dst)
+	}
+	cases := []struct {
+		name    string
+		options []ipfw.Opt
+		context vm.Context
+		packet  vm.Packet
+		verdict ipfw.Action
+	}{
+		{
+			name: "patterns of one block are alternatives",
+			options: []ipfw.Opt{
+				{Kind: ipfw.OptIn},
+				{Pattern: 1, Kind: ipfw.OptOut},
+			},
+			context: vm.Context{Direction: vm.Out},
+			packet:  packet(22),
+			verdict: pass,
+		},
+		{
+			name: "every block has to hold",
+			options: []ipfw.Opt{
+				{Kind: ipfw.OptIn},
+				{Block: 1, Kind: ipfw.OptOut},
+			},
+			context: vm.Context{Direction: vm.Out},
+			packet:  packet(22),
+			verdict: deny,
+		},
+		{
+			name:    "a negated pattern rejects any of its members",
+			options: []ipfw.Opt{port(true, 0, 0, 22), port(true, 0, 0, 80)},
+			packet:  packet(80),
+			verdict: deny,
+		},
+		{
+			name:    "a negated pattern holds outside all of its members",
+			options: []ipfw.Opt{port(true, 0, 0, 22), port(true, 0, 0, 80)},
+			packet:  packet(443),
+			verdict: pass,
+		},
+		{
+			name: "a negated pattern then an alternative",
+			options: []ipfw.Opt{
+				port(true, 0, 0, 22),
+				port(true, 0, 0, 80),
+				{Pattern: 1, Kind: ipfw.OptIn},
+			},
+			context: vm.Context{Direction: vm.Out},
+			packet:  packet(80),
+			verdict: deny,
+		},
+		{
+			name: "members of separate patterns are negated separately",
+			options: []ipfw.Opt{
+				port(true, 0, 0, 22),
+				port(true, 0, 1, 80),
+			},
+			packet:  packet(80),
+			verdict: pass,
+		},
+		{
+			name: "a comment sharing its block stays an alternative",
+			options: []ipfw.Opt{
+				{Kind: ipfw.OptOut},
+				{Pattern: 1, Kind: ipfw.OptComment, Text: "note"},
+			},
+			packet:  packet(22),
+			verdict: pass,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hook := func(line string, state ipfw.State) (ipfw.Record, int, error) {
+				if line != "PLACED" {
+					return ipfw.Record{}, 0, nil
+				}
+				if err := state.OnSourceTarget(ipfw.Target{Kind: ipfw.TargetAny}); err != nil {
+					return ipfw.Record{}, 0, err
+				}
+				if err := state.OnDestinationTarget(ipfw.Target{Kind: ipfw.TargetAny}); err != nil {
+					return ipfw.Record{}, 0, err
+				}
+				for _, opt := range tc.options {
+					if err := state.OnOption(opt); err != nil {
+						return ipfw.Record{}, 0, err
+					}
+				}
+				record := ipfw.Record{
+					Kind:        ipfw.RecordInstruction,
+					Instruction: ipfw.Instruction{Action: pass},
+				}
+				return record, len(line), nil
+			}
+			src := "PLACED\nadd deny ip from any to any\n"
+			machine, err := vm.Build(ipfw.NewParser(src, ipfw.WithCommandHook(hook)), none)
+			require.NoError(t, err)
+			require.Equal(t, tc.verdict, machine.Check(&tc.context, tc.packet))
+		})
+	}
+}
+
 // verifies that a decided option expression does not invoke a later custom matcher.
 func Test_VM_Check_OptionShortCircuit_Custom(t *testing.T) {
 	calls := 0
@@ -3368,6 +3487,38 @@ func Benchmark_VM_Check_SourceList(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
 				machine.Check(syntheticContext, testCase.packet)
+			}
+		})
+	}
+}
+
+// Benchmark_VM_Check_Options measures option folds of every shape, 1024 rules
+// whose last or-block fails for the benchmark packet.
+func Benchmark_VM_Check_Options(b *testing.B) {
+	cases := []struct {
+		name    string
+		options string
+	}{
+		{name: "Keywords", options: "in via vlan1234 proto tcp not frag established"},
+		{name: "PortList", options: "dst-port 21,22,23,25,53,80,110,143"},
+		{name: "NegatedPortList", options: "not dst-port 21,22,23,25,53,80,110,443"},
+		{name: "OrBlock", options: "{ dst-port 21,22 or src-port 21,22 or established or frag }"},
+		{name: "NegatedListInBlock", options: "{ not dst-port 21,443 or out } in"},
+		{name: "Comment", options: "in not frag established // a commented rule"},
+	}
+	for _, testCase := range cases {
+		b.Run(testCase.name, func(b *testing.B) {
+			rule := "add pass tcp from any to any " + testCase.options + "\n"
+			machine, err := vm.Build(
+				ipfw.NewParser(strings.Repeat(rule, 1024)),
+				vm.Config[net4, net6]{Environment: resolving},
+			)
+			require.NoError(b, err)
+			require.Equal(b, deny, machine.Check(syntheticContext, syntheticPackets["tcp4 syn"]))
+			packet := syntheticPackets["tcp4 syn"]
+			b.ReportAllocs()
+			for b.Loop() {
+				machine.Check(syntheticContext, packet)
 			}
 		})
 	}

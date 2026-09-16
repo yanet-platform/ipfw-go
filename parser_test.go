@@ -228,7 +228,7 @@ func Test_Parser_Next_CommentOnlyRuleStreaming(t *testing.T) {
 		SourcePorts:  []ipfw.PortMatch{portNumber(443)},
 		Options: []ipfw.Opt{
 			{Kind: ipfw.OptIn},
-			{Kind: ipfw.OptComment, Text: " prior"},
+			{Block: 1, Kind: ipfw.OptComment, Text: " prior"},
 		},
 	}, state)
 	state.Reset()
@@ -697,8 +697,8 @@ func Test_Parser_Next_HashCommentPortOptions(t *testing.T) {
 		DestinationPorts: []ipfw.PortMatch{portNumber(443)},
 		Options: []ipfw.Opt{
 			notOpt(srcPort(443)),
-			dstPort(8443),
-			{Or: true, Kind: ipfw.OptProto, Proto: ipfw.Proto{Name: "ipv6"}},
+			at(1, 0, dstPort(8443)),
+			{Block: 1, Pattern: 1, Kind: ipfw.OptProto, Proto: ipfw.Proto{Name: "ipv6"}},
 		},
 	}, state)
 	next(t, parser, eof)
@@ -1324,7 +1324,7 @@ func Test_ReduceState_Reset(t *testing.T) {
 	require.NoError(t, state.OnSourcePort(single))
 	require.NoError(t, state.OnDestinationPort(span))
 	require.NoError(t, state.OnOption(ipfw.Opt{Kind: ipfw.OptIn}))
-	require.NoError(t, state.OnOption(ipfw.Opt{Kind: ipfw.OptOut, Or: true}))
+	require.NoError(t, state.OnOption(ipfw.Opt{Pattern: 1, Kind: ipfw.OptOut}))
 	require.Equal(t, ipfw.ReduceState{
 		IPProtos:         []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPv4}},
 		Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
@@ -1332,7 +1332,7 @@ func Test_ReduceState_Reset(t *testing.T) {
 		Destinations:     []ipfw.Target{{Kind: ipfw.TargetMe}},
 		SourcePorts:      []ipfw.PortMatch{single},
 		DestinationPorts: []ipfw.PortMatch{span},
-		Options:          []ipfw.Opt{{Kind: ipfw.OptIn}, {Kind: ipfw.OptOut, Or: true}},
+		Options:          []ipfw.Opt{{Kind: ipfw.OptIn}, {Pattern: 1, Kind: ipfw.OptOut}},
 	}, state)
 
 	state.Reset()
@@ -1663,7 +1663,7 @@ func Test_Parser_Next_StandardActionsWithoutCompatibility(t *testing.T) {
 				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
 				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
 				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
-				Options:      []ipfw.Opt{{Kind: ipfw.OptKeepState, Text: "flow"}, rule},
+				Options:      []ipfw.Opt{{Kind: ipfw.OptKeepState, Text: "flow"}, at(1, 0, rule)},
 			},
 		},
 	}
@@ -2332,7 +2332,7 @@ func Test_Parser_Next_OptionOnly(t *testing.T) {
 				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
 				Options: []ipfw.Opt{
 					{Kind: ipfw.OptVia, Via: ipfw.Via{Kind: ipfw.ViaExact, Name: "vlan17"}},
-					{Kind: ipfw.OptComment, Text: " memo"},
+					{Block: 1, Kind: ipfw.OptComment, Text: " memo"},
 				},
 			},
 		},
@@ -2353,7 +2353,7 @@ func Test_Parser_Next_OptionOnly(t *testing.T) {
 				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
 				Options: []ipfw.Opt{
 					{Neg: true, Kind: ipfw.OptIn},
-					{Or: true, Kind: ipfw.OptOut},
+					{Pattern: 1, Kind: ipfw.OptOut},
 				},
 			},
 		},
@@ -3777,9 +3777,9 @@ func Test_Parser_Next_Options(t *testing.T) {
 				DestinationPorts: []ipfw.PortMatch{portNumber(80)},
 				Options: []ipfw.Opt{
 					established,
-					{Kind: ipfw.OptFrag},
-					tcpFlags(ipfw.TCPSyn, ipfw.TCPAck),
-					icmp6Types(128, 129),
+					{Block: 1, Kind: ipfw.OptFrag},
+					at(2, 0, tcpFlags(ipfw.TCPSyn, ipfw.TCPAck)),
+					at(3, 0, icmp6Types(128, 129)),
 				},
 			},
 		},
@@ -3793,11 +3793,11 @@ func Test_Parser_Next_Options(t *testing.T) {
 				Destinations: anyToAny,
 				Options: []ipfw.Opt{
 					notOpt(established),
-					{Or: true, Kind: ipfw.OptFrag},
-					notOpt(tcpFlags(ipfw.TCPSyn, ipfw.TCPAck)),
-					{Kind: ipfw.OptIn},
-					orOpt(notOpt(icmp6Types(128, 129))),
-					{Kind: ipfw.OptOut},
+					{Pattern: 1, Kind: ipfw.OptFrag},
+					at(1, 0, notOpt(tcpFlags(ipfw.TCPSyn, ipfw.TCPAck))),
+					{Block: 2, Kind: ipfw.OptIn},
+					at(2, 1, notOpt(icmp6Types(128, 129))),
+					{Block: 3, Kind: ipfw.OptOut},
 				},
 			},
 		},
@@ -3810,7 +3810,7 @@ func Test_Parser_Next_Options(t *testing.T) {
 				Destinations: anyToAny,
 				Options: []ipfw.Opt{
 					established,
-					{Kind: ipfw.OptComment, Text: " alias spelling"},
+					{Block: 1, Kind: ipfw.OptComment, Text: " alias spelling"},
 				},
 			},
 		},
@@ -3986,7 +3986,7 @@ func Test_Parser_Next_Options(t *testing.T) {
 				Destinations: anyToAny,
 				Options: []ipfw.Opt{
 					established,
-					{Neg: true, Or: true, Kind: ipfw.OptEstablished},
+					{Neg: true, Pattern: 1, Kind: ipfw.OptEstablished},
 				},
 			},
 		},
@@ -3999,7 +3999,7 @@ func Test_Parser_Next_Options(t *testing.T) {
 				Destinations: anyToAny,
 				Options: []ipfw.Opt{
 					established,
-					{Neg: true, Or: true, Kind: ipfw.OptEstablished},
+					{Neg: true, Pattern: 1, Kind: ipfw.OptEstablished},
 				},
 			},
 		},
@@ -4031,7 +4031,7 @@ func Test_Parser_Next_Options(t *testing.T) {
 				Protos:       tcp,
 				Sources:      anyToAny,
 				Destinations: anyToAny,
-				Options:      []ipfw.Opt{{Kind: ipfw.OptIn}, {Kind: ipfw.OptOut}},
+				Options:      []ipfw.Opt{{Kind: ipfw.OptIn}, {Block: 1, Kind: ipfw.OptOut}},
 			},
 		},
 		{
@@ -4041,7 +4041,7 @@ func Test_Parser_Next_Options(t *testing.T) {
 				Protos:       tcp,
 				Sources:      anyToAny,
 				Destinations: anyToAny,
-				Options:      []ipfw.Opt{{Kind: ipfw.OptIn}, {Or: true, Kind: ipfw.OptOut}},
+				Options:      []ipfw.Opt{{Kind: ipfw.OptIn}, {Pattern: 1, Kind: ipfw.OptOut}},
 			},
 		},
 		{
@@ -4051,7 +4051,10 @@ func Test_Parser_Next_Options(t *testing.T) {
 				Protos:       tcp,
 				Sources:      anyToAny,
 				Destinations: anyToAny,
-				Options:      []ipfw.Opt{{Kind: ipfw.OptIn}, {Kind: ipfw.OptComment, Text: " c"}},
+				Options: []ipfw.Opt{
+					{Kind: ipfw.OptIn},
+					{Block: 1, Kind: ipfw.OptComment, Text: " c"},
+				},
 			},
 		},
 		{
@@ -4063,7 +4066,7 @@ func Test_Parser_Next_Options(t *testing.T) {
 				Destinations: anyToAny,
 				Options: []ipfw.Opt{
 					{Kind: ipfw.OptIn},
-					{Neg: true, Kind: ipfw.OptComment, Text: " never"},
+					{Neg: true, Block: 1, Kind: ipfw.OptComment, Text: " never"},
 				},
 			},
 		},
@@ -4092,7 +4095,7 @@ func Test_Parser_Next_Options(t *testing.T) {
 				Destinations: anyToAny,
 				Options: []ipfw.Opt{
 					{Kind: ipfw.OptIn},
-					{Or: true, Kind: ipfw.OptComment, Text: " c }"},
+					{Pattern: 1, Kind: ipfw.OptComment, Text: " c }"},
 				},
 			},
 		},
@@ -4143,7 +4146,7 @@ func Test_Parser_Next_Options(t *testing.T) {
 				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
 				Sources:      anyToAny,
 				Destinations: anyToAny,
-				Options:      []ipfw.Opt{{Kind: ipfw.OptAntiSpoof}, {Kind: ipfw.OptIn}},
+				Options:      []ipfw.Opt{{Kind: ipfw.OptAntiSpoof}, {Block: 1, Kind: ipfw.OptIn}},
 			},
 		},
 		{
@@ -4189,7 +4192,7 @@ func Test_Parser_Next_Options(t *testing.T) {
 				Destinations: anyToAny,
 				Options: []ipfw.Opt{
 					notOpt(dstPort(22)),
-					portOr(notOpt(dstPort(80))),
+					notOpt(dstPort(80)),
 				},
 			},
 		},
@@ -4230,7 +4233,7 @@ func Test_Parser_Next_Options(t *testing.T) {
 				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "icmp"}}},
 				Sources:      anyToAny,
 				Destinations: anyToAny,
-				Options:      []ipfw.Opt{icmpTypes(0, 7, 8, 31), {Kind: ipfw.OptIn}},
+				Options:      []ipfw.Opt{icmpTypes(0, 7, 8, 31), {Block: 1, Kind: ipfw.OptIn}},
 			},
 		},
 		{
@@ -4240,7 +4243,10 @@ func Test_Parser_Next_Options(t *testing.T) {
 				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
 				Sources:      anyToAny,
 				Destinations: anyToAny,
-				Options:      []ipfw.Opt{icmp6Types(0, 5, 135, 150, 201), {Kind: ipfw.OptIn}},
+				Options: []ipfw.Opt{
+					icmp6Types(0, 5, 135, 150, 201),
+					{Block: 1, Kind: ipfw.OptIn},
+				},
 			},
 		},
 		{
@@ -4270,7 +4276,7 @@ func Test_Parser_Next_Options(t *testing.T) {
 				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
 				Sources:      []ipfw.Target{{Kind: ipfw.TargetMe}},
 				Destinations: []ipfw.Target{{Kind: ipfw.TargetMe}},
-				Options:      []ipfw.Opt{viaExact("lo0"), orOpt(viaExact("lo1"))},
+				Options:      []ipfw.Opt{viaExact("lo0"), at(0, 1, viaExact("lo1"))},
 			},
 		},
 		{
@@ -4280,7 +4286,7 @@ func Test_Parser_Next_Options(t *testing.T) {
 				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
 				Sources:      anyToAny,
 				Destinations: anyToAny,
-				Options:      []ipfw.Opt{viaExact("eth0"), {Kind: ipfw.OptIn}},
+				Options:      []ipfw.Opt{viaExact("eth0"), {Block: 1, Kind: ipfw.OptIn}},
 			},
 		},
 		{
@@ -4312,7 +4318,7 @@ func Test_Parser_Next_Options(t *testing.T) {
 				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
 				Sources:      anyToAny,
 				Destinations: anyToAny,
-				Options:      []ipfw.Opt{viaTable("t", ""), {Kind: ipfw.OptIn}},
+				Options:      []ipfw.Opt{viaTable("t", ""), {Block: 1, Kind: ipfw.OptIn}},
 			},
 		},
 		{
@@ -4322,7 +4328,10 @@ func Test_Parser_Next_Options(t *testing.T) {
 				Protos:       tcp,
 				Sources:      anyToAny,
 				Destinations: anyToAny,
-				Options:      []ipfw.Opt{established, {Kind: ipfw.OptComment, Text: " c"}},
+				Options: []ipfw.Opt{
+					established,
+					{Block: 1, Kind: ipfw.OptComment, Text: " c"},
+				},
 			},
 		},
 	}
@@ -4911,7 +4920,7 @@ func Test_Parser_Next_CommentOption(t *testing.T) {
 		{
 			name:    "slashes right after an option",
 			input:   "add pass ip from any to any in// c\n",
-			options: []ipfw.Opt{{Kind: ipfw.OptIn}, comment(" c")},
+			options: []ipfw.Opt{{Kind: ipfw.OptIn}, at(1, 0, comment(" c"))},
 		},
 		{
 			name:    "options inside the comment",
@@ -5534,6 +5543,12 @@ func Benchmark_Parser_Next_TenOptions(b *testing.B) {
 	benchmarkNext(b, "add allow tcp from any 1024-65535 to any 22,80,443 in via vlan1?? established"+
 		" keep-state :flow proto tcp tcpflags syn,!ack dst-port 8080,8443 not frag antispoof"+
 		" { src-port 22 or out }\n")
+}
+
+func Benchmark_Parser_Next_OptionBlocks(b *testing.B) {
+	benchmarkNext(b, "add allow tcp from any to any dst-port 21,22,23,25,53,80"+
+		" { not src-port 1024-65535,8080 or in or established } not frag"+
+		" { via vlan1?? or out } // blocks\n")
 }
 
 func Benchmark_Parser_Next_OptionsAfterTarget(b *testing.B) {

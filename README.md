@@ -84,6 +84,8 @@ for {
 
 Every token keeps its text: a network is `Target{Kind: TargetNetwork4, Text: "192.0.2.0/24"}`, a service is `Port{Name: "ssh"}`. See `ExampleParser_Next`.
 
+Every token also carries its place in the match, in the terms of ipfw(8). A rule holds when every or-block of it does, an or-block when one of its match patterns does, and a pattern when one of its members does, its `not` aside. A source or a destination is one or-block, so a `Target` carries only its `Pattern`: the alternatives of `{ a or b }` count up and the members of an address list share one. Options carry `Opt.Block` as well, so `in { not dst-port 22,80 or out }` gives `in` in block 0, both ports in block 1 pattern 0 under one `not`, and `out` in block 1 pattern 1, which is how a FreeBSD instruction holds a whole port list.
+
 Rules can use existing options as the complete body by default, as in
 [FreeBSD](https://github.com/freebsd/freebsd-src/blob/2350f75acb0da0271ccff1fb22381f7e8c5948f8/sbin/ipfw/ipfw.8#L1371).
 For example, `add 110 allow in proto tcp via vlan17` matches incoming TCP packets of either
