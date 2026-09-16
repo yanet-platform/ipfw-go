@@ -35,6 +35,10 @@ Licensed under the Apache License 2.0, see [LICENSE](LICENSE).
 
   A command or an option the format does not know goes to a hook that reuses the exported sub-parsers, and the VM asks your matcher what it means.
 
+- **The way back to text.**
+
+  Records you collected render into canonical ruleset text: aliases folded, whitespace normalized, order stable, the round trip parse-equivalent and idempotent. Appending into a destination with room for it allocates nothing.
+
 - **A virtual machine, not only a parser.**
 
   Build a ruleset once and check packets against it: protocols, addresses, ports, tables, interfaces, ICMP types, TCP flags, jumps and labels, a configurable default verdict, and a tracer that reports every rule a check evaluated.
@@ -183,6 +187,32 @@ error: unknown option
 ```
 
 `WithDiagStyle(ipfw.DiagStyleFor(os.Stderr))` colours it when a terminal is watching and leaves it plain when the output is a file. `WithDiagWidth` cuts a long line around the caret.
+
+## Serialization
+
+A `Formatter` renders records you collected back into canonical ruleset text: aliases folded (`allow` into `pass`), whitespace and line endings normalized, address lists under one negation, ICMP types ascending, TCP flags in a fixed order. Canonical output is parse-equivalent rather than byte-for-byte equal to the source, and formatting canonical output again returns identical bytes.
+
+```go
+parser := ipfw.NewParser(src)
+var state ipfw.ReduceState
+var ruleset []ipfw.ParsedRecord
+for {
+	rec, err := parser.Next(&state)
+	if err != nil {
+		return err
+	}
+	if rec.Kind == ipfw.RecordEOF {
+		break
+	}
+	ruleset = append(ruleset, ipfw.NewParsedRecord(rec, &state))
+	state.Reset()
+}
+text, err := ipfw.NewFormatter().AppendRuleset(nil, ruleset)
+```
+
+Both the record and the body belong to the parser and the state, so `NewParsedRecord` copies them before the next `Next` call and remembers whether an instruction used a legacy, native option-only, or comment-only body. Collecting a ruleset allocates by design; `AppendRecord` and `AppendRuleset` themselves append without allocating once the destination has capacity. A value the parser cannot produce — an unknown kind, a broken `or` chain, a stray field — is rejected with an `ErrorKind`. On error, the append methods preserve the destination's length and visible bytes, though unused capacity may contain attempted output. `WithCustomOptAppender` reconstructs `OptCustom` and a hook-produced option whose built-in spelling cannot preserve its position, such as a grouped `OptComment`.
+
+Replaying accepted input is the other direction: every `Record.Text` holds its line without leading and trailing whitespace, so appending the texts with a newline per record plays the accepted lines back. The whitespace the parser trimmed stays gone, and the replay always ends with a newline the source may not have had. See `ExampleFormatter_AppendRuleset`.
 
 ## Names into values
 

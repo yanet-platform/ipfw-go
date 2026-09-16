@@ -1,5 +1,7 @@
 package ipfw
 
+import "slices"
+
 // State receives the tokens of a rule body as the parser recognizes them.
 //
 // Every callback may reject a token: an ErrorKind becomes a ParseError of
@@ -108,6 +110,29 @@ func (m *ReduceState) OnSourcePort(match PortMatch) error {
 func (m *ReduceState) OnDestinationPort(match PortMatch) error {
 	m.DestinationPorts = append(m.DestinationPorts, match)
 	return nil
+}
+
+// Clone returns a copy of the state that owns every slice.
+//
+// The tokens themselves keep sharing the input they were parsed from, a Go
+// string keeping its backing storage alive.
+func (m ReduceState) Clone() ReduceState {
+	return ReduceState{
+		IPProtos:         slices.Clone(m.IPProtos),
+		Protos:           slices.Clone(m.Protos),
+		Sources:          slices.Clone(m.Sources),
+		Destinations:     slices.Clone(m.Destinations),
+		SourcePorts:      slices.Clone(m.SourcePorts),
+		DestinationPorts: slices.Clone(m.DestinationPorts),
+		Options:          slices.Clone(m.Options),
+	}
+}
+
+// IsEmpty reports whether the state holds no tokens.
+func (m ReduceState) IsEmpty() bool {
+	return len(m.IPProtos) == 0 && len(m.Protos) == 0 && len(m.Sources) == 0 &&
+		len(m.Destinations) == 0 && len(m.SourcePorts) == 0 &&
+		len(m.DestinationPorts) == 0 && len(m.Options) == 0
 }
 
 // OnOption implements State.
