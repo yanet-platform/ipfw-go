@@ -4539,7 +4539,7 @@ func Test_Parser_Next_OptionErrors(t *testing.T) {
 	}
 }
 
-// verifies that state-producing options are unique, stay outside OR groups,
+// verifies that dynamic state options are unique, stay outside OR groups,
 // and use fresh context for every rule.
 func Test_Parser_Next_KeepStateContext(t *testing.T) {
 	cases := []struct {
@@ -4552,7 +4552,7 @@ func Test_Parser_Next_KeepStateContext(t *testing.T) {
 			name:  "duplicate after destination port",
 			input: "add pass tcp from any to any 80 keep-state keep-state\n",
 			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrDuplicateStateOption,
+				Kind:   ipfw.ErrDuplicateDynamicState,
 				Line:   1,
 				Column: 43,
 				Text:   "add pass tcp from any to any 80 keep-state keep-state",
@@ -4569,7 +4569,7 @@ func Test_Parser_Next_KeepStateContext(t *testing.T) {
 			name:  "inside OR group",
 			input: "add pass ip from any to any { in or keep-state }\n",
 			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrStateOptionInGroup,
+				Kind:   ipfw.ErrDynamicStateInGroup,
 				Line:   1,
 				Column: 36,
 				Text:   "add pass ip from any to any { in or keep-state }",

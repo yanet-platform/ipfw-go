@@ -52,8 +52,12 @@ const (
 	// ErrState wraps an error a State or a hook returned, see ParseError.Err.
 	ErrState
 	ErrExpectedTag
-	ErrStateOptionInGroup
-	ErrDuplicateStateOption
+	// ErrDynamicStateInGroup is an option creating dynamic state, such as
+	// keep-state, inside an OR block.
+	ErrDynamicStateInGroup
+	// ErrDuplicateDynamicState is a second option creating dynamic state in
+	// one rule.
+	ErrDuplicateDynamicState
 )
 
 // Error returns the message of the kind.
@@ -131,10 +135,10 @@ func (m ErrorKind) Error() string {
 		return "expected `\\n` or EOF"
 	case ErrState:
 		return "state error"
-	case ErrStateOptionInGroup:
-		return "state-producing option in OR block"
-	case ErrDuplicateStateOption:
-		return "more than one state-producing option"
+	case ErrDynamicStateInGroup:
+		return "dynamic state option in OR block"
+	case ErrDuplicateDynamicState:
+		return "more than one dynamic state option"
 	default:
 		return "unknown error kind " + strconv.Itoa(int(m))
 	}

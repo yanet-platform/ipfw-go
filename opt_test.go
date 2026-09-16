@@ -624,20 +624,20 @@ func Test_ParseOptions_Table(t *testing.T) {
 			name:    "duplicate keep-state",
 			input:   "in keep-state keep-state out",
 			n:       14,
-			err:     ipfw.ErrDuplicateStateOption,
+			err:     ipfw.ErrDuplicateDynamicState,
 			options: []ipfw.Opt{{Kind: ipfw.OptIn}, {Kind: ipfw.OptKeepState}},
 		},
 		{
 			name:  "keep-state first in a group",
 			input: "{ keep-state or in }",
 			n:     2,
-			err:   ipfw.ErrStateOptionInGroup,
+			err:   ipfw.ErrDynamicStateInGroup,
 		},
 		{
 			name:    "keep-state after an option in a group",
 			input:   "{ in or keep-state }",
 			n:       8,
-			err:     ipfw.ErrStateOptionInGroup,
+			err:     ipfw.ErrDynamicStateInGroup,
 			options: []ipfw.Opt{{Kind: ipfw.OptIn}},
 		},
 		{
@@ -998,7 +998,7 @@ func Test_ParseOptions_StateError(t *testing.T) {
 	require.Equal(t, ipfw.ErrExpectedOpt, err)
 }
 
-// verifies that state-producing options returned by a hook obey the same
+// verifies that dynamic state options returned by a hook obey the same
 // placement and uniqueness rules as built-in options.
 func Test_ParseOptions_HookKeepState(t *testing.T) {
 	cases := []struct {
@@ -1012,14 +1012,14 @@ func Test_ParseOptions_HookKeepState(t *testing.T) {
 			name:    "duplicate after built-in",
 			input:   "keep-state state-option",
 			n:       11,
-			err:     ipfw.ErrDuplicateStateOption,
+			err:     ipfw.ErrDuplicateDynamicState,
 			options: []ipfw.Opt{{Kind: ipfw.OptKeepState}},
 		},
 		{
 			name:  "hook option in group",
 			input: "{ state-option or in }",
 			n:     2,
-			err:   ipfw.ErrStateOptionInGroup,
+			err:   ipfw.ErrDynamicStateInGroup,
 		},
 	}
 	for _, tc := range cases {
