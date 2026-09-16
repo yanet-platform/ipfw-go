@@ -909,10 +909,10 @@ func validateStateOptions(opts []Opt) error {
 		}
 		next := nextOptionHead(opts, idx)
 		if opts[idx].Or || next < len(opts) && opts[next].Or {
-			return ErrStateOptionInGroup
+			return ErrDynamicStateInGroup
 		}
 		if seen {
-			return ErrDuplicateStateOption
+			return ErrDuplicateDynamicState
 		}
 		seen = true
 	}

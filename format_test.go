@@ -1325,7 +1325,7 @@ func Test_Formatter_AppendRecord_InvalidValues(t *testing.T) {
 					{Or: true, Kind: ipfw.OptKeepState},
 				}
 			},
-			err: ipfw.ErrStateOptionInGroup,
+			err: ipfw.ErrDynamicStateInGroup,
 		},
 		{
 			name: "duplicate keep-state",
@@ -1335,7 +1335,7 @@ func Test_Formatter_AppendRecord_InvalidValues(t *testing.T) {
 					{Kind: ipfw.OptKeepState, Text: "flow"},
 				}
 			},
-			err: ipfw.ErrDuplicateStateOption,
+			err: ipfw.ErrDuplicateDynamicState,
 		},
 		{
 			name: "comment option as a port continuation",
@@ -1929,7 +1929,8 @@ func genProtocols(t *rapid.T) string {
 
 // genAddressMember draws one address-list member.
 func genAddressMember(t *rapid.T) string {
-	return drawPick(t, "member",
+	return drawPick(
+		t, "member",
 		"192.0.2.1", "198.51.100.0/24", "203.0.113.7",
 		"2001:db8::1", "2001:db8:aa::/48",
 		drawPick(t, "host", genHostnames...),
@@ -1939,13 +1940,15 @@ func genAddressMember(t *rapid.T) string {
 
 func genAddressListMember(t *rapid.T, ipv6 bool) string {
 	if ipv6 {
-		return drawPick(t, "member6",
+		return drawPick(
+			t, "member6",
 			"2001:db8::1", "2001:db8:aa::/48",
 			drawPick(t, "host6", genHostnames...),
 			drawPick(t, "custom6", genCustomNames...),
 		)
 	}
-	return drawPick(t, "member4",
+	return drawPick(
+		t, "member4",
 		"192.0.2.1", "198.51.100.0/24", "203.0.113.7",
 		drawPick(t, "host4", genHostnames...),
 		drawPick(t, "custom4", genCustomNames...),
@@ -1957,7 +1960,8 @@ func genAddressListMember(t *rapid.T, ipv6 bool) string {
 func genTargetChain(t *rapid.T) string {
 	prefix := drawNot(t)
 	if drawPick(t, "lone", true, false) {
-		return prefix + drawPick(t, "target",
+		return prefix + drawPick(
+			t, "target",
 			"any", "me", "me6",
 			"table("+drawPick(t, "table", genTableNames...)+")",
 			genAddressMember(t),
@@ -2007,7 +2011,8 @@ func genPorts(t *rapid.T) string {
 // genOption draws one option with its argument.
 func genOption(t *rapid.T) string {
 	prefix := drawNot(t)
-	switch kind := drawPick(t, "option",
+	switch kind := drawPick(
+		t, "option",
 		"in", "out", "established", "frag", "diverted", "antispoof",
 		"keep-state", "proto", "tcpflags", "icmptypes", "icmp6types",
 		"src-port", "dst-port", "via",
@@ -2083,7 +2088,8 @@ func genInstructionLine(t *rapid.T) string {
 	if rapid.IntRange(0, 7).Draw(t, "commentOnly") == 0 {
 		return line + drawPick(t, "commentOnlyText", "//", "// c", "//\tmetadata")
 	}
-	switch action := drawPick(t, "action",
+	switch action := drawPick(
+		t, "action",
 		"pass", "allow", "accept", "deny", "drop", "count", "check-state", "skipto",
 	); action {
 	case "check-state":
@@ -2127,7 +2133,8 @@ func genInstructionLine(t *rapid.T) string {
 
 // genRulesetLine draws one valid line of any record kind.
 func genRulesetLine(t *rapid.T) string {
-	switch drawPick(t, "kind",
+	switch drawPick(
+		t, "kind",
 		"instruction", "instruction", "instruction", "label", "comment", "empty", "tableCreate", "tableAdd",
 	) {
 	case "label":

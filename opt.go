@@ -106,22 +106,22 @@ func parseOptions(s string, state State, hook OptionHook) (string, fail) {
 type optionPlace uint8
 
 type optionContext struct {
-	stateOptionSeen bool
+	dynamicStateSeen bool
 }
 
-// Validate rejects a state-producing option in an OR group or after one
+// Validate rejects a dynamic state option in an OR group or after one
 // already accepted in the same rule.
 func (m *optionContext) Validate(kind OptKind, place optionPlace, at string) fail {
 	if kind != OptKeepState {
 		return fail{}
 	}
 	if place != topLevel {
-		return fail{Kind: ErrStateOptionInGroup, At: at}
+		return fail{Kind: ErrDynamicStateInGroup, At: at}
 	}
-	if m.stateOptionSeen {
-		return fail{Kind: ErrDuplicateStateOption, At: at}
+	if m.dynamicStateSeen {
+		return fail{Kind: ErrDuplicateDynamicState, At: at}
 	}
-	m.stateOptionSeen = true
+	m.dynamicStateSeen = true
 	return fail{}
 }
 
