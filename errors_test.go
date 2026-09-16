@@ -22,7 +22,6 @@ func Test_ErrorKind_Error(t *testing.T) {
 			kind:    ipfw.ErrExpectedLine,
 			message: "expected `add`, `table`, a `:label` or a `#` comment",
 		},
-		{name: "expected command", kind: ipfw.ErrExpectedCommand, message: "expected command"},
 		{
 			name:    "state option in group",
 			kind:    ipfw.ErrStateOptionInGroup,
@@ -43,7 +42,6 @@ func Test_ErrorKind_Error(t *testing.T) {
 			kind:    ipfw.ErrExpectedWhitespace,
 			message: "expected whitespace",
 		},
-		{name: "expected IP proto", kind: ipfw.ErrExpectedIPProto, message: "expected IP protocol"},
 		{
 			name:    "expected either IP or proto",
 			kind:    ipfw.ErrExpectedEitherIPOrProto,
@@ -67,7 +65,6 @@ func Test_ErrorKind_Error(t *testing.T) {
 			message: "unexpected escape character in port name",
 		},
 		{name: "expected token", kind: ipfw.ErrExpectedToken, message: "expected token"},
-		{name: "expected flow name", kind: ipfw.ErrExpectedFlowName, message: "expected flow name"},
 		{name: "unknown option", kind: ipfw.ErrUnknownOption, message: "unknown option"},
 		{name: "expected target", kind: ipfw.ErrExpectedTarget, message: "expected target"},
 		{
@@ -123,16 +120,6 @@ func Test_ErrorKind_Error(t *testing.T) {
 			message: "unknown ICMPv6 type",
 		},
 		{name: "unknown TCP flag", kind: ipfw.ErrUnknownTCPFlag, message: "unknown TCP flag"},
-		{
-			name:    "expected interface name",
-			kind:    ipfw.ErrExpectedIfName,
-			message: "expected interface name",
-		},
-		{
-			name:    "invalid interface mask",
-			kind:    ipfw.ErrExpectedIfMask,
-			message: "invalid interface mask pattern",
-		},
 		{
 			name:    "expected table type",
 			kind:    ipfw.ErrExpectedTableType,

@@ -648,10 +648,10 @@ func Test_CommandHook_Errors(t *testing.T) {
 			name:  "error kind at a chosen offset",
 			input: "CUSTOM line\n",
 			hook: func(string, ipfw.State) (ipfw.Record, int, error) {
-				return ipfw.Record{}, 5, ipfw.ErrExpectedCommand
+				return ipfw.Record{}, 5, ipfw.ErrExpectedLine
 			},
 			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedCommand,
+				Kind:   ipfw.ErrExpectedLine,
 				Line:   1,
 				Column: 5,
 				Text:   "CUSTOM line",

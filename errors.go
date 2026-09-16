@@ -9,7 +9,6 @@ type ErrorKind uint8
 const (
 	_ ErrorKind = iota
 	ErrExpectedLine
-	ErrExpectedCommand
 	ErrExpectedFrom
 	// ErrExpectedPrefix is a missing keyword or punctuation.
 	ErrExpectedPrefix
@@ -17,7 +16,6 @@ const (
 	ErrExpectedOr
 	ErrExpectedProto
 	ErrExpectedWhitespace
-	ErrExpectedIPProto
 	ErrExpectedEitherIPOrProto
 	ErrExpectedIPv4Network
 	ErrExpectedIPv6Network
@@ -26,7 +24,6 @@ const (
 	// ErrUnexpectedEscape is a backslash in a port name escaping anything but `-`.
 	ErrUnexpectedEscape
 	ErrExpectedToken
-	ErrExpectedFlowName
 	ErrUnknownOption
 	ErrExpectedTarget
 	// ErrUnresolvedTarget is a hostname or a target of unknown shape that no
@@ -46,8 +43,6 @@ const (
 	ErrUnknownICMPType
 	ErrUnknownICMP6Type
 	ErrUnknownTCPFlag
-	ErrExpectedIfName
-	ErrExpectedIfMask
 	ErrExpectedTableType
 	ErrExpectedTableName
 	ErrExpectedTableValue
@@ -66,8 +61,6 @@ func (m ErrorKind) Error() string {
 	switch m {
 	case ErrExpectedLine:
 		return "expected `add`, `table`, a `:label` or a `#` comment"
-	case ErrExpectedCommand:
-		return "expected command"
 	case ErrExpectedFrom:
 		return "expected `from`"
 	case ErrExpectedPrefix:
@@ -80,8 +73,6 @@ func (m ErrorKind) Error() string {
 		return "expected protocol"
 	case ErrExpectedWhitespace:
 		return "expected whitespace"
-	case ErrExpectedIPProto:
-		return "expected IP protocol"
 	case ErrExpectedEitherIPOrProto:
 		return "expected IP or transport protocol"
 	case ErrExpectedIPv4Network:
@@ -96,8 +87,6 @@ func (m ErrorKind) Error() string {
 		return "unexpected escape character in port name"
 	case ErrExpectedToken:
 		return "expected token"
-	case ErrExpectedFlowName:
-		return "expected flow name"
 	case ErrUnknownOption:
 		return "unknown option"
 	case ErrExpectedTarget:
@@ -130,10 +119,6 @@ func (m ErrorKind) Error() string {
 		return "unknown ICMPv6 type"
 	case ErrUnknownTCPFlag:
 		return "unknown TCP flag"
-	case ErrExpectedIfName:
-		return "expected interface name"
-	case ErrExpectedIfMask:
-		return "invalid interface mask pattern"
 	case ErrExpectedTableType:
 		return "expected table type"
 	case ErrExpectedTableName:
