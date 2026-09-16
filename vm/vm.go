@@ -185,6 +185,26 @@ func (m *program[V4, V6]) Mark() rule {
 	}
 }
 
+// DropComments removes the comments that decide nothing from the options of
+// the rule, so that a commented rule keeps an empty run of options.
+//
+// A comment holds for every packet, so dropping it changes no verdict unless
+// it is negated or belongs to an or-group, joined to the option before it or
+// followed by one joined to it.
+func (m *program[V4, V6]) DropComments(open rule) {
+	options := m.options[open.Options.Start:]
+	kept := 0
+	for idx, opt := range options {
+		joined := idx+1 < len(options) && options[idx+1].Or
+		if opt.Kind == ipfw.OptComment && !opt.Neg && !opt.Or && !joined {
+			continue
+		}
+		options[kept] = opt
+		kept++
+	}
+	m.options = m.options[:int(open.Options.Start)+kept]
+}
+
 // Close ends every run of the rule where the arenas end now.
 func (m *program[V4, V6]) Close(open rule) rule {
 	open.IPProtos.End = uint32(len(m.ipProtos))
@@ -438,6 +458,7 @@ func (m *builder[V4, V6]) Add(rec *ipfw.Record) error {
 	m.link(m.pendingNumbers[m.number])
 	delete(m.pendingNumbers, m.number)
 	idx := m.Len()
+	m.DropComments(m.start)
 	closed := m.Close(m.start)
 	closed.Kind = rec.Instruction.Action.Kind
 	switch closed.Kind {
@@ -966,7 +987,8 @@ func inRange(port uint16, ports ipfw.PortRange) bool {
 // cannot reproduce.
 //
 // keep-state holds, the VM being stateless and the state it would create
-// of no consequence to the verdict. A comment holds, being no condition.
+// of no consequence to the verdict. A comment holds, being no condition, so
+// a negated one fails its rule.
 // diverted never holds, there being no divert sockets. antispoof holds
 // on the way out and never on the way in, the VM knowing no topology to
 // tell a spoofed source by.

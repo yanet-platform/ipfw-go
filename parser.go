@@ -205,7 +205,8 @@ func (m *Parser) hookLine(s string, state State) (string, fail) {
 }
 
 // parseInstruction parses `[NUM] ACTION … [// comment]` after `add ` into
-// instruction, which may be partially written when it fails.
+// instruction and the state, the instruction possibly partially written when
+// it fails.
 func (m *Parser) parseInstruction(s string, state State, instruction *Instruction) (string, fail) {
 	input := s
 	if num, afterNum, kind := parseU32(s); kind == 0 {
@@ -222,8 +223,11 @@ func (m *Parser) parseInstruction(s string, state State, instruction *Instructio
 		if err := state.OnDestinationTarget(Target{Kind: TargetAny}); err != nil {
 			return input, failFrom(err, s)
 		}
-		instruction.InlineComment, rest = parseInlineComment(s)
-		return rest, fail{}
+		buf, err := parseCommentOption(s, state, false, topLevel)
+		if err.Failed() {
+			return input, err
+		}
+		return buf, fail{}
 	}
 	rest, err := m.parseAction(s, &instruction.Action)
 	if err.Failed() {
@@ -242,7 +246,9 @@ func (m *Parser) parseInstruction(s string, state State, instruction *Instructio
 		}
 	}
 	if instruction.Action.Kind == ActionCheckState {
-		instruction.InlineComment, rest = parseInlineComment(rest)
+		if rest, err = parseTrailingComment(rest, state); err.Failed() {
+			return input, err
+		}
 		return rest, fail{}
 	}
 	rest, ok := ws1(rest)
@@ -253,7 +259,9 @@ func (m *Parser) parseInstruction(s string, state State, instruction *Instructio
 	if err.Failed() {
 		return input, err
 	}
-	instruction.InlineComment, rest = parseInlineComment(rest)
+	if rest, err = parseTrailingComment(rest, state); err.Failed() {
+		return input, err
+	}
 	return rest, fail{}
 }
 
@@ -432,6 +440,10 @@ func (m *Parser) parseBodyLegacy(s string, state State) (string, fail) {
 	// falls back to ports. A token that is not a port leaves the input where
 	// the destination ended, a port the state refuses fails the line.
 	if buf, ok := ws1(rest); ok {
+		// A comment is never a port, and trying it would scan the rest of the line twice.
+		if hasPrefix(buf, "//") {
+			return parseOptions(buf, state, m.opts.OptionHook)
+		}
 		var ctx optionContext
 		_, err = parseOptionGroup(&ctx, buf, DiscardState{}, m.opts.OptionHook)
 		if !err.Failed() || err.Kind != ErrUnknownOption {
@@ -512,9 +524,6 @@ func parseBodyHeader(s string, state State) (string, fail) {
 
 // startsOptions recognizes the first element even when a later group member is unknown.
 func startsOptions(s string, hook OptionHook) bool {
-	if hasPrefix(s, "//") {
-		return true
-	}
 	opened, rest := openGroup(s, trailingPosition)
 	place := topLevel
 	if opened.Braced {
@@ -525,17 +534,17 @@ func startsOptions(s string, hook OptionHook) bool {
 	return err.Kind != ErrUnknownOption
 }
 
-// parseInlineComment returns the text after `//` without its trailing
-// whitespace, or the untouched input when there is none.
+// parseTrailingComment parses a comment that ends a rule without the
+// whitespace an option list starts with, leaving any other input untouched.
 //
-// Input contains only the current physical line, with any hash suffix removed.
-// A comment consumes the remaining input. Whitespace before the slashes is skipped.
-func parseInlineComment(s string) (string, string) {
-	rest, ok := prefix(ws0(s), "//")
-	if !ok {
-		return "", s
+// Such a comment follows check-state, whose rule has no body, or sits right
+// against the last token of a body.
+func parseTrailingComment(s string, state State) (string, fail) {
+	buf := ws0(s)
+	if !hasPrefix(buf, "//") {
+		return s, fail{}
 	}
-	return trimRightSpace(rest), ""
+	return parseCommentOption(buf, state, false, topLevel)
 }
 
 // parseTable parses `NAME create|add …` after `table `.
@@ -711,7 +720,8 @@ type Record struct {
 	Label string
 }
 
-// Instruction is the header of an `add` rule, the body going to the State.
+// Instruction is the header of an `add` rule, the body and its `//` comment
+// going to the State.
 type Instruction struct {
 	// Num is the explicit rule number, 0 when absent.
 	Num uint32
@@ -721,9 +731,6 @@ type Instruction struct {
 	Log Log
 	// Tag is the positive `tag` number, 0 when absent.
 	Tag uint32
-	// InlineComment is the borrowed text after `//` and before any `#`.
-	// Leading space is kept and trailing whitespace removed.
-	InlineComment string
 }
 
 // Log is the `log [logamount N]` part of a rule.

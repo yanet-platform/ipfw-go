@@ -6,6 +6,10 @@ import "strings"
 type OptKind uint8
 
 // The rule options. OptCustom is produced by an option hook.
+//
+// OptComment is `//` with the rest of the line up to any `#` as its text, the
+// leading space kept and the trailing whitespace removed. Taking the rest of
+// the line, it ends the option list and leaves any group it stands in unclosed.
 const (
 	_ OptKind = iota
 	OptComment
@@ -77,8 +81,8 @@ func ParseOptions(s string, state State, hook OptionHook) (int, error) {
 	return consumed(s, rest, err)
 }
 
-// parseOptions parses the option list up to the end of the input, the end
-// of the line or an inline comment.
+// parseOptions parses the option list up to the end of the input or of the
+// line.
 //
 // Every option is handed to the state as it is read, so the ones before a
 // failure stay in the state.
@@ -86,7 +90,7 @@ func parseOptions(s string, state State, hook OptionHook) (string, fail) {
 	rest := s
 	var ctx optionContext
 	var ok bool
-	for rest != "" && rest[0] != '\n' && !hasPrefix(rest, "\r\n") && !hasPrefix(rest, "//") {
+	for rest != "" && rest[0] != '\n' && !hasPrefix(rest, "\r\n") {
 		buf, err := parseOptionGroup(&ctx, rest, state, hook)
 		if err.Failed() {
 			return s, err
@@ -174,6 +178,8 @@ func parseOption(
 		return s, err
 	}
 	switch kind {
+	case OptComment:
+		buf, err = parseCommentOption(rest, state, neg, place)
 	case OptSourcePort, OptDestinationPort:
 		buf, err = parsePortsOption(arg, state, kind, neg, place)
 	case OptICMPTypes, OptICMP6Types:
@@ -205,6 +211,10 @@ func argumentOption(s string) (OptKind, int) {
 		return 0, 0
 	}
 	switch s[0] {
+	case '/':
+		if hasPrefix(s, "//") {
+			return OptComment, len("//")
+		}
 	case 's':
 		if hasPrefix(s, "src-port") {
 			return OptSourcePort, len("src-port")
@@ -300,6 +310,31 @@ func parseCustomOption(
 		return s, failure
 	}
 	return s[n:], fail{}
+}
+
+// parseCommentOption takes the rest of the line after `//` as the comment,
+// a rejection pointing at the slashes.
+//
+// The newline stays for the line to end on, a carriage return before it
+// included, so the comment never reaches the next line.
+func parseCommentOption(s string, state State, neg bool, place optionPlace) (string, fail) {
+	text, _ := prefix(s, "//")
+	end := strings.IndexByte(text, '\n')
+	if end < 0 {
+		end = len(text)
+	} else if end > 0 && text[end-1] == '\r' {
+		end--
+	}
+	opt := Opt{
+		Neg:  neg,
+		Or:   place == groupNext,
+		Kind: OptComment,
+		Text: trimRightSpace(text[:end]),
+	}
+	if err := failFrom(state.OnOption(opt), s); err.Failed() {
+		return s, err
+	}
+	return text[end:], fail{}
 }
 
 // parseTypesOption parses the comma list of type numbers after `icmptypes`
@@ -615,7 +650,8 @@ type Opt struct {
 	PortOr bool
 	// Kind is the option.
 	Kind OptKind
-	// Text is the comment, the keep-state flow name or the custom keyword.
+	// Text is the comment after `//`, the keep-state flow name or the custom
+	// keyword.
 	Text string
 	// Arg is the raw argument of a custom option.
 	Arg string

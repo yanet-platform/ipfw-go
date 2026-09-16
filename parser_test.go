@@ -90,33 +90,34 @@ func Test_Parser_Next_CommentOnlyRule(t *testing.T) {
 	cases := []struct {
 		name     string
 		input    string
+		comment  string
 		expected ipfw.Record
 	}{
 		{
-			name:  "comment with LF",
-			input: "add // note\n",
+			name:    "comment with LF",
+			input:   "add // note\n",
+			comment: " note",
 			expected: ipfw.Record{
 				Line: 1,
 				Text: "add // note",
 				Kind: ipfw.RecordInstruction,
 				Instruction: ipfw.Instruction{
-					Action:        ipfw.Action{Kind: ipfw.ActionCount},
-					InlineComment: " note",
+					Action: ipfw.Action{Kind: ipfw.ActionCount},
 				},
 			},
 		},
 		{
-			name:  "number and hash metadata with CRLF",
-			input: "\tadd 100 // note \t# metadata \t\r\n",
+			name:    "number and hash metadata with CRLF",
+			input:   "\tadd 100 // note \t# metadata \t\r\n",
+			comment: " note",
 			expected: ipfw.Record{
 				Line:    1,
 				Text:    "add 100 // note \t# metadata",
 				Kind:    ipfw.RecordInstruction,
 				Comment: " metadata",
 				Instruction: ipfw.Instruction{
-					Num:           100,
-					Action:        ipfw.Action{Kind: ipfw.ActionCount},
-					InlineComment: " note",
+					Num:    100,
+					Action: ipfw.Action{Kind: ipfw.ActionCount},
 				},
 			},
 		},
@@ -162,16 +163,16 @@ func Test_Parser_Next_CommentOnlyRule(t *testing.T) {
 			},
 		},
 		{
-			name:  "comment content is not rule syntax",
-			input: "add 200 //\tdeny log tcp from any to any in // more \t",
+			name:    "comment content is not rule syntax",
+			input:   "add 200 //\tdeny log tcp from any to any in // more \t",
+			comment: "\tdeny log tcp from any to any in // more",
 			expected: ipfw.Record{
 				Line: 1,
 				Text: "add 200 //\tdeny log tcp from any to any in // more",
 				Kind: ipfw.RecordInstruction,
 				Instruction: ipfw.Instruction{
-					Num:           200,
-					Action:        ipfw.Action{Kind: ipfw.ActionCount},
-					InlineComment: "\tdeny log tcp from any to any in // more",
+					Num:    200,
+					Action: ipfw.Action{Kind: ipfw.ActionCount},
 				},
 			},
 		},
@@ -186,6 +187,7 @@ func Test_Parser_Next_CommentOnlyRule(t *testing.T) {
 			require.Equal(t, ipfw.ReduceState{
 				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
 				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Options:      []ipfw.Opt{{Kind: ipfw.OptComment, Text: test.comment}},
 			}, state)
 			next(t, parser, eof)
 		})
@@ -214,9 +216,8 @@ func Test_Parser_Next_CommentOnlyRuleStreaming(t *testing.T) {
 				Kind:   ipfw.ActionSkipTo,
 				SkipTo: ipfw.SkipTo{Kind: ipfw.SkipToNumber, Number: 10},
 			},
-			Log:           ipfw.Log{Enabled: true, HasAmount: true, Amount: 3},
-			Tag:           7,
-			InlineComment: " prior",
+			Log: ipfw.Log{Enabled: true, HasAmount: true, Amount: 3},
+			Tag: 7,
 		},
 	}, *record)
 	require.Equal(t, ipfw.ReduceState{
@@ -224,7 +225,10 @@ func Test_Parser_Next_CommentOnlyRuleStreaming(t *testing.T) {
 		Sources:      []ipfw.Target{{Kind: ipfw.TargetNetwork4, Text: "192.0.2.1"}},
 		Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
 		SourcePorts:  []ipfw.PortMatch{portNumber(443)},
-		Options:      []ipfw.Opt{{Kind: ipfw.OptIn}},
+		Options: []ipfw.Opt{
+			{Kind: ipfw.OptIn},
+			{Kind: ipfw.OptComment, Text: " prior"},
+		},
 	}, state)
 	state.Reset()
 	record, err = parser.Next(&state)
@@ -234,14 +238,14 @@ func Test_Parser_Next_CommentOnlyRuleStreaming(t *testing.T) {
 		Text: "add 10 // first",
 		Kind: ipfw.RecordInstruction,
 		Instruction: ipfw.Instruction{
-			Num:           10,
-			Action:        ipfw.Action{Kind: ipfw.ActionCount},
-			InlineComment: " first",
+			Num:    10,
+			Action: ipfw.Action{Kind: ipfw.ActionCount},
 		},
 	}, *record)
 	require.Equal(t, ipfw.ReduceState{
 		Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
 		Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+		Options:      []ipfw.Opt{{Kind: ipfw.OptComment, Text: " first"}},
 	}, emptyToNil(state))
 	state.Reset()
 	record, err = parser.Next(&state)
@@ -312,6 +316,15 @@ func Test_Parser_Next_CommentOnlyRuleCallbackFailure(t *testing.T) {
 				Sources: []ipfw.Target{{Kind: ipfw.TargetAny}},
 			},
 		},
+		{
+			name:  "comment error kind",
+			state: commentRejectingState{OptionError: ipfw.ErrUnknownOption},
+			kind:  ipfw.ErrUnknownOption,
+			want: ipfw.ReduceState{
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+			},
+		},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -335,11 +348,12 @@ func Test_Parser_Next_CommentOnlyRuleCallbackFailure(t *testing.T) {
 	}
 }
 
-// commentRejectingState rejects one implicit target and retains earlier callbacks.
+// commentRejectingState rejects one implicit target or the comment and retains earlier callbacks.
 type commentRejectingState struct {
 	ipfw.ReduceState
 	SourceError      error
 	DestinationError error
+	OptionError      error
 }
 
 // OnSourceTarget implements State.
@@ -356,6 +370,14 @@ func (m *commentRejectingState) OnDestinationTarget(target ipfw.Target) error {
 		return m.DestinationError
 	}
 	return m.ReduceState.OnDestinationTarget(target)
+}
+
+// OnOption implements State.
+func (m *commentRejectingState) OnOption(opt ipfw.Opt) error {
+	if m.OptionError != nil {
+		return m.OptionError
+	}
+	return m.ReduceState.OnOption(opt)
 }
 
 // verifies that parsing a comment-only count rule allocates nothing.
@@ -380,6 +402,7 @@ func Test_Parser_Next_CommentOnlyRuleNoAllocs(t *testing.T) {
 	require.Equal(t, ipfw.ReduceState{
 		Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
 		Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+		Options:      []ipfw.Opt{{Kind: ipfw.OptComment, Text: " note"}},
 	}, state)
 }
 
@@ -409,10 +432,11 @@ func Test_Parser_Next_HashCommentInQuotedText(t *testing.T) {
 	record, err := parser.Next(&state)
 	require.Nil(t, err)
 	expected := passAnyToAny(1, input)
-	expected.Instruction.InlineComment = ` {"id": "before`
 	expected.Comment = `after"}`
 	require.Equal(t, expected, *record)
-	require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), state)
+	expectedState := anyToAnyState(ipfw.ProtoIPAny)
+	expectedState.Options = []ipfw.Opt{{Kind: ipfw.OptComment, Text: ` {"id": "before`}}
+	require.Equal(t, expectedState, state)
 	next(t, parser, eof)
 }
 
@@ -613,11 +637,15 @@ func Test_Parser_Next_HashComments(t *testing.T) {
 				Kind:    ipfw.RecordInstruction,
 				Comment: " metadata",
 				Instruction: ipfw.Instruction{
-					Action:        ipfw.Action{Kind: ipfw.ActionPass},
-					InlineComment: ` {"id": "SLASH-4"}`,
+					Action: ipfw.Action{Kind: ipfw.ActionPass},
 				},
 			},
-			state: anyToAnyState(ipfw.ProtoIPAny),
+			state: ipfw.ReduceState{
+				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Options:      []ipfw.Opt{{Kind: ipfw.OptComment, Text: ` {"id": "SLASH-4"}`}},
+			},
 		},
 		{
 			name:  "check-state slash comment",
@@ -628,9 +656,11 @@ func Test_Parser_Next_HashComments(t *testing.T) {
 				Kind:    ipfw.RecordInstruction,
 				Comment: "metadata",
 				Instruction: ipfw.Instruction{
-					Action:        ipfw.Action{Kind: ipfw.ActionCheckState},
-					InlineComment: " state",
+					Action: ipfw.Action{Kind: ipfw.ActionCheckState},
 				},
+			},
+			state: ipfw.ReduceState{
+				Options: []ipfw.Opt{{Kind: ipfw.OptComment, Text: " state"}},
 			},
 		},
 	}
@@ -836,8 +866,7 @@ func Test_Parser_Next_HashCommentStreaming(t *testing.T) {
 			Kind:    ipfw.RecordInstruction,
 			Comment: " hash",
 			Instruction: ipfw.Instruction{
-				Action:        ipfw.Action{Kind: ipfw.ActionPass},
-				InlineComment: " slash",
+				Action: ipfw.Action{Kind: ipfw.ActionPass},
 			},
 		},
 		{Line: 3, Text: ":NEXT# label", Kind: ipfw.RecordLabel, Comment: " label", Label: "NEXT"},
@@ -855,6 +884,9 @@ func Test_Parser_Next_HashCommentStreaming(t *testing.T) {
 		expectedState := ipfw.ReduceState{}
 		if expectedRecord.Kind == ipfw.RecordInstruction {
 			expectedState = anyToAnyState(ipfw.ProtoIPAny)
+		}
+		if expectedRecord.Line == 2 {
+			expectedState.Options = []ipfw.Opt{{Kind: ipfw.OptComment, Text: " slash"}}
 		}
 		require.Equal(t, expectedState, emptyToNil(state))
 		saved = append(saved, *record)
@@ -1599,6 +1631,7 @@ func Test_Parser_Next_SkipToLabelsOptIn(t *testing.T) {
 
 // verifies that numeric jumps and state-flow names retain their default syntax and metadata.
 func Test_Parser_Next_StandardActionsWithoutCompatibility(t *testing.T) {
+	rule := ipfw.Opt{Kind: ipfw.OptComment, Text: " rule"}
 	cases := []struct {
 		name   string
 		input  string
@@ -1610,16 +1643,17 @@ func Test_Parser_Next_StandardActionsWithoutCompatibility(t *testing.T) {
 			action: ipfw.Action{
 				Kind: ipfw.ActionSkipTo, SkipTo: ipfw.SkipTo{Kind: ipfw.SkipToNumber, Number: 100},
 			},
-			state: anyToAnyState(ipfw.ProtoIPAny),
+			state: withOptions(anyToAnyState(ipfw.ProtoIPAny), rule),
 		},
 		{
 			name: "tablearg", input: "add skipto tablearg ip from any to any // rule # hash",
 			action: ipfw.Action{Kind: ipfw.ActionSkipTo, SkipTo: ipfw.SkipTo{Kind: ipfw.SkipToTableArg}},
-			state:  anyToAnyState(ipfw.ProtoIPAny),
+			state:  withOptions(anyToAnyState(ipfw.ProtoIPAny), rule),
 		},
 		{
 			name: "state flow", input: "add check-state :flow // rule # hash",
 			action: ipfw.Action{Kind: ipfw.ActionCheckState, Flow: "flow"},
+			state:  withOptions(ipfw.ReduceState{}, rule),
 		},
 		{
 			name: "keep flow", input: "add pass ip from any to any keep-state :flow // rule # hash",
@@ -1628,7 +1662,7 @@ func Test_Parser_Next_StandardActionsWithoutCompatibility(t *testing.T) {
 				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
 				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
 				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
-				Options:      []ipfw.Opt{{Kind: ipfw.OptKeepState, Text: "flow"}},
+				Options:      []ipfw.Opt{{Kind: ipfw.OptKeepState, Text: "flow"}, rule},
 			},
 		},
 	}
@@ -1640,7 +1674,7 @@ func Test_Parser_Next_StandardActionsWithoutCompatibility(t *testing.T) {
 			require.Nil(t, err)
 			require.Equal(t, ipfw.Record{
 				Line: 1, Text: testCase.input, Kind: ipfw.RecordInstruction, Comment: " hash",
-				Instruction: ipfw.Instruction{Action: testCase.action, InlineComment: " rule"},
+				Instruction: ipfw.Instruction{Action: testCase.action},
 			}, *record)
 			require.Equal(t, testCase.state, state)
 			next(t, parser, eof)
@@ -1805,14 +1839,18 @@ func Test_Parser_Next_ActionCheckState(t *testing.T) {
 		add pass ip from any to any
 	`)
 	parser := ipfw.NewParser(source)
-	expected := checkState(1, "add check-state :any // comment", "any", 0)
-	expected.Instruction.InlineComment = " comment"
-	next(t, parser, expected)
 	var state ipfw.ReduceState
 	rec, err := parser.Next(&state)
 	require.Nil(t, err)
+	require.Equal(t, checkState(1, "add check-state :any // comment", "any", 0), *rec)
+	require.Equal(t, ipfw.ReduceState{
+		Options: []ipfw.Opt{{Kind: ipfw.OptComment, Text: " comment"}},
+	}, state)
+	state.Reset()
+	rec, err = parser.Next(&state)
+	require.Nil(t, err)
 	require.Equal(t, passAnyToAny(2, "add pass ip from any to any"), *rec)
-	require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), state)
+	require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), emptyToNil(state))
 	next(t, parser, eof)
 
 	cases := []struct {
@@ -2211,6 +2249,12 @@ func anyToAnyState(version ipfw.ProtoIP) ipfw.ReduceState {
 	}
 }
 
+// withOptions is the state with the options appended after its own.
+func withOptions(state ipfw.ReduceState, options ...ipfw.Opt) ipfw.ReduceState {
+	state.Options = append(state.Options, options...)
+	return state
+}
+
 // verifies the simplest complete rule end to end: the record and every
 // token of the body in the state.
 func Test_Parser_Next_AnyToAny(t *testing.T) {
@@ -2276,11 +2320,10 @@ func Test_Parser_Next_OptionOnly(t *testing.T) {
 				Kind:    ipfw.RecordInstruction,
 				Comment: " metadata",
 				Instruction: ipfw.Instruction{
-					Num:           130,
-					Action:        ipfw.Action{Kind: ipfw.ActionPass},
-					Log:           ipfw.Log{Enabled: true, HasAmount: true, Amount: 3},
-					Tag:           7,
-					InlineComment: " memo",
+					Num:    130,
+					Action: ipfw.Action{Kind: ipfw.ActionPass},
+					Log:    ipfw.Log{Enabled: true, HasAmount: true, Amount: 3},
+					Tag:    7,
 				},
 			},
 			state: ipfw.ReduceState{
@@ -2288,6 +2331,7 @@ func Test_Parser_Next_OptionOnly(t *testing.T) {
 				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
 				Options: []ipfw.Opt{
 					{Kind: ipfw.OptVia, Via: ipfw.Via{Kind: ipfw.ViaExact, Name: "vlan17"}},
+					{Kind: ipfw.OptComment, Text: " memo"},
 				},
 			},
 		},
@@ -2320,14 +2364,32 @@ func Test_Parser_Next_OptionOnly(t *testing.T) {
 				Text: "add 150 allow // memo",
 				Kind: ipfw.RecordInstruction,
 				Instruction: ipfw.Instruction{
-					Num:           150,
-					Action:        ipfw.Action{Kind: ipfw.ActionPass},
-					InlineComment: " memo",
+					Num:    150,
+					Action: ipfw.Action{Kind: ipfw.ActionPass},
 				},
 			},
 			state: ipfw.ReduceState{
 				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
 				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Options:      []ipfw.Opt{{Kind: ipfw.OptComment, Text: " memo"}},
+			},
+		},
+		{
+			name:  "negated comment body",
+			input: "add 155 allow not // never\n",
+			expected: ipfw.Record{
+				Line: 1,
+				Text: "add 155 allow not // never",
+				Kind: ipfw.RecordInstruction,
+				Instruction: ipfw.Instruction{
+					Num:    155,
+					Action: ipfw.Action{Kind: ipfw.ActionPass},
+				},
+			},
+			state: ipfw.ReduceState{
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Options:      []ipfw.Opt{{Neg: true, Kind: ipfw.OptComment, Text: " never"}},
 			},
 		},
 		{
@@ -2800,10 +2862,9 @@ func Test_Parser_Next_TargetGroups(t *testing.T) {
 func Test_Parser_Next_Ports(t *testing.T) {
 	anyToAny := []ipfw.Target{{Kind: ipfw.TargetAny}}
 	cases := []struct {
-		name    string
-		input   string
-		comment string
-		state   ipfw.ReduceState
+		name  string
+		input string
+		state ipfw.ReduceState
 	}{
 		{
 			name:  "source port starting with to",
@@ -2970,14 +3031,14 @@ func Test_Parser_Next_Ports(t *testing.T) {
 			},
 		},
 		{
-			name:    "destination port before an inline comment",
-			input:   "add allow tcp from any to any 80 // web\n",
-			comment: " web",
+			name:  "destination port before a comment",
+			input: "add allow tcp from any to any 80 // web\n",
 			state: ipfw.ReduceState{
 				Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
 				Sources:          anyToAny,
 				Destinations:     anyToAny,
 				DestinationPorts: []ipfw.PortMatch{portNumber(80)},
+				Options:          []ipfw.Opt{{Kind: ipfw.OptComment, Text: " web"}},
 			},
 		},
 	}
@@ -2991,8 +3052,7 @@ func Test_Parser_Next_Ports(t *testing.T) {
 				Text: strings.TrimSuffix(tc.input, "\n"),
 				Kind: ipfw.RecordInstruction,
 				Instruction: ipfw.Instruction{
-					Action:        ipfw.Action{Kind: ipfw.ActionPass},
-					InlineComment: tc.comment,
+					Action: ipfw.Action{Kind: ipfw.ActionPass},
 				},
 			}, *rec)
 			require.Equal(t, tc.state, state)
@@ -3378,11 +3438,10 @@ func Test_Parser_Next_Options(t *testing.T) {
 	tcp := []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}}
 	established := ipfw.Opt{Kind: ipfw.OptEstablished}
 	cases := []struct {
-		name    string
-		input   string
-		comment string
-		err     *ipfw.ParseError
-		state   ipfw.ReduceState
+		name  string
+		input string
+		err   *ipfw.ParseError
+		state ipfw.ReduceState
 	}{
 		{
 			name:  "estab alias immediately after destination",
@@ -3459,14 +3518,16 @@ func Test_Parser_Next_Options(t *testing.T) {
 			},
 		},
 		{
-			name:    "alias before a comment at EOF",
-			input:   "add allow tcp from any to any estab // alias spelling",
-			comment: " alias spelling",
+			name:  "alias before a comment at EOF",
+			input: "add allow tcp from any to any estab // alias spelling",
 			state: ipfw.ReduceState{
 				Protos:       tcp,
 				Sources:      anyToAny,
 				Destinations: anyToAny,
-				Options:      []ipfw.Opt{established},
+				Options: []ipfw.Opt{
+					established,
+					{Kind: ipfw.OptComment, Text: " alias spelling"},
+				},
 			},
 		},
 		{
@@ -3700,14 +3761,55 @@ func Test_Parser_Next_Options(t *testing.T) {
 			},
 		},
 		{
-			name:    "in before an inline comment",
-			input:   "add allow tcp from any to any in // c\n",
-			comment: " c",
+			name:  "in before a comment",
+			input: "add allow tcp from any to any in // c\n",
 			state: ipfw.ReduceState{
 				Protos:       tcp,
 				Sources:      anyToAny,
 				Destinations: anyToAny,
-				Options:      []ipfw.Opt{{Kind: ipfw.OptIn}},
+				Options:      []ipfw.Opt{{Kind: ipfw.OptIn}, {Kind: ipfw.OptComment, Text: " c"}},
+			},
+		},
+		{
+			name:  "negated comment",
+			input: "add allow tcp from any to any in not // never\n",
+			state: ipfw.ReduceState{
+				Protos:       tcp,
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options: []ipfw.Opt{
+					{Kind: ipfw.OptIn},
+					{Neg: true, Kind: ipfw.OptComment, Text: " never"},
+				},
+			},
+		},
+		{
+			name:  "comment right after the destination",
+			input: "add allow tcp from any to any // c { in or out }\n",
+			state: ipfw.ReduceState{
+				Protos:       tcp,
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options:      []ipfw.Opt{{Kind: ipfw.OptComment, Text: " c { in or out }"}},
+			},
+		},
+		{
+			name:  "comment inside a group",
+			input: "add allow tcp from any to any { in or // c }\n",
+			err: &ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedOr,
+				Line:   1,
+				Column: 44,
+				Text:   "add allow tcp from any to any { in or // c }",
+			},
+			state: ipfw.ReduceState{
+				Protos:       tcp,
+				Sources:      anyToAny,
+				Destinations: anyToAny,
+				Options: []ipfw.Opt{
+					{Kind: ipfw.OptIn},
+					{Or: true, Kind: ipfw.OptComment, Text: " c }"},
+				},
 			},
 		},
 		{
@@ -3930,14 +4032,13 @@ func Test_Parser_Next_Options(t *testing.T) {
 			},
 		},
 		{
-			name:    "option before an inline comment",
-			input:   "add allow tcp from any to any established // c\n",
-			comment: " c",
+			name:  "option before a comment",
+			input: "add allow tcp from any to any established // c\n",
 			state: ipfw.ReduceState{
 				Protos:       tcp,
 				Sources:      anyToAny,
 				Destinations: anyToAny,
-				Options:      []ipfw.Opt{established},
+				Options:      []ipfw.Opt{established, {Kind: ipfw.OptComment, Text: " c"}},
 			},
 		},
 	}
@@ -3953,8 +4054,7 @@ func Test_Parser_Next_Options(t *testing.T) {
 					Text: strings.TrimSuffix(tc.input, "\n"),
 					Kind: ipfw.RecordInstruction,
 					Instruction: ipfw.Instruction{
-						Action:        ipfw.Action{Kind: ipfw.ActionPass},
-						InlineComment: tc.comment,
+						Action: ipfw.Action{Kind: ipfw.ActionPass},
 					},
 				}, *rec)
 			} else {
@@ -4490,37 +4590,64 @@ func Test_Parser_Next_TrailingWhitespace(t *testing.T) {
 	}, state)
 }
 
-// verifies that an inline comment after the body is the raw text after the
-// slashes, part of the line text, and that a lone slash is an unknown option.
-func Test_Parser_Next_InlineComment(t *testing.T) {
+// verifies that a comment after the body is an option holding the raw text
+// after the slashes, part of the line text, and that a lone slash is an
+// unknown option.
+func Test_Parser_Next_CommentOption(t *testing.T) {
 	cases := []struct {
 		name    string
 		input   string
-		comment string
+		options []ipfw.Opt
 	}{
 		{
 			name:    "json payload",
 			input:   "add pass ip from any to any // {\"id\": \"RULE-42\", \"log\": true}\n",
-			comment: " {\"id\": \"RULE-42\", \"log\": true}",
+			options: []ipfw.Opt{comment(" {\"id\": \"RULE-42\", \"log\": true}")},
 		},
-		{name: "empty comment", input: "add pass ip from any to any //", comment: ""},
+		{
+			name:    "empty comment",
+			input:   "add pass ip from any to any //",
+			options: []ipfw.Opt{comment("")},
+		},
 		{
 			name:    "trailing whitespace is trimmed",
 			input:   "add pass ip from any to any // c \t\n",
-			comment: " c",
+			options: []ipfw.Opt{comment(" c")},
 		},
-		{name: "tab before the slashes", input: "add pass ip from any to any\t//x\n", comment: "x"},
-		{name: "no comment", input: "add pass ip from any to any\n", comment: ""},
+		{
+			name:    "carriage return before LF is trimmed",
+			input:   "add pass ip from any to any // c\r\n",
+			options: []ipfw.Opt{comment(" c")},
+		},
+		{
+			name:    "tab before the slashes",
+			input:   "add pass ip from any to any\t//x\n",
+			options: []ipfw.Opt{comment("x")},
+		},
+		{
+			name:    "slashes right after an option",
+			input:   "add pass ip from any to any in// c\n",
+			options: []ipfw.Opt{{Kind: ipfw.OptIn}, comment(" c")},
+		},
+		{
+			name:    "options inside the comment",
+			input:   "add pass ip from any to any // in not out\n",
+			options: []ipfw.Opt{comment(" in not out")},
+		},
+		{
+			name:    "negated comment",
+			input:   "add pass ip from any to any not // never\n",
+			options: []ipfw.Opt{{Neg: true, Kind: ipfw.OptComment, Text: " never"}},
+		},
+		{name: "no comment", input: "add pass ip from any to any\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var state ipfw.ReduceState
 			rec, err := ipfw.NewParser(tc.input).Next(&state)
 			require.Nil(t, err)
-			expected := passAnyToAny(1, strings.TrimSpace(tc.input))
-			expected.Instruction.InlineComment = tc.comment
-			require.Equal(t, expected, *rec)
-			require.Equal(t, anyToAnyState(ipfw.ProtoIPAny), state)
+			require.Equal(t, passAnyToAny(1, strings.TrimSpace(tc.input)), *rec)
+			require.Equal(t, withOptions(anyToAnyState(ipfw.ProtoIPAny), tc.options...), state)
 		})
 	}
 	nextError(t, ipfw.NewParser("add pass ip from any to any / x"), ipfw.ParseError{
@@ -4856,9 +4983,15 @@ func ExampleParser_Next() {
 		if rec.Kind == ipfw.RecordEOF {
 			break
 		}
+		note := ""
+		for _, opt := range state.Options {
+			if opt.Kind == ipfw.OptComment {
+				note = opt.Text
+			}
+		}
 		fmt.Printf("%d: %s, log %v, from %q, %d destination ports, comment %q\n",
 			rec.Instruction.Num, rec.Instruction.Action, rec.Instruction.Log.Enabled,
-			state.Sources[0].Text, len(state.DestinationPorts), rec.Instruction.InlineComment)
+			state.Sources[0].Text, len(state.DestinationPorts), note)
 		state.Reset()
 	}
 	// Output:
@@ -5140,7 +5273,7 @@ func Benchmark_Parser_Next_CommentLong(b *testing.B) {
 	benchmarkNext(b, "# "+strings.Repeat("example comment ", 256)+"\n")
 }
 
-func Benchmark_Parser_Next_InlineCommentLong(b *testing.B) {
+func Benchmark_Parser_Next_CommentOptionLong(b *testing.B) {
 	benchmarkNext(b, "add pass ip from any to any // "+strings.Repeat("example comment ", 256)+"\n")
 }
 
