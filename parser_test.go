@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
 
@@ -2672,6 +2673,289 @@ func (m *bodyRejectingProtoState) OnProto(ipfw.ProtoMatch) error {
 	return m.Error
 }
 
+// inAndTCP knows `in` and `tcp` as protocols, an option keyword among them.
+var inAndTCP = ipfw.ProtoCheckerFunc(func(name string) bool {
+	return name == "in" || name == "tcp"
+})
+
+// verifies that a proto checker commits a body to the legacy grammar exactly
+// when its first protocol is known, whatever an option start would suggest.
+func Test_Parser_Next_ProtoChecker(t *testing.T) {
+	option := ipfw.Opt{Kind: ipfw.OptCustom, Text: "tcp:note"}
+	hook := func(rest string) (ipfw.Opt, int, error) {
+		if strings.HasPrefix(rest, "tcp:note") {
+			return option, len("tcp:note"), nil
+		}
+		return ipfw.Opt{}, 0, nil
+	}
+	anyToAny := ipfw.ReduceState{
+		Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+		Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+	}
+	cases := []struct {
+		name  string
+		input string
+		hook  ipfw.OptionHook
+		state ipfw.ReduceState
+	}{
+		{
+			name:  "known option-shaped protocol",
+			input: "add pass in from any to any",
+			state: ipfw.ReduceState{
+				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "in"}}},
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+			},
+		},
+		{
+			name:  "unknown first name selects options",
+			input: "add pass out",
+			state: ipfw.ReduceState{
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Options:      []ipfw.Opt{{Kind: ipfw.OptOut}},
+			},
+		},
+		{
+			name:  "compact protocol group",
+			input: "add pass {tcp} from any to any",
+			state: ipfw.ReduceState{
+				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "tcp"}}},
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+			},
+		},
+		{
+			name:  "punctuated option",
+			input: "add pass tcp:note",
+			hook:  hook,
+			state: ipfw.ReduceState{
+				Sources:      anyToAny.Sources,
+				Destinations: anyToAny.Destinations,
+				Options:      []ipfw.Opt{option},
+			},
+		},
+		{
+			name:  "grouped punctuated option",
+			input: "add pass { tcp:note }",
+			hook:  hook,
+			state: ipfw.ReduceState{
+				Sources:      anyToAny.Sources,
+				Destinations: anyToAny.Destinations,
+				Options:      []ipfw.Opt{option},
+			},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			parser := ipfw.NewParser(
+				ruleset(test.input+"\n# after\n"),
+				ipfw.WithProtoChecker(inAndTCP),
+				ipfw.WithOptionHook(test.hook),
+			)
+			var state ipfw.ReduceState
+			record, err := parser.Next(&state)
+			require.Nil(t, err)
+			require.Equal(t, passAnyToAny(1, test.input), *record)
+			require.Equal(t, test.state, state)
+			next(t, parser, ipfw.Record{
+				Line:    2,
+				Text:    "# after",
+				Kind:    ipfw.RecordComment,
+				Comment: " after",
+			})
+			next(t, parser, eof)
+		})
+	}
+}
+
+// verifies that a body the proto checker commits to one grammar fails in that
+// grammar rather than falling back to the other.
+func Test_Parser_Next_ProtoCheckerErrors(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		expected ipfw.ParseError
+		state    ipfw.ReduceState
+	}{
+		{
+			name:  "known option-shaped protocol needs from",
+			input: "add allow in proto tcp",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedFrom,
+				Line:   1,
+				Column: 13,
+				Text:   "add allow in proto tcp",
+			},
+			state: ipfw.ReduceState{
+				Protos: []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "in"}}},
+			},
+		},
+		{
+			name:  "known option-shaped protocol alone",
+			input: "add allow in",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 12,
+				Text:   "add allow in",
+			},
+			state: ipfw.ReduceState{
+				Protos: []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "in"}}},
+			},
+		},
+		{
+			name:  "unknown later group member keeps the legacy grammar",
+			input: "add allow { not in or out }",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedWhitespace,
+				Line:   1,
+				Column: 27,
+				Text:   "add allow { not in or out }",
+			},
+			state: ipfw.ReduceState{
+				Protos: []ipfw.ProtoMatch{
+					{Neg: true, Proto: ipfw.Proto{Name: "in"}},
+					{Proto: ipfw.Proto{Name: "out"}},
+				},
+			},
+		},
+		{
+			name:  "unknown protocol name selects options",
+			input: "add allow udp from any to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrUnknownOption,
+				Line:   1,
+				Column: 10,
+				Text:   "add allow udp from any to any",
+			},
+			state: ipfw.ReduceState{
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+			},
+		},
+		{
+			name:  "protocol zero is a name",
+			input: "add allow 0 from any to any",
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrUnknownOption,
+				Line:   1,
+				Column: 10,
+				Text:   "add allow 0 from any to any",
+			},
+			state: ipfw.ReduceState{
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+			},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			parser := ipfw.NewParser(
+				ruleset(test.input+"\n# after\n"),
+				ipfw.WithProtoChecker(inAndTCP),
+			)
+			var state ipfw.ReduceState
+			record, err := parser.Next(&state)
+			require.Nil(t, record)
+			require.Equal(t, &test.expected, err)
+			require.Equal(t, test.state, state)
+			next(t, parser, ipfw.Record{
+				Line:    2,
+				Text:    "# after",
+				Kind:    ipfw.RecordComment,
+				Comment: " after",
+			})
+			next(t, parser, eof)
+		})
+	}
+}
+
+// verifies that IP version keywords and protocol numbers commit to the legacy
+// grammar without asking the proto checker.
+func Test_Parser_Next_ProtoCheckerKeywords(t *testing.T) {
+	var asked []string
+	checker := ipfw.ProtoCheckerFunc(func(name string) bool {
+		asked = append(asked, name)
+		return false
+	})
+	cases := []struct {
+		name  string
+		input string
+		state ipfw.ReduceState
+	}{
+		{
+			name:  "IP version keyword",
+			input: "add pass ip6 from any to any",
+			state: anyToAnyState(ipfw.ProtoIPv6),
+		},
+		{
+			name:  "protocol number",
+			input: "add pass 6 from any to any",
+			state: ipfw.ReduceState{
+				Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Number: 6}}},
+				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+			},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			asked = nil
+			parser := ipfw.NewParser(test.input, ipfw.WithProtoChecker(checker))
+			var state ipfw.ReduceState
+			record, err := parser.Next(&state)
+			require.Nil(t, err)
+			require.Equal(t, passAnyToAny(1, test.input), *record)
+			require.Equal(t, test.state, state)
+			require.Empty(t, asked)
+			next(t, parser, eof)
+		})
+	}
+}
+
+// protoLookupState is a raw state that also happens to look protocols up.
+type protoLookupState struct {
+	ipfw.ReduceState
+}
+
+// ResolveProto knows no protocol.
+func (m *protoLookupState) ResolveProto(string) (uint8, bool) {
+	return 0, false
+}
+
+// verifies that a state looking protocols up has no say in the grammar, which
+// only the parser's proto checker chooses.
+func Test_Parser_Next_ProtoCheckerNotFromState(t *testing.T) {
+	const input = "add 160 allow in from any to any"
+	parser := ipfw.NewParser(input)
+	var state protoLookupState
+	record, err := parser.Next(&state)
+	require.Nil(t, err)
+	require.Equal(t, ipfw.Record{
+		Line: 1,
+		Text: input,
+		Kind: ipfw.RecordInstruction,
+		Instruction: ipfw.Instruction{
+			Num:    160,
+			Action: ipfw.Action{Kind: ipfw.ActionPass},
+		},
+	}, *record)
+	require.Equal(t, ipfw.ReduceState{
+		Protos:       []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "in"}}},
+		Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+		Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+	}, state.ReduceState)
+	next(t, parser, eof)
+}
+
+// verifies that ProtoCheckerFunc asks its function.
+func Test_ProtoCheckerFunc_IsProto(t *testing.T) {
+	assert.True(t, inAndTCP.IsProto("tcp"))
+	assert.True(t, inAndTCP.IsProto("in"))
+	assert.False(t, inAndTCP.IsProto("udp"))
+}
+
 // verifies that me and me6 reach the state as targets without text, the
 // whole token telling me6 from me.
 func Test_Parser_Next_MeToMe6(t *testing.T) {
@@ -5132,7 +5416,7 @@ func Benchmark_Parser_Next_AnyToAny(b *testing.B) {
 	benchmarkNext(b, "add pass ip from any to any\n")
 }
 
-// Benchmark_Parser_Next_Grammar compares grammar selection with raw and resolving states.
+// Benchmark_Parser_Next_Grammar compares grammar selection with and without a proto checker.
 func Benchmark_Parser_Next_Grammar(b *testing.B) {
 	for _, test := range []struct {
 		name  string
@@ -5155,26 +5439,23 @@ func Benchmark_Parser_Next_Grammar(b *testing.B) {
 		{name: "Ruleset", input: syntheticRuleset()},
 	} {
 		b.Run(test.name, func(b *testing.B) {
-			for _, mode := range []string{"Raw", "Resolver", "ForwardedResolver", "HiddenResolver"} {
+			for _, mode := range []string{"Raw", "RawChecker", "Resolver", "ResolverChecker"} {
 				b.Run(mode, func(b *testing.B) {
-					parser := ipfw.NewParser(test.input,
-						ipfw.WithLabels(), ipfw.WithOptionHook(test.hook))
+					options := []ipfw.ParserOption{ipfw.WithLabels(), ipfw.WithOptionHook(test.hook)}
+					if strings.HasSuffix(mode, "Checker") {
+						options = append(options, ipfw.WithProtoChecker(protoChecker(fakeProtos{})))
+					}
+					parser := ipfw.NewParser(test.input, options...)
 					var raw ipfw.ReduceState
 					var sink ipfw.ReduceVMState[net4, net6]
 					var state ipfw.State = &raw
 					reset := raw.Reset
-					if mode != "Raw" {
+					if strings.HasPrefix(mode, "Resolver") {
 						state = ipfw.NewResolver(&sink, ipfw.Environment[net4, net6]{
 							Networks: nets, Protos: fakeProtos{}, Services: fakeServices{},
 							Targets: newGrammarBenchmarkTargets(),
 						})
 						reset = sink.Reset
-						switch mode {
-						case "HiddenResolver":
-							state = &grammarOpaqueState{State: state}
-						case "ForwardedResolver":
-							state = &grammarResolvingState{State: state, ProtoResolver: fakeProtos{}}
-						}
 					}
 					for {
 						reset()
@@ -5207,15 +5488,9 @@ func Benchmark_Parser_Next_Grammar(b *testing.B) {
 	}
 }
 
-// grammarOpaqueState forwards callbacks while hiding optional State capabilities.
+// grammarOpaqueState forwards the State callbacks and nothing else.
 type grammarOpaqueState struct {
 	ipfw.State
-}
-
-// grammarResolvingState forwards protocol lookup with the same callback delegation.
-type grammarResolvingState struct {
-	ipfw.State
-	ipfw.ProtoResolver
 }
 
 // grammarBenchmarkTargets keeps target lookup independent of repeated network parsing.

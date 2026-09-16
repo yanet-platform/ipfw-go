@@ -39,6 +39,12 @@ func (m protocols) ResolveProto(name string) (uint8, bool) {
 	return number, ok
 }
 
+// IsProto implements ipfw.ProtoChecker.
+func (m protocols) IsProto(name string) bool {
+	_, ok := m[name]
+	return ok
+}
+
 // printTracer prints every rule a check evaluates and whether it matched.
 type printTracer struct{}
 
@@ -55,13 +61,15 @@ func ExampleVM_CheckTrace() {
 	ruleset := "add deny ip from 198.51.100.0/24 to any\n" +
 		"add pass tcp from 192.0.2.0/24 to any 22 in\n" +
 		"add deny ip from any to any\n"
-	machine, err := vm.Build(ipfw.NewParser(ruleset), vm.Config[xnetip.Network4, xnetip.Network6]{
+	protos := protocols{"tcp": 6, "udp": 17}
+	parser := ipfw.NewParser(ruleset, ipfw.WithProtoChecker(protos))
+	machine, err := vm.Build(parser, vm.Config[xnetip.Network4, xnetip.Network6]{
 		Environment: ipfw.Environment[xnetip.Network4, xnetip.Network6]{
 			Networks: ipfw.NetworkParserFuncs[xnetip.Network4, xnetip.Network6]{
 				Parse4: xnetip.ParseNetwork4,
 				Parse6: xnetip.ParseNetwork6,
 			},
-			Protos: protocols{"tcp": 6, "udp": 17},
+			Protos: protos,
 		},
 	})
 	if err != nil {

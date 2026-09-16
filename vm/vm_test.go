@@ -41,6 +41,14 @@ func (fakeProtos) ResolveProto(name string) (uint8, bool) {
 	return 0, false
 }
 
+// protoChecker knows the protocols the resolver resolves.
+func protoChecker(resolver ipfw.ProtoResolver) ipfw.ProtoCheckerFunc {
+	return func(name string) bool {
+		_, ok := resolver.ResolveProto(name)
+		return ok
+	}
+}
+
 // fakeServices resolves the two service names the tests use.
 type fakeServices struct{}
 
@@ -3040,12 +3048,21 @@ func Test_VM_Build_Errors(t *testing.T) {
 			environment: networksOnly,
 			line:        1,
 			text:        "add pass tcp from any to any",
-			cause:       ipfw.ErrUnknownOption,
+			cause:       ipfw.ErrUnresolvedProto,
 		},
 		{
 			name:        "unresolved protocol name",
 			rules:       "add pass gre from any to any\n",
 			environment: resolving,
+			line:        1,
+			text:        "add pass gre from any to any",
+			cause:       ipfw.ErrUnresolvedProto,
+		},
+		{
+			name:        "protocol unknown to the proto checker",
+			rules:       "add pass gre from any to any\n",
+			environment: resolving,
+			options:     []ipfw.ParserOption{ipfw.WithProtoChecker(protoChecker(fakeProtos{}))},
 			line:        1,
 			text:        "add pass gre from any to any",
 			cause:       ipfw.ErrUnknownOption,
