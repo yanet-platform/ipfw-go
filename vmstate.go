@@ -1,21 +1,14 @@
 package ipfw
 
-import "net/netip"
-
-// NetworkParser turns network text into the network types of a consumer,
-// V4 and V6, and builds host networks from resolved addresses.
+// NetworkParser turns network text into the network types of a consumer, V4 and V6.
 type NetworkParser[V4, V6 any] interface {
 	// ParseNetwork4 parses IPv4 network text.
 	ParseNetwork4(s string) (V4, error)
 	// ParseNetwork6 parses IPv6 network text.
 	ParseNetwork6(s string) (V6, error)
-	// Network4FromAddr is the host network of an IPv4 address.
-	Network4FromAddr(a netip.Addr) (V4, error)
-	// Network6FromAddr is the host network of an IPv6 address.
-	Network6FromAddr(a netip.Addr) (V6, error)
 }
 
-// NetworkParserFuncs is a NetworkParser made of four functions, so a
+// NetworkParserFuncs is a NetworkParser made of two functions, so a
 // network library plugs in without an adapter type.
 //
 // The zero value panics on use.
@@ -24,10 +17,6 @@ type NetworkParserFuncs[V4, V6 any] struct {
 	Parse4 func(string) (V4, error)
 	// Parse6 parses IPv6 network text.
 	Parse6 func(string) (V6, error)
-	// FromAddr4 is the host network of an IPv4 address.
-	FromAddr4 func(netip.Addr) (V4, error)
-	// FromAddr6 is the host network of an IPv6 address.
-	FromAddr6 func(netip.Addr) (V6, error)
 }
 
 // ParseNetwork4 implements NetworkParser.
@@ -38,16 +27,6 @@ func (m NetworkParserFuncs[V4, V6]) ParseNetwork4(s string) (V4, error) {
 // ParseNetwork6 implements NetworkParser.
 func (m NetworkParserFuncs[V4, V6]) ParseNetwork6(s string) (V6, error) {
 	return m.Parse6(s)
-}
-
-// Network4FromAddr implements NetworkParser.
-func (m NetworkParserFuncs[V4, V6]) Network4FromAddr(a netip.Addr) (V4, error) {
-	return m.FromAddr4(a)
-}
-
-// Network6FromAddr implements NetworkParser.
-func (m NetworkParserFuncs[V4, V6]) Network6FromAddr(a netip.Addr) (V6, error) {
-	return m.FromAddr6(a)
 }
 
 // ProtoResolver turns a protocol name into its number.
