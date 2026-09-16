@@ -2,10 +2,10 @@ package ipfw
 
 import "strconv"
 
-// ErrorKind names a syntax or semantic error found while parsing a ruleset.
+// ErrorKind names an error found while parsing or canonically formatting a ruleset.
 type ErrorKind uint8
 
-// The error kinds a parser can report. The zero value means no error.
+// The parser and formatter error kinds. The zero value means no error.
 const (
 	_ ErrorKind = iota
 	ErrExpectedLine
@@ -54,6 +54,28 @@ const (
 	ErrExpectedTag
 	ErrStateOptionInGroup
 	ErrDuplicateStateOption
+	// The formatter-specific kinds.
+	ErrUnknownRecordKind
+	ErrUnexpectedBody
+	ErrInvalidName
+	ErrUnknownActionKind
+	ErrUnknownSkipToKind
+	ErrUnknownProtoKind
+	ErrUnknownTargetKind
+	ErrUnknownTableKind
+	ErrUnknownTableKeyKind
+	ErrUnknownTableType
+	ErrUnknownOptionKind
+	ErrUnknownViaKind
+	ErrMissingProtocol
+	ErrMissingSource
+	ErrMissingDestination
+	ErrInvalidLog
+	ErrBrokenOrChain
+	ErrInconsistentNegation
+	ErrInvalidTCPFlags
+	ErrEmptyTypeSet
+	ErrMissingCustomOptAppender
 )
 
 // Error returns the message of the kind.
@@ -135,6 +157,48 @@ func (m ErrorKind) Error() string {
 		return "state-producing option in OR block"
 	case ErrDuplicateStateOption:
 		return "more than one state-producing option"
+	case ErrUnknownRecordKind:
+		return "record kind without a canonical form"
+	case ErrUnexpectedBody:
+		return "fields or body the record kind cannot hold"
+	case ErrInvalidName:
+		return "invalid name or text"
+	case ErrUnknownActionKind:
+		return "action kind without a canonical form"
+	case ErrUnknownSkipToKind:
+		return "skipto target kind without a canonical form"
+	case ErrUnknownProtoKind:
+		return "IP version set without a canonical keyword"
+	case ErrUnknownTargetKind:
+		return "target kind without a canonical form"
+	case ErrUnknownTableKind:
+		return "table command without a canonical form"
+	case ErrUnknownTableKeyKind:
+		return "table key kind without a canonical form"
+	case ErrUnknownTableType:
+		return "table type without a canonical form"
+	case ErrUnknownOptionKind:
+		return "option kind without a canonical form"
+	case ErrUnknownViaKind:
+		return "via kind without a canonical form"
+	case ErrMissingProtocol:
+		return "missing protocol"
+	case ErrMissingSource:
+		return "missing source"
+	case ErrMissingDestination:
+		return "missing destination"
+	case ErrInvalidLog:
+		return "invalid log and logamount combination"
+	case ErrBrokenOrChain:
+		return "invalid grouping or list continuation"
+	case ErrInconsistentNegation:
+		return "inconsistent negation within a list"
+	case ErrInvalidTCPFlags:
+		return "invalid tcpflags requirements"
+	case ErrEmptyTypeSet:
+		return "empty icmptypes or icmp6types set"
+	case ErrMissingCustomOptAppender:
+		return "custom option without an appender"
 	default:
 		return "unknown error kind " + strconv.Itoa(int(m))
 	}
