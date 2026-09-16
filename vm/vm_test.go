@@ -2498,14 +2498,8 @@ func Test_VM_Check_PolicyOptions(t *testing.T) {
 		{option: "not diverted", in: pass, out: pass},
 		{option: "antispoof", in: deny, out: pass},
 		{option: "not antispoof", in: pass, out: deny},
-		{option: "note", in: pass, out: pass},
-		{option: "not note", in: deny, out: deny},
-	}
-	note := func(rest string) (ipfw.Opt, int, error) {
-		if strings.HasPrefix(rest, "note") {
-			return ipfw.Opt{Kind: ipfw.OptComment, Text: "note"}, len("note"), nil
-		}
-		return ipfw.Opt{}, 0, ipfw.ErrUnknownOption
+		{option: "// note", in: pass, out: pass},
+		{option: "not // note", in: deny, out: deny},
 	}
 	for _, tc := range cases {
 		t.Run(tc.option, func(t *testing.T) {
@@ -2513,13 +2507,92 @@ func Test_VM_Check_PolicyOptions(t *testing.T) {
 
 				add deny ip from any to any
 			`)
-			parser := ipfw.NewParser("add pass ip from any to any "+tc.option+src, ipfw.WithOptionHook(note))
+			parser := ipfw.NewParser("add pass ip from any to any " + tc.option + src)
 			machine, err := vm.Build(parser, vm.Config[net4, net6]{Environment: resolving})
 			require.NoError(t, err)
 			require.Equal(t, tc.in, machine.Check(&vm.Context{Direction: vm.In}, packet))
 			require.Equal(t, tc.out, machine.Check(&vm.Context{Direction: vm.Out}, packet))
 		})
 	}
+}
+
+// verifies that a comment holds for every packet and a negated one for none,
+// wherever it stands among the options, without allocating on a check.
+func Test_VM_Check_CommentOption(t *testing.T) {
+	note := func(rest string) (ipfw.Opt, int, error) {
+		if strings.HasPrefix(rest, "note") {
+			return ipfw.Opt{Kind: ipfw.OptComment, Text: "note"}, len("note"), nil
+		}
+		return ipfw.Opt{}, 0, ipfw.ErrUnknownOption
+	}
+	cases := []struct {
+		name string
+		rule string
+		in   ipfw.Action
+		out  ipfw.Action
+	}{
+		{name: "comment-only rule", rule: "add 100 // note", in: deny, out: deny},
+		{
+			name: "comment after the body",
+			rule: "add pass ip from any to any // x",
+			in:   pass,
+			out:  pass,
+		},
+		{
+			name: "comment after an option",
+			rule: "add pass ip from any to any out // x",
+			in:   deny,
+			out:  pass,
+		},
+		{
+			name: "negated comment",
+			rule: "add pass ip from any to any not // x",
+			in:   deny,
+			out:  deny,
+		},
+		{name: "negated comment body", rule: "add pass not // x", in: deny, out: deny},
+		{
+			name: "hook comment opening a group",
+			rule: "add pass ip from any to any { note or out }",
+			in:   pass,
+			out:  pass,
+		},
+		{
+			name: "hook comment closing a group",
+			rule: "add pass ip from any to any { out or note }",
+			in:   pass,
+			out:  pass,
+		},
+		{
+			name: "hook comment before a group",
+			rule: "add pass ip from any to any note { out or out }",
+			in:   deny,
+			out:  pass,
+		},
+	}
+	packet := tcp4("192.0.2.1", "192.0.2.2")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := tc.rule + "\nadd deny ip from any to any\n"
+			machine := build(t, src, none, ipfw.WithOptionHook(note))
+			require.Equal(t, tc.in, machine.Check(&vm.Context{Direction: vm.In}, packet))
+			require.Equal(t, tc.out, machine.Check(&vm.Context{Direction: vm.Out}, packet))
+		})
+	}
+	src := ruleset(`
+		add 100 // note
+		add pass ip from any to any not // x
+		add pass ip from any to any in note { out or out } // x
+		add pass ip from any to any { out or note } // x
+	`)
+	machine := build(t, src, none, ipfw.WithOptionHook(note))
+	ctx := &vm.Context{Direction: vm.In}
+	verdict := deny
+	allocs := testing.AllocsPerRun(100, func() {
+		verdict = machine.Check(ctx, packet)
+	})
+	require.Equal(t, pass, verdict)
+	require.Zero(t, allocs)
 }
 
 type countingTableRegistry struct {

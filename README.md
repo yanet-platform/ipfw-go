@@ -117,16 +117,19 @@ whitespace.
 whitespace. `Record.Text` keeps the complete original line, including both comment markers and
 payloads, without leading or trailing whitespace.
 
-Rule comments introduced by `//` remain in `Instruction.InlineComment`, with the same payload
-whitespace rules. In `add pass ip from any to any // rule # metadata`, the inline payload is ` rule`
-and the hash payload is ` metadata`. The first hash separates the line even inside quoted text.
+Rule comments introduced by `//` are an option, as in FreeBSD: `State.OnOption` receives an
+`OptComment` whose `Text` follows the same payload whitespace rules. The comment takes the rest of
+the line, so it is the last option, and inside a `{ … }` group it leaves the group unclosed.
+A negated comment is accepted as upstream and makes the rule never match.
+In `add pass ip from any to any // rule # metadata`, the comment text is ` rule` and the hash
+payload is ` metadata`. The first hash separates the line even inside quoted text.
 Standalone `//` and slash comments after tables or labels are not enabled by this behavior.
 
 Comment-only rules such as `add 100 // note` are supported by default, as in
 [FreeBSD](https://github.com/freebsd/freebsd-src/blob/88e7371d9dc26f85dfc1b008cbe59ebc7e4a33da/sbin/ipfw/ipfw.8#L1622).
 They produce an `ActionCount` instruction with implicit `TargetAny` source and destination
-callbacks. The VM matches the rule and continues to the next one. The payload stays in
-`Instruction.InlineComment`, and any hash metadata stays in `Record.Comment`.
+callbacks followed by the comment option. The VM matches the rule and continues to the next one.
+Any hash metadata stays in `Record.Comment`.
 The `//` action must be a complete token, so `add //note` is rejected.
 
 LF, CRLF and a final line without a newline each produce one record. Copy the returned `Record`

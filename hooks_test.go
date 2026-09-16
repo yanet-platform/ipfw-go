@@ -17,7 +17,6 @@ func Test_CommandHook_CompatibilitySeam(t *testing.T) {
 		name    string
 		input   string
 		comment string
-		inline  string
 		state   ipfw.ReduceState
 	}{
 		{
@@ -51,23 +50,23 @@ func Test_CommandHook_CompatibilitySeam(t *testing.T) {
 			},
 		},
 		{
-			name:   "table target and rule comment",
-			input:  "EX_PASS(ip6, { table(_EX_TABLE_) }) // note",
-			inline: " note",
+			name:  "table target and rule comment",
+			input: "EX_PASS(ip6, { table(_EX_TABLE_) }) // note",
 			state: ipfw.ReduceState{
 				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPv6}},
 				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
 				Destinations: []ipfw.Target{{Kind: ipfw.TargetTable, Text: "_EX_TABLE_"}},
+				Options:      []ipfw.Opt{{Kind: ipfw.OptComment, Text: " note"}},
 			},
 		},
 		{
-			name:   "vertical tab payload",
-			input:  "EX_PASS(ip, { any }) // note\v",
-			inline: " note\v",
+			name:  "vertical tab payload",
+			input: "EX_PASS(ip, { any }) // note\v",
 			state: ipfw.ReduceState{
 				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
 				Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
 				Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+				Options:      []ipfw.Opt{{Kind: ipfw.OptComment, Text: " note\v"}},
 			},
 		},
 	}
@@ -81,7 +80,7 @@ func Test_CommandHook_CompatibilitySeam(t *testing.T) {
 				Line: 1, Text: testCase.input, Kind: ipfw.RecordInstruction,
 				Comment: testCase.comment,
 				Instruction: ipfw.Instruction{
-					Action: ipfw.Action{Kind: ipfw.ActionPass}, InlineComment: testCase.inline,
+					Action: ipfw.Action{Kind: ipfw.ActionPass},
 				},
 			}, *record)
 			require.Equal(t, testCase.state, state)
@@ -170,10 +169,6 @@ func examplePass(line string, state ipfw.State) (ipfw.Record, int, error) {
 	record := ipfw.Record{
 		Kind:        ipfw.RecordInstruction,
 		Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
-	}
-	if strings.HasPrefix(line[position:], "//") {
-		record.Instruction.InlineComment = strings.TrimRight(line[position+2:], " \t\r\n\f")
-		position = len(line)
 	}
 	return record, position, nil
 }
@@ -333,13 +328,15 @@ func Test_CommandHook_SubparserRemainders(t *testing.T) {
 			}},
 		},
 		{
-			name: "options", input: "{ in or not out } // after", remainder: "// after",
-			consumed: 18,
+			name: "options", input: "{ in or not out } // after\nout", remainder: "\nout",
+			consumed: 26,
 			parse: func(input string, state ipfw.State) (int, error) {
 				return ipfw.ParseOptions(input, state, nil)
 			},
 			state: ipfw.ReduceState{Options: []ipfw.Opt{
-				{Kind: ipfw.OptIn}, {Or: true, Neg: true, Kind: ipfw.OptOut},
+				{Kind: ipfw.OptIn},
+				{Or: true, Neg: true, Kind: ipfw.OptOut},
+				{Kind: ipfw.OptComment, Text: " after"},
 			}},
 		},
 	}
@@ -400,7 +397,10 @@ func allowFromAny(line string, state ipfw.State) (ipfw.Record, int, error) {
 		Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
 	}
 	if rest := skipSpaces(line, pos); strings.HasPrefix(line[rest:], "//") {
-		rec.Instruction.InlineComment = line[rest+2:]
+		comment := ipfw.Opt{Kind: ipfw.OptComment, Text: line[rest+2:]}
+		if rejected := state.OnOption(comment); rejected != nil {
+			return ipfw.Record{}, rest, rejected
+		}
 		pos = len(line)
 	}
 	return rec, pos, nil
@@ -448,17 +448,15 @@ func Test_CommandHook_Table(t *testing.T) {
 			},
 		},
 		{
-			name:  "port list and inline comment",
-			input: "ALLOW_FROM_ANY(udp, { custom:second }, 80,443) // {\"id\": 1}\n",
-			instruction: ipfw.Instruction{
-				Action:        ipfw.Action{Kind: ipfw.ActionPass},
-				InlineComment: " {\"id\": 1}",
-			},
+			name:        "port list and comment",
+			input:       "ALLOW_FROM_ANY(udp, { custom:second }, 80,443) // {\"id\": 1}\n",
+			instruction: pass,
 			state: ipfw.ReduceState{
 				Protos:           []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "udp"}}},
 				Sources:          []ipfw.Target{{Kind: ipfw.TargetAny}},
 				Destinations:     []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "custom:second"}},
 				DestinationPorts: []ipfw.PortMatch{portNumber(80), portNumber(443)},
+				Options:          []ipfw.Opt{{Kind: ipfw.OptComment, Text: " {\"id\": 1}"}},
 			},
 		},
 		{
@@ -860,7 +858,7 @@ func Test_OptionHook_Precedence(t *testing.T) {
 		return customOptions(rest)
 	}
 	input := "add allow tcp from any to any " +
-		"in established estab fragment tcpflgs syn,!ack icmp6type 128,129 \t\r\n"
+		"in established estab fragment tcpflgs syn,!ack icmp6type 128,129 not // setup \t\r\n"
 	var state ipfw.ReduceState
 	_, err := ipfw.NewParser(input, ipfw.WithOptionHook(counting)).Next(&state)
 	require.Nil(t, err)
@@ -876,8 +874,19 @@ func Test_OptionHook_Precedence(t *testing.T) {
 			{Kind: ipfw.OptFrag},
 			tcpFlags(ipfw.TCPSyn, ipfw.TCPAck),
 			icmp6Types(128, 129),
+			{Neg: true, Kind: ipfw.OptComment, Text: " setup"},
 		},
 	}, state)
+
+	state.Reset()
+	_, err = ipfw.NewParser("add allow // setup\n", ipfw.WithOptionHook(counting)).Next(&state)
+	require.Nil(t, err)
+	require.Equal(t, 0, calls)
+	require.Equal(t, ipfw.ReduceState{
+		Sources:      []ipfw.Target{{Kind: ipfw.TargetAny}},
+		Destinations: []ipfw.Target{{Kind: ipfw.TargetAny}},
+		Options:      []ipfw.Opt{{Kind: ipfw.OptComment, Text: " setup"}},
+	}, emptyToNil(state))
 
 	_, err = ipfw.NewParser("add allow tcp from any to any setup\n", ipfw.WithOptionHook(counting)).
 		Next(ipfw.DiscardState{})

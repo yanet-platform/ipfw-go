@@ -9,6 +9,11 @@ import (
 	"github.com/yanet-platform/ipfw-go"
 )
 
+// comment is a `//` option with the text after the slashes.
+func comment(text string) ipfw.Opt {
+	return ipfw.Opt{Kind: ipfw.OptComment, Text: text}
+}
+
 // dstPort is a dst-port option for one numeric port.
 func dstPort(number uint16) ipfw.Opt {
 	port := ipfw.Port{Number: number}
@@ -116,8 +121,9 @@ func Test_OptKind_String(t *testing.T) {
 	}
 }
 
-// verifies that the option list runs up to the end of the line or an inline
-// comment and that anything else in it is an unknown option at its token.
+// verifies that the option list runs up to the end of the line, a comment
+// taking the rest of it, and that anything else in it is an unknown option at
+// its token.
 //
 // Each option is handed to the state as it is read.
 func Test_ParseOptions_Table(t *testing.T) {
@@ -172,8 +178,8 @@ func Test_ParseOptions_Table(t *testing.T) {
 		{
 			name:    "fragment alias before a comment",
 			input:   "fragment // c",
-			n:       9,
-			options: []ipfw.Opt{{Kind: ipfw.OptFrag}},
+			n:       13,
+			options: []ipfw.Opt{{Kind: ipfw.OptFrag}, comment(" c")},
 		},
 		{
 			name:    "tcpflgs alias before a newline",
@@ -238,11 +244,52 @@ func Test_ParseOptions_Table(t *testing.T) {
 			options: []ipfw.Opt{established},
 		},
 		{
-			name:    "whitespace before a comment is consumed",
+			name:    "comment after an option",
 			input:   "established // c",
-			n:       12,
-			options: []ipfw.Opt{established},
+			n:       16,
+			options: []ipfw.Opt{established, comment(" c")},
 		},
+		{
+			name:    "comment takes the options after it",
+			input:   "// in not out \t",
+			n:       15,
+			options: []ipfw.Opt{comment(" in not out")},
+		},
+		{
+			name:    "comment stops before CRLF",
+			input:   "// c \r\nout",
+			n:       5,
+			options: []ipfw.Opt{comment(" c")},
+		},
+		{
+			name:    "comment keeps a lone carriage return",
+			input:   "// a\rb\n",
+			n:       6,
+			options: []ipfw.Opt{comment(" a\rb")},
+		},
+		{
+			name:    "empty comment",
+			input:   "//",
+			n:       2,
+			options: []ipfw.Opt{comment("")},
+		},
+		{
+			name:    "negated comment",
+			input:   "not // c",
+			n:       8,
+			options: []ipfw.Opt{{Neg: true, Kind: ipfw.OptComment, Text: " c"}},
+		},
+		{
+			name:  "comment leaves its group open",
+			input: "{ in or // c }",
+			n:     14,
+			err:   ipfw.ErrExpectedOr,
+			options: []ipfw.Opt{
+				{Kind: ipfw.OptIn},
+				{Or: true, Kind: ipfw.OptComment, Text: " c }"},
+			},
+		},
+		{name: "lone slash", input: "/ c", n: 0, err: ipfw.ErrUnknownOption},
 		{
 			name:    "trailing whitespace is consumed",
 			input:   "established  ",
@@ -264,7 +311,7 @@ func Test_ParseOptions_Table(t *testing.T) {
 		{name: "empty input", input: "", n: 0},
 		{name: "newline alone", input: "\n", n: 0},
 		{name: "CRLF before another line", input: "\r\nout", n: 0},
-		{name: "comment alone", input: "// c", n: 0},
+		{name: "comment alone", input: "// c", n: 4, options: []ipfw.Opt{comment(" c")}},
 		{name: "unknown option", input: "foo", n: 0, err: ipfw.ErrUnknownOption},
 		{name: "port is not an option", input: "22", n: 0, err: ipfw.ErrUnknownOption},
 		{
