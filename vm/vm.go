@@ -86,6 +86,8 @@ var (
 	ErrUnsupportedRecord = errors.New("unsupported record")
 	// ErrUnsupportedTableType is a create of a table type the VM cannot hold.
 	ErrUnsupportedTableType = errors.New("unsupported table type")
+	// ErrUnsupportedTableValue is a table lookup asking for a value by name.
+	ErrUnsupportedTableValue = errors.New("unsupported table value")
 )
 
 // BuildError is a build failure located at a line of the ruleset.
@@ -657,6 +659,31 @@ func (m *builder[V4, V6]) Labels() map[string]int {
 	return m.labels
 }
 
+// OnSourceTarget implements ipfw.VMState, a table lookup asking for a value
+// by name being ErrUnsupportedTableValue.
+func (m *builder[V4, V6]) OnSourceTarget(match ipfw.TargetMatch[V4, V6]) error {
+	if !tableValueSupported(match.Name) {
+		return ErrUnsupportedTableValue
+	}
+	return m.program.OnSourceTarget(match)
+}
+
+// OnDestinationTarget is OnSourceTarget for the destination.
+func (m *builder[V4, V6]) OnDestinationTarget(match ipfw.TargetMatch[V4, V6]) error {
+	if !tableValueSupported(match.Name) {
+		return ErrUnsupportedTableValue
+	}
+	return m.program.OnDestinationTarget(match)
+}
+
+// tableValueSupported reports whether a table lookup asks for its value as a
+// plain one, not by name as in `table(t,skipto=100)`: an entry holds one
+// value, with no names for it.
+func tableValueSupported(lookup string) bool {
+	_, value, _ := strings.Cut(lookup, ",")
+	return strings.IndexByte(value, '=') < 0
+}
+
 // OnOption implements ipfw.VMState, a custom option with no matcher, or an
 // option of a kind the VM does not know, being ErrUnsupportedOption.
 func (m *builder[V4, V6]) OnOption(opt ipfw.Opt) error {
@@ -1134,7 +1161,7 @@ func (m *VM[V4, V6]) matchVia(via *ipfw.Via, ctx *Context) (bool, int) {
 // number the first rule numbered at or after it, as in ipfw(8), and a label
 // the rule after it, unnamedTarget when no label is so named.
 func (m *VM[V4, V6]) tableTarget(value string) int {
-	if number, ok := ruleNumber(value); ok {
+	if number, ok := tableNumber(value); ok {
 		return m.program.At(number)
 	}
 	if target, ok := m.labels[value]; ok {
@@ -1143,9 +1170,9 @@ func (m *VM[V4, V6]) tableTarget(value string) int {
 	return unnamedTarget
 }
 
-// ruleNumber reads a table value of decimal digits as a rule number, false
-// for any other value.
-func ruleNumber(value string) (uint64, bool) {
+// tableNumber reads a table value of decimal digits as a number, false for
+// any other value and one past 32 bits, the width of a value in ipfw(8).
+func tableNumber(value string) (uint64, bool) {
 	if value == "" || len(value) > 10 {
 		return 0, false
 	}
@@ -1285,7 +1312,8 @@ func (m *VM[V4, V6]) matchTargets6(
 // address to belong to.
 //
 // me and me6 are the context's addresses of the packet's family, a
-// missing table holds nothing.
+// missing table holds nothing, and a table lookup asking for a value holds
+// only an address whose entry has it.
 func (m *VM[V4, V6]) matchNamedTarget(
 	target *ipfw.TargetMatch[V4, V6],
 	ctx *Context,
@@ -1298,10 +1326,33 @@ func (m *VM[V4, V6]) matchNamedTarget(
 	case ipfw.TargetMe6:
 		return family == IPv6 && slices.Contains(ctx.LocalAddrs, addr)
 	case ipfw.TargetTable:
-		_, ok := m.tables.LookupNetwork(target.Name, addr)
+		_, ok := m.lookupTable(target, addr)
 		return ok
 	}
 	return false
+}
+
+// lookupTable returns the value of the entry of the target's table holding
+// the address, false when none does or the entry lacks the value the target
+// asks for, which loses a leading colon as the value of an entry does.
+func (m *VM[V4, V6]) lookupTable(target *ipfw.TargetMatch[V4, V6], addr netip.Addr) (string, bool) {
+	name, expected, hasValue := strings.Cut(target.Name, ",")
+	value, ok := m.tables.LookupNetwork(name, addr)
+	if !ok || hasValue && !sameTableValue(value, strings.TrimPrefix(expected, ":")) {
+		return "", false
+	}
+	return value, true
+}
+
+// sameTableValue reports whether two table values are equal, as numbers when
+// both are, a table value in ipfw(8) being a number, and as text otherwise.
+func sameTableValue(value, other string) bool {
+	if number, ok := tableNumber(value); ok {
+		if otherNumber, ok := tableNumber(other); ok {
+			return number == otherNumber
+		}
+	}
+	return value == other
 }
 
 // addressTarget is the tablearg target the address lookups of the matched
@@ -1346,7 +1397,7 @@ func (m *VM[V4, V6]) lookupTargets(
 			case hit:
 			case target.Kind == ipfw.TargetTable:
 				var value string
-				if value, hit = m.tables.LookupNetwork(target.Name, addr); hit {
+				if value, hit = m.lookupTable(target, addr); hit {
 					found = m.tableTarget(value)
 				}
 			case target.Kind == ipfw.TargetNetwork4:

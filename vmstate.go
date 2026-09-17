@@ -64,7 +64,11 @@ type TargetMatch[V4, V6 any] struct {
 	Pattern uint16
 	// Kind is the target kind, never a hostname or a custom one.
 	Kind TargetKind
-	// Name is the table name of a TargetTable.
+	// Name is the lookup of a TargetTable as Target.Text holds it, the table
+	// name followed by a comma and the value when the lookup asks for one.
+	//
+	// A value field of its own would widen every match the VM scans rule
+	// after rule, which cost a tenth of a check full of jumps.
 	Name string
 	// Net4 is the network of a TargetNetwork4.
 	Net4 V4

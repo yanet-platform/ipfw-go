@@ -515,8 +515,8 @@ func Test_Resolver_Networks(t *testing.T) {
 			},
 		},
 		{
-			name:  "keywords and a table keep their name",
-			input: "add allow ip from { me or me6 or table(t) } to any\n",
+			name:  "keywords and a table keep their name and value",
+			input: "add allow ip from { me or me6 or table(t) } to not table(u,:V)\n",
 			state: ipfw.ReduceVMState[net4, net6]{
 				IPProtos: ipAny,
 				Sources: []ipfw.TargetMatch[net4, net6]{
@@ -524,7 +524,9 @@ func Test_Resolver_Networks(t *testing.T) {
 					{Pattern: 1, Kind: ipfw.TargetMe6},
 					{Pattern: 2, Kind: ipfw.TargetTable, Name: "t"},
 				},
-				Destinations: []ipfw.TargetMatch[net4, net6]{anyTarget},
+				Destinations: []ipfw.TargetMatch[net4, net6]{
+					{Neg: true, Kind: ipfw.TargetTable, Name: "u,:V"},
+				},
 			},
 		},
 	}

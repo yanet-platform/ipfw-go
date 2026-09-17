@@ -32,8 +32,13 @@ type Target struct {
 	Pattern uint16
 	// Kind is the shape the token was classified as.
 	Kind TargetKind
-	// Text is the network text, the hostname, the table name or the raw
-	// custom token, and empty for any, me and me6.
+	// Text is the network text, the hostname, what the parentheses of a table
+	// lookup hold or the raw custom token, and empty for any, me and me6.
+	//
+	// A table lookup is its name, followed by a comma and the value when it
+	// asks for one, as in `table(NAME,VALUE)`. The value shares the text as it
+	// shares the token: a fifth field would keep the target out of the
+	// registers of every function it passes through.
 	Text string
 }
 
@@ -83,6 +88,9 @@ func parseTargetElement(
 ) (string, fail) {
 	rest, neg := targetNot(s)
 	token, afterTarget := scanTargetToken(rest)
+	if hasPrefix(afterTarget, ",") && hasPrefix(token, "table(") {
+		token, afterTarget = scanTableToken(rest, token, afterTarget)
+	}
 	target, kind, errorOffset := classifyTarget(token)
 	if kind != 0 {
 		return s, fail{Kind: kind, At: rest[errorOffset:]}
@@ -135,8 +143,8 @@ func targetNot(s string) (string, bool) {
 
 // isAddressListTarget reports whether the target can be an address-list member.
 //
-// A `table(` token cut at its comma stays one custom token, so a table with a
-// value fails at the comma instead of turning into a list.
+// An unclosed `table(` token cut at its comma stays one custom token, so it
+// fails at the comma instead of turning into a list.
 func isAddressListTarget(target Target) bool {
 	switch target.Kind {
 	case TargetHostname, TargetNetwork4, TargetNetwork6:
@@ -163,6 +171,18 @@ func scanTargetToken(s string) (string, string) {
 	return takeWhile(s, isTargetByte)
 }
 
+// scanTableToken rescans a `table(` token cut at a comma as the whole table
+// lookup, the comma being the one before its value, and leaves the token and
+// the rest as cut when no closing parenthesis follows the value.
+func scanTableToken(s, token, rest string) (string, string) {
+	_, afterValue := takeWhile(rest, isTableValueByte)
+	if !hasPrefix(afterValue, ")") {
+		return token, rest
+	}
+	_, afterValue = takeWhile(afterValue, isTargetByte)
+	return s[:len(s)-len(afterValue)], afterValue
+}
+
 func isTargetByte(c byte) bool {
 	return !isASCIISpace(c) && c != '}' && c != ','
 }
@@ -186,14 +206,10 @@ func classifyTarget(token string) (Target, ErrorKind, int) {
 	case "me":
 		return Target{Kind: TargetMe}, 0, 0
 	}
-	if name, end, ok := tableName(token); ok {
-		if name == "" {
-			return Target{}, ErrExpectedTableName, 0
+	if hasPrefix(token, "table(") {
+		if target, kind, errorOffset, ok := classifyTable(token); ok {
+			return target, kind, errorOffset
 		}
-		if end != len(token) {
-			return Target{}, ErrExpectedTarget, end
-		}
-		return Target{Kind: TargetTable, Text: name}, 0, 0
 	}
 	if isNetwork6Text(token) {
 		return Target{Kind: TargetNetwork6, Text: token}, 0, 0
@@ -211,7 +227,32 @@ func classifyTarget(token string) (Target, ErrorKind, int) {
 	return Target{Kind: TargetCustom, Text: token}, 0, 0
 }
 
-// tableName returns the name before the first closing parenthesis and its end.
+// classifyTable tells a closed table lookup, false for a token that is not
+// one.
+//
+// It is a function of its own to keep the classification of every other
+// target as small as it was.
+func classifyTable(token string) (Target, ErrorKind, int, bool) {
+	inside, end, ok := tableName(token)
+	if !ok {
+		return Target{}, 0, 0, false
+	}
+	name, value, hasValue := strings.Cut(inside, ",")
+	if name == "" {
+		return Target{}, ErrExpectedTableName, 0, true
+	}
+	if hasValue && value == "" {
+		return Target{}, ErrExpectedTableValue, end - 1, true
+	}
+	if end != len(token) {
+		return Target{}, ErrExpectedTarget, end, true
+	}
+	return Target{Kind: TargetTable, Text: inside}, 0, 0, true
+}
+
+// tableName returns what the parentheses of a table lookup hold, the name
+// with the value after a comma, and the end of the lookup.
+//
 // An empty name is included, while an unclosed token is not a table reference.
 func tableName(token string) (string, int, bool) {
 	inside, ok := prefix(token, "table(")

@@ -452,8 +452,52 @@ func Test_ParseTargets_Table(t *testing.T) {
 			},
 		},
 		{
-			name:  "table name stops at a comma",
-			input: "table(a,b) to any",
+			name:  "table with a value",
+			input: "table(a,100) to any",
+			n:     12,
+			state: ipfw.ReduceState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetTable, Text: "a,100"}},
+			},
+		},
+		{
+			name:  "table value keeps a later comma",
+			input: "not table(a,:B,c)} x",
+			n:     17,
+			state: ipfw.ReduceState{
+				Sources: []ipfw.Target{
+					{Neg: true, Kind: ipfw.TargetTable, Text: "a,:B,c"},
+				},
+			},
+		},
+		{
+			name:  "table with an empty value",
+			input: "table(a,) to any",
+			n:     8,
+			err:   ipfw.ErrExpectedTableValue,
+		},
+		{
+			name:  "table with a value and an empty name",
+			input: "table(,1) to any",
+			n:     0,
+			err:   ipfw.ErrExpectedTableName,
+		},
+		{
+			name:  "table with a value and text after the closing parenthesis",
+			input: "table(a,1)b to any",
+			n:     10,
+			err:   ipfw.ErrExpectedTarget,
+		},
+		{
+			name:  "table value stops at whitespace",
+			input: "table(a, 1) to any",
+			n:     7,
+			state: ipfw.ReduceState{
+				Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "table(a"}},
+			},
+		},
+		{
+			name:  "table with a value without the closing parenthesis",
+			input: "table(a,1 to any",
 			n:     7,
 			state: ipfw.ReduceState{
 				Sources: []ipfw.Target{{Kind: ipfw.TargetCustom, Text: "table(a"}},
