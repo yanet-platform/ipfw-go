@@ -16,20 +16,24 @@ import (
 type Network interface {
 	// ContainsAddr reports whether addr belongs to the network.
 	ContainsAddr(addr netip.Addr) bool
+	// NumHostBits returns the number of host bits, the zero bits of the
+	// mask, fewer making a network more specific in a table.
+	NumHostBits() int
 }
 
 // TableRegistry holds the tables of a ruleset, filled while building and
 // consulted while matching.
 type TableRegistry[V4, V6 any] interface {
-	// LookupNetwork reports whether addr is in the table, false when the
-	// table does not exist.
-	LookupNetwork(table string, addr netip.Addr) bool
+	// LookupNetwork reports the value of the table's entry holding addr, the
+	// most specific one when several do, as ipfw(8) looks up a prefix, false
+	// when none does or the table does not exist.
+	LookupNetwork(table string, addr netip.Addr) (string, bool)
 	// LookupInterface reports the value of an interface in the table.
 	LookupInterface(table, ifname string) (string, bool)
-	// AddNetwork4 adds an IPv4 network to the table.
-	AddNetwork4(table string, network V4)
-	// AddNetwork6 adds an IPv6 network to the table.
-	AddNetwork6(table string, network V6)
+	// AddNetwork4 adds an IPv4 network with its value to the table.
+	AddNetwork4(table string, network V4, value string)
+	// AddNetwork6 adds an IPv6 network with its value to the table.
+	AddNetwork6(table string, network V6, value string)
 	// AddInterface adds an interface with its value to the table.
 	AddInterface(table, ifname, value string)
 }
@@ -523,7 +527,7 @@ func (m *builder[V4, V6]) Label(name string) {
 }
 
 // Table records the type of a created table or adds the entry of an add to
-// the registry, an interface value losing its leading colon.
+// the registry, its value losing a leading colon.
 //
 // A table never created is an address table, as ipfw(8) makes it. An
 // address table takes network text through the network parser and any
@@ -536,11 +540,12 @@ func (m *builder[V4, V6]) Table(table *ipfw.Table) error {
 	case ipfw.TableCreate:
 		return m.createTable(table)
 	case ipfw.TableAdd:
+		value := strings.TrimPrefix(table.Value, ":")
 		if m.tableTypes[table.Name] == ipfw.TableTypeIface {
-			m.tables.AddInterface(table.Name, table.Key.Text, strings.TrimPrefix(table.Value, ":"))
+			m.tables.AddInterface(table.Name, table.Key.Text, value)
 			return nil
 		}
-		return m.addAddress(table)
+		return m.addAddress(table, value)
 	}
 	return nil
 }
@@ -558,12 +563,13 @@ func (m *builder[V4, V6]) createTable(table *ipfw.Table) error {
 	return nil
 }
 
-// addAddress adds the key of an address table, network text through the
-// network parser and a name through the target resolver.
+// addAddress adds the key of an address table with the value, network text
+// through the network parser and a name through the target resolver, every
+// network it stands for taking the value.
 //
 // Network text the parser rejects is the error kind of its family, the
 // resolver's error comes back as is.
-func (m *builder[V4, V6]) addAddress(table *ipfw.Table) error {
+func (m *builder[V4, V6]) addAddress(table *ipfw.Table, value string) error {
 	target := ipfw.Target{Kind: ipfw.TargetCustom, Text: table.Key.Text}
 	switch table.Key.Kind {
 	case ipfw.TableKeyNetwork4:
@@ -571,14 +577,14 @@ func (m *builder[V4, V6]) addAddress(table *ipfw.Table) error {
 		if err != nil {
 			return ipfw.ErrExpectedIPv4Network
 		}
-		m.tables.AddNetwork4(table.Name, network)
+		m.tables.AddNetwork4(table.Name, network, value)
 		return nil
 	case ipfw.TableKeyNetwork6:
 		network, err := m.networks.ParseNetwork6(table.Key.Text)
 		if err != nil {
 			return ipfw.ErrExpectedIPv6Network
 		}
-		m.tables.AddNetwork6(table.Name, network)
+		m.tables.AddNetwork6(table.Name, network, value)
 		return nil
 	case ipfw.TableKeyHostname:
 		target.Kind = ipfw.TargetHostname
@@ -591,10 +597,10 @@ func (m *builder[V4, V6]) addAddress(table *ipfw.Table) error {
 		return err
 	}
 	for _, network := range nets4 {
-		m.tables.AddNetwork4(table.Name, network)
+		m.tables.AddNetwork4(table.Name, network, value)
 	}
 	for _, network := range nets6 {
-		m.tables.AddNetwork6(table.Name, network)
+		m.tables.AddNetwork6(table.Name, network, value)
 	}
 	return nil
 }
@@ -693,9 +699,9 @@ func (m *VM[V4, V6]) Check(ctx *Context, pkt Packet) ipfw.Action {
 // reporting nothing, and whether a rule terminated the search.
 //
 // A matching skipto continues at its linked rule, a skipto tablearg at
-// the rule the table lookup of its options named, every jump going
-// forward: a tablearg with no target, or one at or before the rule,
-// falls through, and one past the last rule ends the search.
+// the rule the last table lookup of the rule that found an entry named,
+// every jump going forward: a tablearg with no target, or one at or before
+// the rule, falls through, and one past the last rule ends the search.
 func (m *VM[V4, V6]) CheckTrace(ctx *Context, pkt Packet, tracer Tracer) (ipfw.Action, bool) {
 	var fields packetFields
 	fields.Read(pkt)
@@ -717,6 +723,11 @@ func (m *VM[V4, V6]) CheckTrace(ctx *Context, pkt Packet, tracer Tracer) (ipfw.A
 			return program.Action(pc), true
 		case ipfw.ActionSkipTo:
 			if rule.TableArg {
+				// A lookup among the options comes after those of the
+				// addresses, so theirs counts only when the options found none.
+				if target == noTarget {
+					target = m.addressTarget(pc, ctx, &fields)
+				}
 				pc = max(target, pc+1)
 			} else {
 				pc = int(rule.Jump)
@@ -949,8 +960,13 @@ func matchPorts(matches []ipfw.PortNumberMatch, port uint16) bool {
 	return len(matches) > 0 && matches[0].Neg
 }
 
-// noTarget is the tablearg target of a rule whose options named none.
-const noTarget = -1
+// The tablearg targets naming no rule. noTarget is that of a rule no table
+// lookup of which found an entry, unnamedTarget that of an entry whose value
+// names no rule, which still replaces the target of an earlier lookup.
+const (
+	noTarget      = -1
+	unnamedTarget = -2
+)
 
 // matchOptions folds the options as ipfw(8) does: every or-block has to hold,
 // a block holds when one of its match patterns does, and a pattern holds when
@@ -969,7 +985,9 @@ func (m *VM[V4, V6]) matchOptions(
 	for idx := 0; idx < len(options); {
 		first := &options[idx]
 		matched, found := m.matchOption(first, ctx, pkt, fields)
-		target = lookupTarget(first, matched, found, target)
+		if found != noTarget {
+			target = found
+		}
 		// The members after the first are a list, most often of ports, which
 		// are compared in place as the kernel scans the ports of one
 		// instruction, without a call per member.
@@ -990,8 +1008,9 @@ func (m *VM[V4, V6]) matchOptions(
 				fields.ReadPorts(pkt)
 				matched = fields.HasDestinationPort && inRange(fields.DestinationPort, opt.Ports)
 			default:
-				matched, found = m.matchOption(opt, ctx, pkt, fields)
-				target = lookupTarget(opt, matched, found, target)
+				if matched, found = m.matchOption(opt, ctx, pkt, fields); found != noTarget {
+					target = found
+				}
 			}
 		}
 		if matched != first.Neg {
@@ -1004,16 +1023,6 @@ func (m *VM[V4, V6]) matchOptions(
 		idx = end
 	}
 	return true, target
-}
-
-// lookupTarget is the tablearg target after the option was evaluated: the
-// one it found, or none when it is a table lookup that matched without one,
-// so that the last successful lookup decides.
-func lookupTarget(opt *ipfw.Opt, matched bool, found, target int) int {
-	if found != noTarget || matched && opt.Kind == ipfw.OptVia && opt.Via.Kind == ipfw.ViaTable {
-		return found
-	}
-	return target
 }
 
 // matchOption reports whether the option, its negation aside, holds for
@@ -1103,11 +1112,8 @@ func matchPolicy(kind ipfw.OptKind, ctx *Context) bool {
 // matchVia reports whether the context's interface is the one named, one
 // the mask takes or one the table lists, and the target of the table entry.
 //
-// A mask like `*` takes even no interface at all. The value of a table
-// entry names where a tablearg jumps: a number the first rule numbered at or
-// after it, as in ipfw(8), and a label the rule after it, none when no label
-// is so named. The value written in the option is not consulted, as ipfw(8)
-// drops it.
+// A mask like `*` takes even no interface at all. The value written in the
+// option is not consulted, as ipfw(8) drops it.
 func (m *VM[V4, V6]) matchVia(via *ipfw.Via, ctx *Context) (bool, int) {
 	switch via.Kind {
 	case ipfw.ViaExact:
@@ -1119,15 +1125,22 @@ func (m *VM[V4, V6]) matchVia(via *ipfw.Via, ctx *Context) (bool, int) {
 		if !ok {
 			return false, noTarget
 		}
-		if number, ok := ruleNumber(value); ok {
-			return true, m.program.At(number)
-		}
-		if target, ok := m.labels[value]; ok {
-			return true, target
-		}
-		return true, noTarget
+		return true, m.tableTarget(value)
 	}
 	return false, noTarget
+}
+
+// tableTarget is the tablearg target the value of a table entry names: a
+// number the first rule numbered at or after it, as in ipfw(8), and a label
+// the rule after it, unnamedTarget when no label is so named.
+func (m *VM[V4, V6]) tableTarget(value string) int {
+	if number, ok := ruleNumber(value); ok {
+		return m.program.At(number)
+	}
+	if target, ok := m.labels[value]; ok {
+		return target
+	}
+	return unnamedTarget
 }
 
 // ruleNumber reads a table value of decimal digits as a rule number, false
@@ -1285,7 +1298,70 @@ func (m *VM[V4, V6]) matchNamedTarget(
 	case ipfw.TargetMe6:
 		return family == IPv6 && slices.Contains(ctx.LocalAddrs, addr)
 	case ipfw.TargetTable:
-		return m.tables.LookupNetwork(target.Name, addr)
+		_, ok := m.tables.LookupNetwork(target.Name, addr)
+		return ok
 	}
 	return false
+}
+
+// addressTarget is the tablearg target the address lookups of the matched
+// rule at pc yield, the destination looked up after the source as in
+// ipfw_chk, noTarget when none found an entry.
+//
+// The scans that match the addresses keep no target, no other rule needing
+// one, so the addresses are scanned again here, the destination first, as the
+// later lookup is the one that counts. The rule comes by its index, which the
+// check keeps anyway, where its address would cost a store per rule.
+func (m *VM[V4, V6]) addressTarget(pc int, ctx *Context, fields *packetFields) int {
+	program := &m.program
+	rule := &program.Rules()[pc]
+	destinations := program.Destinations(rule.Destinations)
+	target := m.lookupTargets(destinations, ctx, fields.Destination, fields.DestinationFamily)
+	if target != noTarget {
+		return target
+	}
+	return m.lookupTargets(program.Sources(rule.Sources), ctx, fields.Source, fields.SourceFamily)
+}
+
+// lookupTargets is the tablearg target of the table lookups that a scan of the
+// targets for the address makes, noTarget when none finds an entry.
+//
+// The scan stops where matchTargets4 and matchTargets6 stop, at the first
+// alternative the address is in and at the first pattern that holds, looking
+// up no table past them, as ipfw_chk skips the rest of an or-block. A lookup
+// that finds an entry names the target under a negation too.
+func (m *VM[V4, V6]) lookupTargets(
+	targets []ipfw.TargetMatch[V4, V6],
+	ctx *Context,
+	addr netip.Addr,
+	family IPVersion,
+) int {
+	found := noTarget
+	for idx := 0; idx < len(targets); {
+		first := &targets[idx]
+		hit := false
+		for ; idx < len(targets) && targets[idx].Pattern == first.Pattern; idx++ {
+			target := &targets[idx]
+			switch {
+			case hit:
+			case target.Kind == ipfw.TargetTable:
+				var value string
+				if value, hit = m.tables.LookupNetwork(target.Name, addr); hit {
+					found = m.tableTarget(value)
+				}
+			case target.Kind == ipfw.TargetNetwork4:
+				hit = family == IPv4 && target.Net4.ContainsAddr(addr)
+			case target.Kind == ipfw.TargetNetwork6:
+				hit = family == IPv6 && target.Net6.ContainsAddr(addr)
+			case target.Kind == ipfw.TargetAny:
+				hit = true
+			default:
+				hit = m.matchNamedTarget(target, ctx, addr, family)
+			}
+		}
+		if hit != first.Neg {
+			break
+		}
+	}
+	return found
 }
