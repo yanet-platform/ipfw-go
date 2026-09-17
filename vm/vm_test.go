@@ -149,7 +149,7 @@ func tcp4(src, dst string) vm.Packet {
 // rejects on purpose, such as an IPv4-mapped one.
 func raw6(src, dst string) vm.RawIPv6Packet {
 	packet := make(vm.RawIPv6Packet, 64)
-	packet[0] = 6 << 4
+	packet[0], packet[6] = 6<<4, 59
 	from, to := netip.MustParseAddr(src).As16(), netip.MustParseAddr(dst).As16()
 	copy(packet[8:24], from[:])
 	copy(packet[24:40], to[:])
@@ -1749,6 +1749,44 @@ func Test_VM_Check_PacketContract(t *testing.T) {
 			require.NotPanics(t, func() {
 				require.Equal(t, tc.verdict, machine.Check(&vm.Context{}, tc.packet))
 			})
+		})
+	}
+}
+
+// verifies that raw packets are matched past IPv4 options and IPv6 extension
+// headers, that an IPv6 non-first fragment is a fragment with no ports, and
+// that SCTP and UDP-Lite have ports.
+func Test_VM_Check_RawLayout(t *testing.T) {
+	withOptions := vm.NewIPv4Packet(src4, dst4)
+	withOptions[0] = 4<<4 | 6
+	withOptions = withOptions.WithTCP(ipfw.TCPSyn, 40000, 22)
+	tcpHeader := []byte{0x9c, 0x40, 0x00, 0x16, 0, 0, 0, 0, 0, 0, 0, 0, 0x50, byte(ipfw.TCPSyn)}
+	hopByHop := ipv6(0, []byte{6, 0, 0, 0, 0, 0, 0, 0}, tcpHeader)
+	fragment6 := vm.NewIPv6Packet(src6, dst6).WithTCP(ipfw.TCPSyn, 40000, 22).WithFragmentOffset(100)
+	udpLite := vm.NewIPv4Packet(src4, dst4).WithUDP(40000, 22)
+	udpLite[9] = 136
+	sctp := vm.NewIPv6Packet(src6, dst6).WithUDP(40000, 22)
+	sctp[6] = 132
+	cases := []struct {
+		name    string
+		options string
+		packet  vm.Packet
+		verdict ipfw.Action
+	}{
+		{name: "port past IPv4 options", options: "dst-port 22", packet: withOptions, verdict: pass},
+		{name: "port past hop-by-hop options", options: "dst-port 22", packet: hopByHop, verdict: pass},
+		{name: "flags past hop-by-hop options", options: "tcpflags syn", packet: hopByHop, verdict: pass},
+		{name: "IPv6 fragment", options: "frag", packet: fragment6, verdict: pass},
+		{name: "port of an IPv6 fragment", options: "dst-port 22", packet: fragment6, verdict: deny},
+		{name: "whole IPv6 packet", options: "frag", packet: hopByHop, verdict: deny},
+		{name: "port of UDP-Lite", options: "dst-port 22", packet: udpLite, verdict: pass},
+		{name: "port of SCTP", options: "dst-port 22", packet: sctp, verdict: pass},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "add pass ip from any to any " + tc.options + "\nadd deny ip from any to any\n"
+			machine := build(t, src, none)
+			require.Equal(t, tc.verdict, machine.Check(&vm.Context{}, tc.packet))
 		})
 	}
 }

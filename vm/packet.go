@@ -3,25 +3,39 @@ package vm
 import (
 	"encoding/binary"
 	"net/netip"
+	"slices"
 
 	"github.com/yanet-platform/ipfw-go"
 )
 
-// The transport protocol numbers the matcher knows.
+// The upper-layer protocol numbers the matcher knows, and the IPv6 one that
+// names none.
 const (
-	protoICMP    = 1
-	protoTCP     = 6
-	protoUDP     = 17
-	protoICMPv6  = 58
-	protoSCTP    = 132
-	protoUDPLite = 136
+	protoICMP         = 1
+	protoTCP          = 6
+	protoUDP          = 17
+	protoICMPv6       = 58
+	protoNoNextHeader = 59
+	protoSCTP         = 132
+	protoUDPLite      = 136
 )
 
-// The header lengths the raw packets assume: an IPv4 header without
-// options and an IPv6 header without extension headers.
+// The IPv6 extension headers followed up to the upper layer, the ones
+// ipfw_chk follows.
 const (
-	ipv4HeaderLen = 20
-	ipv6HeaderLen = 40
+	protoHopOptions     = 0
+	protoRouting        = 43
+	protoFragment       = 44
+	protoAuthentication = 51
+	protoDstOptions     = 60
+)
+
+// The header lengths: the fixed IPv4 and IPv6 headers and the IPv6 fragment
+// header.
+const (
+	ipv4HeaderLen   = 20
+	ipv6HeaderLen   = 40
+	ipv6FragmentLen = 8
 )
 
 // Direction is where a packet is seen relative to routing.
@@ -96,14 +110,15 @@ type Packet interface {
 	ICMPType() (uint8, bool)
 }
 
-// RawIPv4Packet is an IPv4 packet as bytes, the header taken to be twenty
-// bytes long whatever its IHL says.
+// RawIPv4Packet is an IPv4 packet as bytes, read the way ipfw_chk reads it:
+// its header as long as its IHL says, the transport fields at the header past
+// it whatever the protocol.
 //
 // A field beyond the end of the bytes reads as zero or absent.
 type RawIPv4Packet []byte
 
-// NewIPv4Packet builds a packet between two IPv4 addresses, panicking on
-// any other address: the builders are conveniences, not a parsing path.
+// NewIPv4Packet builds a packet between two IPv4 addresses, panicking on any
+// other address: the builders are conveniences, not a parsing path.
 func NewIPv4Packet(src, dst netip.Addr) RawIPv4Packet {
 	if !src.Is4() || !dst.Is4() {
 		panic("vm: NewIPv4Packet needs IPv4 addresses")
@@ -116,34 +131,53 @@ func NewIPv4Packet(src, dst netip.Addr) RawIPv4Packet {
 	return packet
 }
 
-// WithTCP makes the packet a TCP one.
+// WithTCP returns a copy made a TCP packet with the flags and the ports.
+//
+// Every builder returns a copy, so that packets built from one base share no
+// bytes.
 func (m RawIPv4Packet) WithTCP(flags ipfw.TCPFlag, src, dst uint16) RawIPv4Packet {
-	m[9] = protoTCP
-	setPorts(m[ipv4HeaderLen:], src, dst)
-	m[ipv4HeaderLen+13] |= byte(flags)
-	return m
+	packet, at := m.withProtocol(protoTCP, 14)
+	setPorts(packet[at:], src, dst)
+	packet[at+13] = byte(flags)
+	return packet
 }
 
-// WithUDP makes the packet a UDP one.
+// WithUDP returns a copy made a UDP packet with the ports.
 func (m RawIPv4Packet) WithUDP(src, dst uint16) RawIPv4Packet {
-	m[9] = protoUDP
-	setPorts(m[ipv4HeaderLen:], src, dst)
-	return m
+	packet, at := m.withProtocol(protoUDP, 8)
+	setPorts(packet[at:], src, dst)
+	return packet
 }
 
-// WithICMP makes the packet an ICMP one.
+// WithICMP returns a copy made an ICMP packet with the type and the code.
 func (m RawIPv4Packet) WithICMP(ty, code uint8) RawIPv4Packet {
-	m[9] = protoICMP
-	m[ipv4HeaderLen], m[ipv4HeaderLen+1] = ty, code
-	return m
+	packet, at := m.withProtocol(protoICMP, 4)
+	packet[at], packet[at+1] = ty, code
+	return packet
 }
 
-// WithFragmentOffset sets the thirteen-bit fragment offset, keeping the
-// flag bits above it.
+// WithFragmentOffset returns a copy with the thirteen-bit fragment offset,
+// keeping the flag bits above it.
 func (m RawIPv4Packet) WithFragmentOffset(offset uint16) RawIPv4Packet {
-	m[6] = m[6]&0xe0 | byte(offset>>8)&0x1f
-	m[7] = byte(offset)
-	return m
+	packet := slices.Clone(m)
+	packet[6] = packet[6]&0xe0 | byte(offset>>8)&0x1f
+	packet[7] = byte(offset)
+	return packet
+}
+
+// withProtocol returns a copy naming the protocol, long enough for a header
+// of room bytes past the IP header, and the index of that header.
+func (m RawIPv4Packet) withProtocol(protocol uint8, room int) (RawIPv4Packet, int) {
+	at := m.transport()
+	if at < 0 {
+		panic("vm: the packet has no room for a transport header")
+	}
+	packet := slices.Clone(m)
+	if short := at + room - len(packet); short > 0 {
+		packet = append(packet, make([]byte, short)...)
+	}
+	packet[9] = protocol
+	return packet, at
 }
 
 // Version implements Packet.
@@ -166,80 +200,117 @@ func (m RawIPv4Packet) DestinationAddr() netip.Addr {
 	return addr4At(m, 16)
 }
 
-// SourcePort implements Packet.
-func (m RawIPv4Packet) SourcePort() (uint16, bool) {
-	return portAt(m, m.transport(), ipv4HeaderLen)
-}
-
-// DestinationPort implements Packet.
-func (m RawIPv4Packet) DestinationPort() (uint16, bool) {
-	return portAt(m, m.transport(), ipv4HeaderLen+2)
-}
-
-// TCPFlags implements Packet.
-func (m RawIPv4Packet) TCPFlags() (ipfw.TCPFlag, bool) {
-	return tcpFlagsAt(m, m.transport(), ipv4HeaderLen+13)
-}
-
 // IsFragment implements Packet.
 func (m RawIPv4Packet) IsFragment() bool {
 	return byteAt(m, 6)&0x1f != 0 || byteAt(m, 7) != 0
 }
 
+// SourcePort implements Packet.
+func (m RawIPv4Packet) SourcePort() (uint16, bool) {
+	return uint16At(m, m.transport())
+}
+
+// DestinationPort implements Packet.
+func (m RawIPv4Packet) DestinationPort() (uint16, bool) {
+	return uint16At(m, m.transport()+2)
+}
+
+// TCPFlags implements Packet.
+func (m RawIPv4Packet) TCPFlags() (ipfw.TCPFlag, bool) {
+	flags, ok := uint8At(m, m.transport()+13)
+	return ipfw.TCPFlag(flags), ok
+}
+
 // ICMPType implements Packet.
 func (m RawIPv4Packet) ICMPType() (uint8, bool) {
-	return typeAt(m, m.transport(), ipv4HeaderLen)
+	return uint8At(m, m.transport())
 }
 
-// transport is the protocol of the header after the IP header, none for
-// a non-first fragment, which carries payload there.
-func (m RawIPv4Packet) transport() uint8 {
-	if m.IsFragment() {
-		return 0
+// transport is the index of the header past the IP header, as long as its
+// IHL says, far out of reach when the IHL is shorter than the fixed header.
+func (m RawIPv4Packet) transport() int {
+	length := int(byteAt(m, 0)&0x0f) * 4
+	if length < ipv4HeaderLen {
+		return -1 << 30
 	}
-	return m.Protocol()
+	return length
 }
 
-// RawIPv6Packet is an IPv6 packet as bytes, the header taken to be forty
-// bytes long, extension headers not being followed.
+// RawIPv6Packet is an IPv6 packet as bytes, read the way ipfw_chk reads it:
+// the extension headers ipfw_chk follows, hop-by-hop options, routing,
+// fragment, destination options and authentication, are walked up to the
+// upper layer or to a non-first fragment, and the transport fields are read
+// at the header past them whatever the protocol.
 //
 // A field beyond the end of the bytes reads as zero or absent.
 type RawIPv6Packet []byte
 
-// NewIPv6Packet builds a packet between two IPv6 addresses, panicking on
-// any other address: the builders are conveniences, not a parsing path.
+// NewIPv6Packet builds a packet between two IPv6 addresses, naming no next
+// header, panicking on any other address: the builders are conveniences, not
+// a parsing path.
 func NewIPv6Packet(src, dst netip.Addr) RawIPv6Packet {
 	if !src.Is6() || src.Is4In6() || !dst.Is6() || dst.Is4In6() {
 		panic("vm: NewIPv6Packet needs IPv6 addresses")
 	}
 	packet := make(RawIPv6Packet, 64)
-	packet[0] = 6 << 4
+	packet[0], packet[6] = 6<<4, protoNoNextHeader
 	from, to := src.As16(), dst.As16()
 	copy(packet[8:24], from[:])
 	copy(packet[24:40], to[:])
 	return packet
 }
 
-// WithTCP makes the packet a TCP one.
+// WithTCP returns a copy made a TCP packet with the flags and the ports.
 func (m RawIPv6Packet) WithTCP(flags ipfw.TCPFlag, src, dst uint16) RawIPv6Packet {
-	m[6] = protoTCP
-	setPorts(m[ipv6HeaderLen:], src, dst)
-	m[ipv6HeaderLen+13] |= byte(flags)
-	return m
+	packet, at := m.withProtocol(protoTCP, 14)
+	setPorts(packet[at:], src, dst)
+	packet[at+13] = byte(flags)
+	return packet
 }
 
-// WithUDP makes the packet a UDP one.
+// WithUDP returns a copy made a UDP packet with the ports.
 func (m RawIPv6Packet) WithUDP(src, dst uint16) RawIPv6Packet {
-	m[6] = protoUDP
-	setPorts(m[ipv6HeaderLen:], src, dst)
-	return m
+	packet, at := m.withProtocol(protoUDP, 8)
+	setPorts(packet[at:], src, dst)
+	return packet
 }
 
-// WithICMP6 makes the packet an ICMPv6 one.
+// WithICMP6 returns a copy made an ICMPv6 packet with the type and the code.
 func (m RawIPv6Packet) WithICMP6(ty, code uint8) RawIPv6Packet {
-	m[6] = protoICMPv6
-	m[ipv6HeaderLen], m[ipv6HeaderLen+1] = ty, code
-	return m
+	packet, at := m.withProtocol(protoICMPv6, 4)
+	packet[at], packet[at+1] = ty, code
+	return packet
+}
+
+// WithFragmentOffset returns a copy with the thirteen-bit fragment offset in
+// a fragment header right after the fixed header, inserted when there is
+// none.
+func (m RawIPv6Packet) WithFragmentOffset(offset uint16) RawIPv6Packet {
+	packet := slices.Clone(m)
+	if packet[6] != protoFragment {
+		header := [ipv6FragmentLen]byte{packet[6]}
+		packet = slices.Insert(packet, ipv6HeaderLen, header[:]...)
+		packet[6] = protoFragment
+	}
+	field := packet[ipv6HeaderLen+2 : ipv6HeaderLen+4]
+	flags := binary.BigEndian.Uint16(field) & 7
+	binary.BigEndian.PutUint16(field, offset<<3|flags)
+	return packet
+}
+
+// withProtocol returns a copy naming the protocol as its upper layer, long
+// enough for a header of room bytes, and the index of that header.
+func (m RawIPv6Packet) withProtocol(protocol uint8, room int) (RawIPv6Packet, int) {
+	layout := m.layout()
+	if layout.Transport < 0 {
+		panic("vm: the packet has no room for a transport header")
+	}
+	packet := slices.Clone(m)
+	if short := layout.Transport + room - len(packet); short > 0 {
+		packet = append(packet, make([]byte, short)...)
+	}
+	packet[layout.NextHeader] = protocol
+	return packet, layout.Transport
 }
 
 // Version implements Packet.
@@ -249,7 +320,10 @@ func (m RawIPv6Packet) Version() IPVersion {
 
 // Protocol implements Packet.
 func (m RawIPv6Packet) Protocol() uint8 {
-	return byteAt(m, 6)
+	if next := byteAt(m, 6); !isExtensionHeader(next) {
+		return next
+	}
+	return m.layout().Protocol
 }
 
 // SourceAddr implements Packet.
@@ -262,29 +336,123 @@ func (m RawIPv6Packet) DestinationAddr() netip.Addr {
 	return addr6At(m, 24)
 }
 
+// IsFragment implements Packet.
+func (m RawIPv6Packet) IsFragment() bool {
+	if !isExtensionHeader(byteAt(m, 6)) {
+		return false
+	}
+	return m.layout().Fragment
+}
+
 // SourcePort implements Packet.
 func (m RawIPv6Packet) SourcePort() (uint16, bool) {
-	return portAt(m, m.Protocol(), ipv6HeaderLen)
+	if isExtensionHeader(byteAt(m, 6)) {
+		return uint16At(m, m.walkedTransport())
+	}
+	return uint16At(m, ipv6HeaderLen)
 }
 
 // DestinationPort implements Packet.
 func (m RawIPv6Packet) DestinationPort() (uint16, bool) {
-	return portAt(m, m.Protocol(), ipv6HeaderLen+2)
+	if isExtensionHeader(byteAt(m, 6)) {
+		return uint16At(m, m.walkedTransport()+2)
+	}
+	return uint16At(m, ipv6HeaderLen+2)
 }
 
 // TCPFlags implements Packet.
 func (m RawIPv6Packet) TCPFlags() (ipfw.TCPFlag, bool) {
-	return tcpFlagsAt(m, m.Protocol(), ipv6HeaderLen+13)
-}
-
-// IsFragment implements Packet.
-func (m RawIPv6Packet) IsFragment() bool {
-	return false
+	at := ipv6HeaderLen
+	if isExtensionHeader(byteAt(m, 6)) {
+		at = m.walkedTransport()
+	}
+	flags, ok := uint8At(m, at+13)
+	return ipfw.TCPFlag(flags), ok
 }
 
 // ICMPType implements Packet.
 func (m RawIPv6Packet) ICMPType() (uint8, bool) {
-	return typeAt(m, m.Protocol(), ipv6HeaderLen)
+	if isExtensionHeader(byteAt(m, 6)) {
+		return uint8At(m, m.walkedTransport())
+	}
+	return uint8At(m, ipv6HeaderLen)
+}
+
+// walkedTransport is the index of the header past the extension headers, far
+// out of reach when the packet holds none.
+//
+// The accessors call it only for a fixed header naming an extension header,
+// so that nearly every packet is read with one call less.
+//
+//go:noinline
+func (m RawIPv6Packet) walkedTransport() int {
+	if at := m.layout().Transport; at >= 0 {
+		return at
+	}
+	return -1 << 30
+}
+
+// extensionHeaders has the bit of every IPv6 extension header layout
+// follows, all of them numbered below 64.
+const extensionHeaders = 1<<protoHopOptions | 1<<protoRouting | 1<<protoFragment |
+	1<<protoAuthentication | 1<<protoDstOptions
+
+// isExtensionHeader reports whether the protocol is an extension header the
+// walk follows.
+func isExtensionHeader(protocol uint8) bool {
+	return protocol < 64 && extensionHeaders>>protocol&1 != 0
+}
+
+// ipv6Layout is where the layers of an IPv6 packet lie.
+type ipv6Layout struct {
+	// Protocol is the upper-layer protocol, or the extension header a
+	// truncated packet stops at.
+	Protocol uint8
+	// NextHeader is the index of the field naming Protocol.
+	NextHeader int
+	// Transport is the index of the header past the IP headers, negative
+	// when the packet holds none.
+	Transport int
+	// Fragment is whether the packet is a fragment other than the first one.
+	Fragment bool
+}
+
+// layout follows the extension headers up to the upper layer, as ipfw_chk
+// does before it runs the rules, stopping at a non-first fragment, whose
+// upper layer is the payload of another packet.
+//
+// A header too short to name the next one leaves no transport header. A
+// header running past the end still names it, the transport header then
+// reading as absent.
+func (m RawIPv6Packet) layout() ipv6Layout {
+	layout := ipv6Layout{Protocol: byteAt(m, 6), NextHeader: 6, Transport: ipv6HeaderLen}
+	for {
+		at := layout.Transport
+		need := 2
+		switch layout.Protocol {
+		case protoHopOptions, protoRouting, protoDstOptions, protoAuthentication:
+		case protoFragment:
+			need = ipv6FragmentLen
+		default:
+			return layout
+		}
+		if at+need > len(m) {
+			layout.Transport = -1
+			return layout
+		}
+		length := (int(m[at+1]) + 1) * 8
+		switch layout.Protocol {
+		case protoAuthentication:
+			length = (int(m[at+1]) + 2) * 4
+		case protoFragment:
+			length = ipv6FragmentLen
+			layout.Fragment = binary.BigEndian.Uint16(m[at+2:at+4])>>3 != 0
+		}
+		layout.Protocol, layout.NextHeader, layout.Transport = m[at], at, at+length
+		if layout.Fragment {
+			return layout
+		}
+	}
 }
 
 // setPorts writes the two ports of a transport header.
@@ -317,25 +485,17 @@ func addr6At(packet []byte, idx int) netip.Addr {
 	return netip.AddrFrom16([16]byte(packet[idx : idx+16]))
 }
 
-// portAt is the port at idx of a TCP or UDP packet.
-func portAt(packet []byte, protocol uint8, idx int) (uint16, bool) {
-	if protocol != protoTCP && protocol != protoUDP || idx+2 > len(packet) {
+// uint16At is the big-endian field at idx, absent beyond the end.
+func uint16At(packet []byte, idx int) (uint16, bool) {
+	if idx < 0 || idx+2 > len(packet) {
 		return 0, false
 	}
 	return binary.BigEndian.Uint16(packet[idx : idx+2]), true
 }
 
-// tcpFlagsAt is the flag byte at idx of a TCP packet.
-func tcpFlagsAt(packet []byte, protocol uint8, idx int) (ipfw.TCPFlag, bool) {
-	if protocol != protoTCP || idx >= len(packet) {
-		return 0, false
-	}
-	return ipfw.TCPFlag(packet[idx]), true
-}
-
-// typeAt is the type byte at idx of an ICMP or ICMPv6 packet.
-func typeAt(packet []byte, protocol uint8, idx int) (uint8, bool) {
-	if protocol != protoICMP && protocol != protoICMPv6 || idx >= len(packet) {
+// uint8At is the byte at idx, absent beyond the end.
+func uint8At(packet []byte, idx int) (uint8, bool) {
+	if idx < 0 || idx >= len(packet) {
 		return 0, false
 	}
 	return packet[idx], true
