@@ -9,10 +9,12 @@ import (
 
 // The transport protocol numbers the matcher knows.
 const (
-	protoICMP   = 1
-	protoTCP    = 6
-	protoUDP    = 17
-	protoICMPv6 = 58
+	protoICMP    = 1
+	protoTCP     = 6
+	protoUDP     = 17
+	protoICMPv6  = 58
+	protoSCTP    = 132
+	protoUDPLite = 136
 )
 
 // The header lengths the raw packets assume: an IPv4 header without
@@ -63,29 +65,35 @@ func ipVersion(nibble byte) IPVersion {
 	return 0
 }
 
-// Packet is what the matcher reads from a packet.
+// Packet is what the matcher reads from a packet: the fields of its headers.
+//
+// The VM decides which fields mean something for the packet, as ipfw(8)
+// does, so a packet only reports what its headers hold. A transport field is
+// asked for on a first fragment or a whole packet of a protocol that has it,
+// and false tells that the packet does not hold the header.
 type Packet interface {
 	// Version is the IP version.
 	Version() IPVersion
-	// Protocol is the transport protocol number.
+	// Protocol is the upper-layer protocol, past any IPv6 extension headers.
 	Protocol() uint8
 	// SourceAddr is the source address.
 	SourceAddr() netip.Addr
 	// DestinationAddr is the destination address.
 	DestinationAddr() netip.Addr
-	// SourcePort is the source port of a TCP or UDP packet.
-	SourcePort() (uint16, bool)
-	// DestinationPort is the destination port of a TCP or UDP packet.
-	DestinationPort() (uint16, bool)
-	// TCPFlags are the flags of a TCP packet.
-	TCPFlags() (ipfw.TCPFlag, bool)
 	// IsFragment reports whether the packet is a fragment other than the
-	// first one.
+	// first one, IPv4 or IPv6.
 	IsFragment() bool
-	// ICMPType is the type of an ICMP packet.
+	// SourcePort is the source port field of the transport header, asked for
+	// only for TCP, UDP, SCTP and UDP-Lite.
+	SourcePort() (uint16, bool)
+	// DestinationPort is the destination port field of the transport header,
+	// asked for only for TCP, UDP, SCTP and UDP-Lite.
+	DestinationPort() (uint16, bool)
+	// TCPFlags are the flags of the TCP header, asked for only for TCP.
+	TCPFlags() (ipfw.TCPFlag, bool)
+	// ICMPType is the type field of the ICMP or ICMPv6 header, asked for only
+	// when Protocol names one of them.
 	ICMPType() (uint8, bool)
-	// ICMP6Type is the type of an ICMPv6 packet.
-	ICMP6Type() (uint8, bool)
 }
 
 // RawIPv4Packet is an IPv4 packet as bytes, the header taken to be twenty
@@ -180,12 +188,7 @@ func (m RawIPv4Packet) IsFragment() bool {
 
 // ICMPType implements Packet.
 func (m RawIPv4Packet) ICMPType() (uint8, bool) {
-	return typeAt(m, m.transport(), protoICMP, ipv4HeaderLen)
-}
-
-// ICMP6Type implements Packet.
-func (m RawIPv4Packet) ICMP6Type() (uint8, bool) {
-	return typeAt(m, m.transport(), protoICMPv6, ipv4HeaderLen)
+	return typeAt(m, m.transport(), ipv4HeaderLen)
 }
 
 // transport is the protocol of the header after the IP header, none for
@@ -281,12 +284,7 @@ func (m RawIPv6Packet) IsFragment() bool {
 
 // ICMPType implements Packet.
 func (m RawIPv6Packet) ICMPType() (uint8, bool) {
-	return typeAt(m, m.Protocol(), protoICMP, ipv6HeaderLen)
-}
-
-// ICMP6Type implements Packet.
-func (m RawIPv6Packet) ICMP6Type() (uint8, bool) {
-	return typeAt(m, m.Protocol(), protoICMPv6, ipv6HeaderLen)
+	return typeAt(m, m.Protocol(), ipv6HeaderLen)
 }
 
 // setPorts writes the two ports of a transport header.
@@ -335,9 +333,9 @@ func tcpFlagsAt(packet []byte, protocol uint8, idx int) (ipfw.TCPFlag, bool) {
 	return ipfw.TCPFlag(packet[idx]), true
 }
 
-// typeAt is the type byte at idx of a packet of the given protocol.
-func typeAt(packet []byte, protocol, wanted uint8, idx int) (uint8, bool) {
-	if protocol != wanted || idx >= len(packet) {
+// typeAt is the type byte at idx of an ICMP or ICMPv6 packet.
+func typeAt(packet []byte, protocol uint8, idx int) (uint8, bool) {
+	if protocol != protoICMP && protocol != protoICMPv6 || idx >= len(packet) {
 		return 0, false
 	}
 	return packet[idx], true

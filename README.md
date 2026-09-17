@@ -259,7 +259,7 @@ action, matched := machine.CheckTrace(ctx, packet, tracer)           // every ru
 
 A `table NAME create type` line says what the keys of the table are: an address table takes networks and, through the target resolver, hostnames and custom targets, an interface table takes interface names. A table never created is an address table, as in `ipfw(8)`.
 
-`Packet` is an interface over the fields the matchers read. `RawIPv4Packet` and `RawIPv6Packet` implement it over raw bytes and double as builders in tests. See `ExampleBuild` and `ExampleVM_CheckTrace`.
+`Packet` is an interface over the header fields the matchers read, so a structure of your own, a decoded protobuf message for one, is checked without copying. The VM decides which fields mean something, as `ipfw_chk` does: it asks for ports only of TCP, UDP, SCTP and UDP-Lite, for flags only of TCP, for the type only of ICMP and ICMPv6, and for none of them on a non-first fragment, so an implementation just reports what its headers hold. `RawIPv4Packet` and `RawIPv6Packet` implement it over raw bytes and double as builders in tests. See `ExampleBuild` and `ExampleVM_CheckTrace`.
 
 ## Extension points
 

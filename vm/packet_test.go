@@ -24,16 +24,16 @@ var (
 
 // fields is everything the matcher reads from a packet, for comparison.
 type fields struct {
-	version                   vm.IPVersion
-	protocol                  uint8
-	src, dst                  netip.Addr
-	srcPort, dstPort          uint16
-	hasSrcPort, hasDstPort    bool
-	flags                     ipfw.TCPFlag
-	hasFlags                  bool
-	fragment                  bool
-	icmpType, icmp6Type       uint8
-	hasICMPType, hasICMP6Type bool
+	version                vm.IPVersion
+	protocol               uint8
+	src, dst               netip.Addr
+	srcPort, dstPort       uint16
+	hasSrcPort, hasDstPort bool
+	flags                  ipfw.TCPFlag
+	hasFlags               bool
+	fragment               bool
+	icmpType               uint8
+	hasICMPType            bool
 }
 
 // fieldsOf reads every accessor of a packet.
@@ -46,7 +46,6 @@ func fieldsOf(packet vm.Packet) fields {
 	f.flags, f.hasFlags = packet.TCPFlags()
 	f.fragment = packet.IsFragment()
 	f.icmpType, f.hasICMPType = packet.ICMPType()
-	f.icmp6Type, f.hasICMP6Type = packet.ICMP6Type()
 	return f
 }
 
@@ -115,7 +114,7 @@ func Test_Packet_Table(t *testing.T) {
 			packet: vm.NewIPv6Packet(src6, dst6).WithICMP6(135, 0),
 			expected: fields{
 				version: vm.IPv6, protocol: 58, src: src6, dst: dst6,
-				icmp6Type: 135, hasICMP6Type: true,
+				icmpType: 135, hasICMPType: true,
 			},
 		},
 	}
