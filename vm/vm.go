@@ -1,7 +1,9 @@
 package vm
 
 import (
+	"cmp"
 	"errors"
+	"math"
 	"net/netip"
 	"slices"
 	"strconv"
@@ -126,6 +128,7 @@ type VM[V4, V6 Network] struct {
 // callbacks append to the arenas, Mark and Close delimit a rule's runs.
 type program[V4, V6 Network] struct {
 	rules            []rule
+	numbers          []uint32
 	records          []ipfw.Record
 	actions          []ipfw.Action
 	ipProtos         []ipfw.ProtoIPMatch
@@ -157,11 +160,27 @@ func (m *program[V4, V6]) Action(idx int) ipfw.Action {
 	return m.actions[idx]
 }
 
-// Append adds a rule closed over the arenas with the record it came from.
-func (m *program[V4, V6]) Append(closed rule, rec *ipfw.Record) {
+// Append adds a rule closed over the arenas with its number and the record
+// it came from.
+func (m *program[V4, V6]) Append(closed rule, number uint32, rec *ipfw.Record) {
 	m.rules = append(m.rules, closed)
+	m.numbers = append(m.numbers, number)
 	m.records = append(m.records, *rec)
 	m.actions = append(m.actions, rec.Instruction.Action)
+}
+
+// Number returns the number of the rule.
+func (m *program[V4, V6]) Number(idx int) uint32 {
+	return m.numbers[idx]
+}
+
+// At returns the index of the first rule numbered at or after number, the
+// number of rules when none is, the rule numbers going up.
+func (m *program[V4, V6]) At(number uint64) int {
+	idx, _ := slices.BinarySearchFunc(m.numbers, number, func(have uint32, want uint64) int {
+		return cmp.Compare(uint64(have), want)
+	})
+	return idx
 }
 
 // Link points the jump of the rule at the target.
@@ -361,6 +380,7 @@ func Build[V4, V6 Network](p *ipfw.Parser, cfg Config[V4, V6]) (*VM[V4, V6], err
 		}
 		switch rec.Kind {
 		case ipfw.RecordEOF:
+			sink.LinkNumbers()
 			if unresolved, ok := sink.Unresolved(); ok && cfg.UnresolvedJumps == UnresolvedJumpsError {
 				return nil, &BuildError{Line: unresolved.Line, Text: unresolved.Text, Err: ErrUnresolvedJump}
 			}
@@ -410,16 +430,21 @@ type builder[V4, V6 Network] struct {
 	tableTypes map[string]ipfw.TableType
 	// custom is whether a custom option has a matcher to go to.
 	custom bool
-	// number is the rule number the next instruction gets, an explicit one
-	// moving it forward.
+	// number is the rule number the next instruction gets, one past the
+	// previous rule unless the instruction gives its own, which may only
+	// move it forward.
 	number uint32
 	// labels is the index of the rule after each label, the last
 	// occurrence winning.
 	labels map[string]int
-	// pendingNumbers and pendingLabels hold, by rule number and by label,
-	// the indexes of the skipto rules waiting for them.
-	pendingNumbers map[uint32][]int
-	pendingLabels  map[string][]int
+	// numberJumps holds the indexes of the skipto rules to a number, linked
+	// once every rule number is known, and unresolvedNumbers those no later
+	// rule is numbered for.
+	numberJumps       []int
+	unresolvedNumbers []int
+	// pendingLabels holds, by label, the indexes of the skipto rules waiting
+	// for it.
+	pendingLabels map[string][]int
 }
 
 func newBuilder[V4, V6 Network](
@@ -428,15 +453,14 @@ func newBuilder[V4, V6 Network](
 	custom bool,
 ) *builder[V4, V6] {
 	return &builder[V4, V6]{
-		tables:         tables,
-		networks:       env.Networks,
-		targets:        env.Targets,
-		tableTypes:     map[string]ipfw.TableType{},
-		custom:         custom,
-		number:         1,
-		labels:         map[string]int{},
-		pendingNumbers: map[uint32][]int{},
-		pendingLabels:  map[string][]int{},
+		tables:        tables,
+		networks:      env.Networks,
+		targets:       env.Targets,
+		tableTypes:    map[string]ipfw.TableType{},
+		custom:        custom,
+		number:        1,
+		labels:        map[string]int{},
+		pendingLabels: map[string][]int{},
 	}
 }
 
@@ -450,8 +474,8 @@ func (m *builder[V4, V6]) Program() program[V4, V6] {
 //
 // An explicit rule number below the running one is ErrRuleNumberOrder, an
 // action the VM cannot run ErrUnsupportedAction. A skipto falls through to
-// the next rule until the rule numbered so, or the label, comes after it
-// and links the jump, so every jump goes forward.
+// the next rule until LinkNumbers or a later label links the jump, so every
+// jump goes forward.
 func (m *builder[V4, V6]) Add(rec *ipfw.Record) error {
 	if num := rec.Instruction.Num; num != 0 {
 		if num < m.number {
@@ -459,9 +483,11 @@ func (m *builder[V4, V6]) Add(rec *ipfw.Record) error {
 		}
 		m.number = num
 	}
-	m.link(m.pendingNumbers[m.number])
-	delete(m.pendingNumbers, m.number)
 	idx := m.Len()
+	if idx > 0 && m.number <= m.Number(idx-1) {
+		// The numbering wrapped past the largest rule number.
+		return ErrRuleNumberOrder
+	}
 	m.DropComments(m.start)
 	closed := m.Close(m.start)
 	closed.Kind = rec.Instruction.Action.Kind
@@ -471,7 +497,7 @@ func (m *builder[V4, V6]) Add(rec *ipfw.Record) error {
 		closed.Jump = uint32(idx + 1)
 		switch target := rec.Instruction.Action.SkipTo; target.Kind {
 		case ipfw.SkipToNumber:
-			m.pendingNumbers[target.Number] = append(m.pendingNumbers[target.Number], idx)
+			m.numberJumps = append(m.numberJumps, idx)
 		case ipfw.SkipToLabel:
 			m.pendingLabels[target.Label] = append(m.pendingLabels[target.Label], idx)
 		case ipfw.SkipToTableArg:
@@ -482,7 +508,7 @@ func (m *builder[V4, V6]) Add(rec *ipfw.Record) error {
 	default:
 		return ErrUnsupportedAction
 	}
-	m.Append(closed, rec)
+	m.Append(closed, m.number, rec)
 	m.number++
 	m.start = m.Mark()
 	return nil
@@ -580,13 +606,26 @@ func (m *builder[V4, V6]) link(idxs []int) {
 	}
 }
 
-// Unresolved returns the record of the first skipto still waiting for its
-// rule number or label.
-func (m *builder[V4, V6]) Unresolved() (ipfw.Record, bool) {
-	first := -1
-	for _, idxs := range m.pendingNumbers {
-		first = lowest(first, idxs)
+// LinkNumbers links every skipto to a number to the first later rule
+// numbered at or after it, as ipfw(8) jumps once the ruleset is complete.
+//
+// A target at or before the rule's own number lands on the next rule, so no
+// jump goes back. A target no later rule reaches stays unresolved.
+func (m *builder[V4, V6]) LinkNumbers() {
+	for _, idx := range m.numberJumps {
+		target := max(uint64(m.Action(idx).SkipTo.Number), uint64(m.Number(idx))+1)
+		if at := m.At(target); at < m.Len() {
+			m.Link(idx, at)
+		} else {
+			m.unresolvedNumbers = append(m.unresolvedNumbers, idx)
+		}
 	}
+}
+
+// Unresolved returns the record of the first skipto still waiting for its
+// rule number or label, after LinkNumbers.
+func (m *builder[V4, V6]) Unresolved() (ipfw.Record, bool) {
+	first := lowest(-1, m.unresolvedNumbers)
 	for _, idxs := range m.pendingLabels {
 		first = lowest(first, idxs)
 	}
@@ -656,7 +695,7 @@ func (m *VM[V4, V6]) Check(ctx *Context, pkt Packet) ipfw.Action {
 // A matching skipto continues at its linked rule, a skipto tablearg at
 // the rule the table lookup of its options named, every jump going
 // forward: a tablearg with no target, or one at or before the rule,
-// falls through.
+// falls through, and one past the last rule ends the search.
 func (m *VM[V4, V6]) CheckTrace(ctx *Context, pkt Packet, tracer Tracer) (ipfw.Action, bool) {
 	var fields packetFields
 	fields.Read(pkt)
@@ -1065,9 +1104,10 @@ func matchPolicy(kind ipfw.OptKind, ctx *Context) bool {
 // the mask takes or one the table lists, and the target of the table entry.
 //
 // A mask like `*` takes even no interface at all. The value of a table
-// entry names the label a tablearg jumps to, the target being the rule
-// after it, or none when no label is so named. The value written in the
-// option is not consulted.
+// entry names where a tablearg jumps: a number the first rule numbered at or
+// after it, as in ipfw(8), and a label the rule after it, none when no label
+// is so named. The value written in the option is not consulted, as ipfw(8)
+// drops it.
 func (m *VM[V4, V6]) matchVia(via *ipfw.Via, ctx *Context) (bool, int) {
 	switch via.Kind {
 	case ipfw.ViaExact:
@@ -1079,12 +1119,32 @@ func (m *VM[V4, V6]) matchVia(via *ipfw.Via, ctx *Context) (bool, int) {
 		if !ok {
 			return false, noTarget
 		}
+		if number, ok := ruleNumber(value); ok {
+			return true, m.program.At(number)
+		}
 		if target, ok := m.labels[value]; ok {
 			return true, target
 		}
 		return true, noTarget
 	}
 	return false, noTarget
+}
+
+// ruleNumber reads a table value of decimal digits as a rule number, false
+// for any other value.
+func ruleNumber(value string) (uint64, bool) {
+	if value == "" || len(value) > 10 {
+		return 0, false
+	}
+	var number uint64
+	for idx := range len(value) {
+		digit := value[idx] - '0'
+		if digit > 9 {
+			return 0, false
+		}
+		number = number*10 + uint64(digit)
+	}
+	return number, number <= math.MaxUint32
 }
 
 // matchIPProtos reports whether the version is in one of the version
