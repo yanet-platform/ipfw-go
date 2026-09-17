@@ -172,9 +172,10 @@ labels are a project extension. See the upstream
 [jump syntax](https://github.com/freebsd/freebsd-src/blob/88e7371d9dc26f85dfc1b008cbe59ebc7e4a33da/sbin/ipfw/ipfw.8#L1062)
 and [named state syntax](https://github.com/freebsd/freebsd-src/blob/88e7371d9dc26f85dfc1b008cbe59ebc7e4a33da/sbin/ipfw/ipfw2.c#L4338).
 
-Table values remain raw text, including `:NEXT` and `::1`. In the VM, a symbolic tablearg
-can resolve to a label supplied by an enabled declaration or a command hook. It does not need
-a separate VM option. See `ExampleBuild_labels`.
+Table values remain raw text, including `:NEXT` and `::1`. In the VM, a numeric tablearg
+value names a rule number, and a symbolic one can resolve to a label supplied by an enabled
+declaration or a command hook. It does not need a separate VM option. See
+`ExampleBuild_labels`.
 
 ## Errors
 
@@ -256,6 +257,8 @@ packet := vm.NewIPv4Packet(src, dst).WithTCP(ipfw.TCPSyn, 40000, 22) // or your 
 verdict := machine.Check(ctx, packet)                                // ipfw.Action: pass or deny
 action, matched := machine.CheckTrace(ctx, packet, tracer)           // every rule evaluated
 ```
+
+A rule without a number is numbered one past the previous rule, where FreeBSD adds `net.inet.ip.fw.autoinc_step`, 100 by default: rulesets that leave most rules unnumbered and number a few, as YANET rulesets do, rely on it. An explicit number may not go back. A numeric `skipto`, and a `skipto tablearg` whose table value is a number, lands as in FreeBSD on the first later rule numbered at or after the target, the next rule when the target is not past the jumping rule's own number. A static jump no later rule reaches is a build error, or falls through under `UnresolvedJumpsFallThrough`, and a tablearg one ends the search with the default verdict.
 
 A `table NAME create type` line says what the keys of the table are: an address table takes networks and, through the target resolver, hostnames and custom targets, an interface table takes interface names. A table never created is an address table, as in `ipfw(8)`.
 

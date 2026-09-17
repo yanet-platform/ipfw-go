@@ -557,6 +557,136 @@ func Test_VM_Check_RuleNumbers(t *testing.T) {
 	}, tracer.seen)
 }
 
+// verifies that a numeric skipto lands on the first later rule numbered at or
+// after its target, as ipfw(8) jumps, a target at or before the rule's own
+// number landing on the next rule, and that a rule without a number is
+// numbered one past the previous rule.
+func Test_VM_Check_SkipToAtOrAfter(t *testing.T) {
+	packet := tcp4("192.0.2.1", "192.0.2.2")
+	cases := []struct {
+		name  string
+		rules string
+		seen  []traced
+	}{
+		{
+			name: "a gap before the target",
+			rules: ruleset(`
+				add 100 skipto 150 ip from any to any
+				add 120 deny ip from any to any
+				add 200 pass ip from any to any
+			`),
+			seen: []traced{
+				{line: 1, action: ipfw.ActionSkipTo, matched: true},
+				{line: 3, action: ipfw.ActionPass, matched: true},
+			},
+		},
+		{
+			name: "the target numbered implicitly",
+			rules: ruleset(`
+				add 10 skipto 12 ip from any to any
+				add deny ip from any to any
+				add pass ip from any to any
+			`),
+			seen: []traced{
+				{line: 1, action: ipfw.ActionSkipTo, matched: true},
+				{line: 3, action: ipfw.ActionPass, matched: true},
+			},
+		},
+		{
+			name: "its own number",
+			rules: ruleset(`
+				add 50 skipto 50 ip from any to any
+				add pass ip from any to any
+			`),
+			seen: []traced{
+				{line: 1, action: ipfw.ActionSkipTo, matched: true},
+				{line: 2, action: ipfw.ActionPass, matched: true},
+			},
+		},
+		{
+			name: "backwards",
+			rules: ruleset(`
+				add 50 count ip from any to any
+				add 100 skipto 50 ip from any to any
+				add 110 pass ip from any to any
+			`),
+			seen: []traced{
+				{line: 1, action: ipfw.ActionCount, matched: true},
+				{line: 2, action: ipfw.ActionSkipTo, matched: true},
+				{line: 3, action: ipfw.ActionPass, matched: true},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			machine := build(t, tc.rules, none)
+			tracer := &recordingTracer{}
+			action, matched := machine.CheckTrace(&vm.Context{}, packet, tracer)
+			require.True(t, matched)
+			require.Equal(t, pass, action)
+			require.Equal(t, tc.seen, tracer.seen)
+		})
+	}
+}
+
+// verifies that a table value holding a number sends a skipto tablearg to the
+// first later rule numbered at or after it, to the next rule when the number
+// is not past the rule's own, and past the last rule to the default verdict.
+func Test_VM_Check_TableArgNumber(t *testing.T) {
+	src := ruleset(`
+		table t create type iface
+		table t add vlan1 300
+		table t add vlan2 250
+		table t add vlan3 50
+		table t add vlan4 900
+		add 100 skipto tablearg ip from any to any via table(t)
+		add 200 deny ip from any to any
+		add 300 pass ip from any to any
+	`)
+	machine := build(t, src, none)
+	packet := tcp4("192.0.2.1", "192.0.2.2")
+	cases := []struct {
+		ifname  string
+		matched bool
+		seen    []traced
+	}{
+		{
+			ifname:  "vlan1",
+			matched: true,
+			seen: []traced{
+				{line: 6, action: ipfw.ActionSkipTo, matched: true},
+				{line: 8, action: ipfw.ActionPass, matched: true},
+			},
+		},
+		{
+			ifname:  "vlan2",
+			matched: true,
+			seen: []traced{
+				{line: 6, action: ipfw.ActionSkipTo, matched: true},
+				{line: 8, action: ipfw.ActionPass, matched: true},
+			},
+		},
+		{
+			ifname:  "vlan3",
+			matched: true,
+			seen: []traced{
+				{line: 6, action: ipfw.ActionSkipTo, matched: true},
+				{line: 7, action: ipfw.ActionDeny, matched: true},
+			},
+		},
+		{
+			ifname: "vlan4",
+			seen:   []traced{{line: 6, action: ipfw.ActionSkipTo, matched: true}},
+		},
+	}
+	for _, tc := range cases {
+		tracer := &recordingTracer{}
+		_, matched := machine.CheckTrace(&vm.Context{IfName: tc.ifname}, packet, tracer)
+		require.Equal(t, tc.matched, matched, tc.ifname)
+		require.Equal(t, tc.seen, tracer.seen, tc.ifname)
+	}
+}
+
 // verifies that a matching skipto to a label continues at the rule after
 // the label, a mismatching one at the next rule.
 func Test_VM_Check_SkipToLabel(t *testing.T) {
@@ -3322,6 +3452,17 @@ func Test_VM_Build_Errors(t *testing.T) {
 			cause:       vm.ErrRuleNumberOrder,
 		},
 		{
+			name: "rule after the largest rule number",
+			rules: ruleset(`
+				add 4294967295 count ip from any to any
+				add pass ip from any to any
+			`),
+			environment: resolving,
+			line:        2,
+			text:        "add pass ip from any to any",
+			cause:       vm.ErrRuleNumberOrder,
+		},
+		{
 			name: "skipto to a number that never appears",
 			rules: ruleset(`
 				add deny udp from any to any
@@ -3334,18 +3475,18 @@ func Test_VM_Build_Errors(t *testing.T) {
 			cause:       vm.ErrUnresolvedJump,
 		},
 		{
-			name: "skipto to its own number",
+			name: "skipto its own number as the last rule",
 			rules: ruleset(`
+				add pass udp from any to any
 				add 50 skipto 50 ip from any to any
-				add pass ip from any to any
 			`),
 			environment: resolving,
-			line:        1,
+			line:        2,
 			text:        "add 50 skipto 50 ip from any to any",
 			cause:       vm.ErrUnresolvedJump,
 		},
 		{
-			name: "skipto backwards",
+			name: "skipto backwards as the last rule",
 			rules: ruleset(`
 				add 50 pass udp from any to any
 				add 100 skipto 50 ip from any to any
