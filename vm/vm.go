@@ -709,24 +709,23 @@ type packetFields struct {
 	Destination netip.Addr
 	// SourcePort is the source port, after ReadPorts.
 	SourcePort uint16
-	// HasSourcePort is whether the packet carries a source port.
+	// HasSourcePort is whether the packet carries a source port that means
+	// something, a first fragment or whole packet of a protocol with ports.
 	HasSourcePort bool
 	// DestinationPort is the destination port, after ReadPorts.
 	DestinationPort uint16
-	// HasDestinationPort is whether the packet carries a destination port.
+	// HasDestinationPort is HasSourcePort for the destination port.
 	HasDestinationPort bool
 	// Flags are the TCP flags, after ReadFlags.
 	Flags ipfw.TCPFlag
-	// HasFlags is whether the packet carries TCP flags.
+	// HasFlags is whether the packet carries TCP flags, a first fragment or
+	// whole packet of TCP.
 	HasFlags bool
-	// ICMPType is the ICMP type, after ReadICMP.
+	// ICMPType is the ICMP or ICMPv6 type, after ReadICMP.
 	ICMPType uint8
-	// HasICMPType is whether the packet is ICMP.
+	// HasICMPType is whether the packet carries it, a first fragment or whole
+	// packet of ICMP or ICMPv6.
 	HasICMPType bool
-	// ICMP6Type is the ICMPv6 type, after ReadICMP.
-	ICMP6Type uint8
-	// HasICMP6Type is whether the packet is ICMPv6.
-	HasICMP6Type bool
 	// Fragment is whether the packet is a non-first fragment, after
 	// ReadFragment.
 	Fragment bool
@@ -761,30 +760,68 @@ func addrFamily(addr netip.Addr) IPVersion {
 	return 0
 }
 
-// ReadPorts takes the ports on first use.
+// ReadPorts takes the ports on first use, of a first fragment or a whole
+// packet of TCP, UDP, SCTP or UDP-Lite only, the protocols ipfw_chk reads
+// ports of.
+//
+// The check of a later use stays small enough to inline at every matcher,
+// the reading itself being a call of its own, as for the flags and the type.
 func (m *packetFields) ReadPorts(pkt Packet) {
 	if !m.ports {
-		m.SourcePort, m.HasSourcePort = pkt.SourcePort()
-		m.DestinationPort, m.HasDestinationPort = pkt.DestinationPort()
-		m.ports = true
+		m.readPorts(pkt)
 	}
 }
 
-// ReadFlags takes the TCP flags on first use.
+func (m *packetFields) readPorts(pkt Packet) {
+	m.ports = true
+	switch m.Protocol {
+	case protoTCP, protoUDP, protoSCTP, protoUDPLite:
+	default:
+		return
+	}
+	if m.ReadFragment(pkt); m.Fragment {
+		return
+	}
+	m.SourcePort, m.HasSourcePort = pkt.SourcePort()
+	m.DestinationPort, m.HasDestinationPort = pkt.DestinationPort()
+}
+
+// ReadFlags takes the TCP flags on first use, of a first fragment or a whole
+// packet of TCP only.
 func (m *packetFields) ReadFlags(pkt Packet) {
 	if !m.tcp {
-		m.Flags, m.HasFlags = pkt.TCPFlags()
-		m.tcp = true
+		m.readFlags(pkt)
 	}
 }
 
-// ReadICMP takes the ICMP and ICMPv6 types on first use.
+func (m *packetFields) readFlags(pkt Packet) {
+	m.tcp = true
+	if m.Protocol != protoTCP {
+		return
+	}
+	if m.ReadFragment(pkt); m.Fragment {
+		return
+	}
+	m.Flags, m.HasFlags = pkt.TCPFlags()
+}
+
+// ReadICMP takes the ICMP or ICMPv6 type on first use, of a first fragment or
+// a whole packet of either only.
 func (m *packetFields) ReadICMP(pkt Packet) {
 	if !m.icmp {
-		m.ICMPType, m.HasICMPType = pkt.ICMPType()
-		m.ICMP6Type, m.HasICMP6Type = pkt.ICMP6Type()
-		m.icmp = true
+		m.readICMP(pkt)
 	}
+}
+
+func (m *packetFields) readICMP(pkt Packet) {
+	m.icmp = true
+	if m.Protocol != protoICMP && m.Protocol != protoICMPv6 {
+		return
+	}
+	if m.ReadFragment(pkt); m.Fragment {
+		return
+	}
+	m.ICMPType, m.HasICMPType = pkt.ICMPType()
 }
 
 // ReadFragment takes whether the packet is a fragment on first use.
@@ -947,8 +984,9 @@ func lookupTarget(opt *ipfw.Opt, matched bool, found, target int) int {
 // its set and clear requirements, src-port and dst-port a packet whose port
 // is in the range, proto one of the protocol number, in and out the direction
 // of the check, via the context's interface by name, by mask or through a
-// table, frag a non-first fragment, icmptypes a packet reporting an ICMP type
-// in the set, and icmp6types an IPv6 packet reporting an ICMPv6 type in the set.
+// table, frag a non-first fragment, icmptypes an ICMP packet of a type in the
+// set, and icmp6types an IPv6 ICMPv6 packet of a type in the set. A transport
+// field holds only on a first fragment or a whole packet, as in ipfw_chk.
 // The options the VM does not emulate follow matchPolicy, a custom one
 // the configured matcher, which sees the packet itself.
 func (m *VM[V4, V6]) matchOption(
@@ -989,11 +1027,12 @@ func (m *VM[V4, V6]) matchOption(
 		return fields.Fragment, noTarget
 	case ipfw.OptICMPTypes:
 		fields.ReadICMP(pkt)
-		return fields.HasICMPType && opt.Types.Has(fields.ICMPType), noTarget
+		return fields.Protocol == protoICMP && fields.HasICMPType &&
+			opt.Types.Has(fields.ICMPType), noTarget
 	case ipfw.OptICMP6Types:
 		fields.ReadICMP(pkt)
-		return fields.Version == IPv6 && fields.HasICMP6Type &&
-			opt.Types.Has(fields.ICMP6Type), noTarget
+		return fields.Version == IPv6 && fields.Protocol == protoICMPv6 && fields.HasICMPType &&
+			opt.Types.Has(fields.ICMPType), noTarget
 	}
 	return false, noTarget
 }

@@ -3,6 +3,7 @@ package vm_test
 import (
 	"fmt"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -1525,6 +1526,229 @@ func Test_VM_Check_ICMPTypes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			machine := build(t, tc.rules, none)
 			require.Equal(t, tc.verdict, machine.Check(&vm.Context{}, tc.packet))
+		})
+	}
+}
+
+// fieldPacket is a packet held field by field, as a structure of another
+// library would hold it, reporting every transport field it is asked for.
+//
+// It panics when the VM asks for a field the Packet contract says it never
+// asks for, a non-first fragment's ports or a UDP packet's flags among them.
+type fieldPacket struct {
+	version  vm.IPVersion
+	protocol uint8
+	fragment bool
+	icmpType uint8
+}
+
+// Version implements vm.Packet.
+func (m fieldPacket) Version() vm.IPVersion {
+	return m.version
+}
+
+// Protocol implements vm.Packet.
+func (m fieldPacket) Protocol() uint8 {
+	return m.protocol
+}
+
+// SourceAddr implements vm.Packet.
+func (m fieldPacket) SourceAddr() netip.Addr {
+	if m.version == vm.IPv6 {
+		return netip.MustParseAddr("2001:db8::1")
+	}
+	return netip.MustParseAddr("192.0.2.1")
+}
+
+// DestinationAddr implements vm.Packet.
+func (m fieldPacket) DestinationAddr() netip.Addr {
+	if m.version == vm.IPv6 {
+		return netip.MustParseAddr("2001:db8::2")
+	}
+	return netip.MustParseAddr("192.0.2.2")
+}
+
+// IsFragment implements vm.Packet.
+func (m fieldPacket) IsFragment() bool {
+	return m.fragment
+}
+
+// SourcePort implements vm.Packet.
+func (m fieldPacket) SourcePort() (uint16, bool) {
+	m.expect("ports", 6, 17, 132, 136)
+	return 40000, true
+}
+
+// DestinationPort implements vm.Packet.
+func (m fieldPacket) DestinationPort() (uint16, bool) {
+	m.expect("ports", 6, 17, 132, 136)
+	return 22, true
+}
+
+// TCPFlags implements vm.Packet.
+func (m fieldPacket) TCPFlags() (ipfw.TCPFlag, bool) {
+	m.expect("TCP flags", 6)
+	return ipfw.TCPSyn | ipfw.TCPAck, true
+}
+
+// ICMPType implements vm.Packet.
+func (m fieldPacket) ICMPType() (uint8, bool) {
+	m.expect("the ICMP type", 1, 58)
+	return m.icmpType, true
+}
+
+// expect panics unless the packet is a first fragment or a whole packet of
+// one of the protocols.
+func (m fieldPacket) expect(what string, protocols ...uint8) {
+	if m.fragment || !slices.Contains(protocols, m.protocol) {
+		panic(fmt.Sprintf("asked for %s of protocol %d, fragment %v", what, m.protocol, m.fragment))
+	}
+}
+
+// verifies that the VM reads a transport field only where ipfw(8) does: ports
+// of TCP, UDP, SCTP and UDP-Lite, flags of TCP, the type of ICMP and ICMPv6,
+// and none of them for a non-first fragment, whatever the packet reports.
+func Test_VM_Check_PacketContract(t *testing.T) {
+	cases := []struct {
+		name    string
+		options string
+		packet  fieldPacket
+		verdict ipfw.Action
+	}{
+		{
+			name:    "dst-port of TCP",
+			options: "dst-port 22",
+			packet:  fieldPacket{version: vm.IPv4, protocol: 6},
+			verdict: pass,
+		},
+		{
+			name:    "dst-port of UDP",
+			options: "dst-port 22",
+			packet:  fieldPacket{version: vm.IPv4, protocol: 17},
+			verdict: pass,
+		},
+		{
+			name:    "dst-port of SCTP",
+			options: "dst-port 22",
+			packet:  fieldPacket{version: vm.IPv6, protocol: 132},
+			verdict: pass,
+		},
+		{
+			name:    "dst-port of UDP-Lite",
+			options: "dst-port 22",
+			packet:  fieldPacket{version: vm.IPv4, protocol: 136},
+			verdict: pass,
+		},
+		{
+			name:    "dst-port of ICMP",
+			options: "dst-port 22",
+			packet:  fieldPacket{version: vm.IPv4, protocol: 1},
+			verdict: deny,
+		},
+		{
+			name:    "negated dst-port of ICMP",
+			options: "not dst-port 22",
+			packet:  fieldPacket{version: vm.IPv4, protocol: 1},
+			verdict: pass,
+		},
+		{
+			name:    "dst-port of a TCP fragment",
+			options: "dst-port 22",
+			packet:  fieldPacket{version: vm.IPv4, protocol: 6, fragment: true},
+			verdict: deny,
+		},
+		{
+			name:    "src-port of an IPv6 UDP fragment",
+			options: "src-port 40000",
+			packet:  fieldPacket{version: vm.IPv6, protocol: 17, fragment: true},
+			verdict: deny,
+		},
+		{
+			name:    "body port of a TCP fragment",
+			options: "22",
+			packet:  fieldPacket{version: vm.IPv4, protocol: 6, fragment: true},
+			verdict: deny,
+		},
+		{
+			name:    "established of TCP",
+			options: "established",
+			packet:  fieldPacket{version: vm.IPv4, protocol: 6},
+			verdict: pass,
+		},
+		{
+			name:    "established of UDP",
+			options: "established",
+			packet:  fieldPacket{version: vm.IPv4, protocol: 17},
+			verdict: deny,
+		},
+		{
+			name:    "established of a TCP fragment",
+			options: "established",
+			packet:  fieldPacket{version: vm.IPv4, protocol: 6, fragment: true},
+			verdict: deny,
+		},
+		{
+			name:    "tcpflags of SCTP",
+			options: "tcpflags syn",
+			packet:  fieldPacket{version: vm.IPv4, protocol: 132},
+			verdict: deny,
+		},
+		{
+			name:    "icmptypes of ICMP",
+			options: "icmptypes 8",
+			packet:  fieldPacket{version: vm.IPv4, protocol: 1, icmpType: 8},
+			verdict: pass,
+		},
+		{
+			name:    "icmptypes of ICMP over IPv6",
+			options: "icmptypes 8",
+			packet:  fieldPacket{version: vm.IPv6, protocol: 1, icmpType: 8},
+			verdict: pass,
+		},
+		{
+			name:    "icmptypes of ICMPv6",
+			options: "icmptypes 8",
+			packet:  fieldPacket{version: vm.IPv6, protocol: 58, icmpType: 8},
+			verdict: deny,
+		},
+		{
+			name:    "icmptypes of an ICMP fragment",
+			options: "icmptypes 8",
+			packet:  fieldPacket{version: vm.IPv4, protocol: 1, fragment: true, icmpType: 8},
+			verdict: deny,
+		},
+		{
+			name:    "icmp6types of ICMPv6",
+			options: "icmp6types 128",
+			packet:  fieldPacket{version: vm.IPv6, protocol: 58, icmpType: 128},
+			verdict: pass,
+		},
+		{
+			name:    "icmp6types of ICMPv6 over IPv4",
+			options: "icmp6types 128",
+			packet:  fieldPacket{version: vm.IPv4, protocol: 58, icmpType: 128},
+			verdict: deny,
+		},
+		{
+			name:    "icmp6types of ICMP over IPv6",
+			options: "icmp6types 128",
+			packet:  fieldPacket{version: vm.IPv6, protocol: 1, icmpType: 128},
+			verdict: deny,
+		},
+		{
+			name:    "frag of an IPv6 fragment",
+			options: "frag",
+			packet:  fieldPacket{version: vm.IPv6, protocol: 17, fragment: true},
+			verdict: pass,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "add pass ip from any to any " + tc.options + "\nadd deny ip from any to any\n"
+			machine := build(t, src, none)
+			require.NotPanics(t, func() {
+				require.Equal(t, tc.verdict, machine.Check(&vm.Context{}, tc.packet))
+			})
 		})
 	}
 }
