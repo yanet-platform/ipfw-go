@@ -5118,7 +5118,7 @@ var (
 	// them being what the property is about.
 	lineBoundedPieces = []string{
 		"tcp", "udp", "ip", "any", "me", "22", "80,443", "1-65535",
-		"192.0.2.0/24", "2001:db8::/32", "table(_T_)", "`host.example.com'",
+		"192.0.2.0/24", "2001:db8::/32", "table(_T_)", "table(_T_,1)", "`host.example.com'",
 		"{", "}", "or", " or ", " o ", " | ", ",", " ", "\t", "\n", "\r\n",
 		"not ", "in", "out", "established", "frag", "via vlan1", "via table(_T_,v)",
 		"src-port 22", "dst-port 8080,8443", "proto tcp", "tcpflags syn,!ack",
@@ -5138,6 +5138,7 @@ var fuzzSeeds = []string{
 	"add 100 deny log logamount 5 tag 7 tcp from any 22 to any 80 established\n",
 	"add allow { tcp or udp } from { 192.0.2.0/24 or not ::1 } 1024-65535 to me domain\n",
 	"add skipto :LBL ip from table(t) to host.example.com { in or out }\n",
+	"add pass ip from { not table(t,100) or table(u,:L) } to table(v,a,b)\n",
 	"add count ip from `node-1.example.net' to custom:first via vlan1?? keep-state :flow\n",
 	"add check-state :flow log\n",
 	"add deny ip from any to any not dst-port 22,80 tcpflags syn,!ack icmptypes 0,8\n",

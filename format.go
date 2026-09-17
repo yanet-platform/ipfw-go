@@ -612,7 +612,8 @@ func appendTargetText(dst []byte, target Target) ([]byte, error) {
 		}
 		return append(dst, "me6"...), nil
 	case TargetTable:
-		if !isTableRefText(target.Text) {
+		name, value, hasValue := strings.Cut(target.Text, ",")
+		if !isTableRefText(name) || hasValue && !isTableValueText(value) {
 			return dst, ErrInvalidName
 		}
 		dst = append(dst, "table("...)
@@ -1141,7 +1142,7 @@ func appendVia(dst []byte, opt Opt) ([]byte, error) {
 		if !isViaTableName(via.Name) {
 			return dst, ErrInvalidName
 		}
-		if via.Value != "" && !isViaTableValue(via.Value) {
+		if via.Value != "" && !isTableValueText(via.Value) {
 			return dst, ErrInvalidName
 		}
 		dst = append(dst, "via table("...)
@@ -1177,9 +1178,9 @@ func isViaTableName(text string) bool {
 	return rest == ""
 }
 
-// isViaTableValue reports whether text reads back as the value inside a via
-// table lookup.
-func isViaTableValue(text string) bool {
+// isTableValueText reports whether text reads back as the value inside a
+// table lookup, of a target or of via.
+func isTableValueText(text string) bool {
 	if text == "" || strings.IndexByte(text, '#') >= 0 {
 		return false
 	}

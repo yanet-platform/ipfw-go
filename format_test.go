@@ -468,6 +468,10 @@ func Test_Formatter_AppendRecord_Targets(t *testing.T) {
 			"add allow tcp from { table(_SRV_) } to table(_DST_)",
 			"add pass tcp from table(_SRV_) to table(_DST_)",
 		},
+		{
+			"add pass ip from { table(t,100) or not table(u,:V) } to any",
+			"add pass ip from { table(t,100) or not table(u,:V) } to any",
+		},
 		{"add pass ip from me to me6", "add pass ip from me to me6"},
 		{"add pass ip from not me to any", "add pass ip from not me to any"},
 		{"add pass ip from _MACRO_ to any", "add pass ip from _MACRO_ to any"},
@@ -1131,6 +1135,27 @@ func Test_Formatter_AppendRecord_InvalidValues(t *testing.T) {
 			name: "empty table target name",
 			mutate: func(record *ipfw.ParsedRecord) {
 				record.Body.Sources = []ipfw.Target{{Kind: ipfw.TargetTable}}
+			},
+			err: ipfw.ErrInvalidName,
+		},
+		{
+			name: "table target value with the closing paren",
+			mutate: func(record *ipfw.ParsedRecord) {
+				record.Body.Sources = []ipfw.Target{{Kind: ipfw.TargetTable, Text: "t,a)b"}}
+			},
+			err: ipfw.ErrInvalidName,
+		},
+		{
+			name: "table target with an empty value",
+			mutate: func(record *ipfw.ParsedRecord) {
+				record.Body.Sources = []ipfw.Target{{Kind: ipfw.TargetTable, Text: "t,"}}
+			},
+			err: ipfw.ErrInvalidName,
+		},
+		{
+			name: "table target with an empty name and a value",
+			mutate: func(record *ipfw.ParsedRecord) {
+				record.Body.Sources = []ipfw.Target{{Kind: ipfw.TargetTable, Text: ",1"}}
 			},
 			err: ipfw.ErrInvalidName,
 		},
@@ -1966,7 +1991,8 @@ func genTargetChain(t *rapid.T) string {
 		return prefix + drawPick(
 			t, "target",
 			"any", "me", "me6",
-			"table("+drawPick(t, "table", genTableNames...)+")",
+			"table("+drawPick(t, "table", genTableNames...)+
+				drawPick(t, "tableValue", "", ",100", ",:V")+")",
 			genAddressMember(t),
 		)
 	}

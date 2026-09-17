@@ -3351,6 +3351,106 @@ func Test_VM_Check_TableArgAddress(t *testing.T) {
 	}
 }
 
+// verifies that table(NAME,VALUE) holds an address only when the entry
+// holding it has the value, the most specific entry deciding.
+//
+// Two numbers compare as numbers and any other value as text, a leading colon
+// dropped on either side as the build drops it from an entry's value.
+func Test_VM_Check_TableValue(t *testing.T) {
+	src := ruleset(`
+		table t add 192.0.2.0/24 100
+		table t add 192.0.2.128/25 :HALF
+		table t add 2001:db8::/32 0100
+		add pass ip from %s to any
+		add deny ip from any to any
+	`)
+	v6 := vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8::2"))
+	cases := []struct {
+		name    string
+		target  string
+		packet  vm.Packet
+		verdict ipfw.Action
+	}{
+		{
+			name:    "entry with the value",
+			target:  "table(t,100)",
+			packet:  tcp4("192.0.2.1", "203.0.113.1"),
+			verdict: pass,
+		},
+		{
+			name:    "more specific entry with another value",
+			target:  "table(t,100)",
+			packet:  tcp4("192.0.2.130", "203.0.113.1"),
+			verdict: deny,
+		},
+		{
+			name:    "label value",
+			target:  "table(t,:HALF)",
+			packet:  tcp4("192.0.2.130", "203.0.113.1"),
+			verdict: pass,
+		},
+		{
+			name:    "label value without the colon",
+			target:  "table(t,HALF)",
+			packet:  tcp4("192.0.2.130", "203.0.113.1"),
+			verdict: pass,
+		},
+		{
+			name:    "equal numbers written apart",
+			target:  "table(t,0100)",
+			packet:  tcp4("192.0.2.1", "203.0.113.1"),
+			verdict: pass,
+		},
+		{
+			name:    "IPv6 entry with an equal number",
+			target:  "table(t,100)",
+			packet:  v6,
+			verdict: pass,
+		},
+		{
+			name:    "no entry",
+			target:  "table(t,100)",
+			packet:  tcp4("198.51.100.1", "203.0.113.1"),
+			verdict: deny,
+		},
+		{
+			name:    "negated, entry with another value",
+			target:  "not table(t,100)",
+			packet:  tcp4("192.0.2.130", "203.0.113.1"),
+			verdict: pass,
+		},
+		{
+			name:    "negated, entry with the value",
+			target:  "not table(t,100)",
+			packet:  tcp4("192.0.2.1", "203.0.113.1"),
+			verdict: deny,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			machine := build(t, fmt.Sprintf(src, tc.target), none)
+			require.Equal(t, tc.verdict, machine.Check(&vm.Context{}, tc.packet))
+		})
+	}
+}
+
+// verifies that a lookup whose entry has another value than the target asks
+// for names no tablearg target, one with the value does.
+func Test_VM_Check_TableValueTableArg(t *testing.T) {
+	src := ruleset(`
+		table j add 192.0.2.0/24 :NET
+		add skipto tablearg ip from { not table(j,%s) or 192.0.2.0/24 } to any
+		add deny ip from any to any
+		:NET
+		add pass ip from any to any
+	`)
+	packet := tcp4("192.0.2.1", "203.0.113.1")
+	other := build(t, fmt.Sprintf(src, ":OTHER"), none, ipfw.WithLabels())
+	require.Equal(t, deny, other.Check(&vm.Context{}, packet))
+	same := build(t, fmt.Sprintf(src, ":NET"), none, ipfw.WithLabels())
+	require.Equal(t, pass, same.Check(&vm.Context{}, packet))
+}
+
 // verifies that symbolic tablearg resolves labels supplied by an explicit option or command hook.
 func Test_VM_Build_TableArgLabelsOptIn(t *testing.T) {
 	source := ruleset(`
@@ -3568,6 +3668,14 @@ func Test_VM_Build_Errors(t *testing.T) {
 			line:        2,
 			text:        "add foobar :any",
 			cause:       ipfw.ErrExpectedAction,
+		},
+		{
+			name:        "table value by name",
+			rules:       "add pass ip from any to table(t,skipto=100)\n",
+			environment: resolving,
+			line:        1,
+			text:        "add pass ip from any to table(t,skipto=100)",
+			cause:       vm.ErrUnsupportedTableValue,
 		},
 		{
 			name: "rule number going backwards",
