@@ -2504,16 +2504,16 @@ func Test_VM_Check_Tables(t *testing.T) {
 }
 
 // verifies that a registry passed in is the one the ruleset fills and the
-// VM consults, and that an interface value loses its leading colon.
+// VM consults, and that a value loses its leading colon.
 func Test_VM_Build_Tables(t *testing.T) {
 	tables := vm.NewDefaultTableRegistry[net4, net6]()
-	tables.AddNetwork4("pre", must4(t, "203.0.113.0/24"))
+	tables.AddNetwork4("pre", must4(t, "203.0.113.0/24"), "")
 	src := ruleset(`
 		table i create type iface
 		table i add vlan1 :LABEL
 		table i add vlan2 plain
 		table i add vlan3
-		table pre add 192.0.2.0/24
+		table pre add 192.0.2.0/24 :NET
 		add pass ip from table(pre) to any
 		add deny ip from any to any
 	`)
@@ -2526,6 +2526,9 @@ func Test_VM_Build_Tables(t *testing.T) {
 	value, ok := machine.Tables().LookupInterface("i", "vlan1")
 	require.True(t, ok)
 	require.Equal(t, "LABEL", value)
+	value, ok = machine.Tables().LookupNetwork("pre", netip.MustParseAddr("192.0.2.7"))
+	require.True(t, ok)
+	require.Equal(t, "NET", value)
 	value, ok = machine.Tables().LookupInterface("i", "vlan2")
 	require.True(t, ok)
 	require.Equal(t, "plain", value)
@@ -2535,7 +2538,8 @@ func Test_VM_Build_Tables(t *testing.T) {
 
 	fresh := build(t, "table t create\n", none)
 	require.NotNil(t, fresh.Tables())
-	require.False(t, fresh.Tables().LookupNetwork("t", netip.MustParseAddr("192.0.2.1")))
+	_, ok = fresh.Tables().LookupNetwork("t", netip.MustParseAddr("192.0.2.1"))
+	require.False(t, ok)
 }
 
 // verifies that the type a create gives a table tells what its keys are, a
@@ -2573,6 +2577,12 @@ func Test_VM_Build_TableTypes(t *testing.T) {
 	require.Equal(t, pass, addr.Check(&vm.Context{}, v6("2001:db8::1", "2001:db9::1")))
 	require.Equal(t, pass, addr.Check(&vm.Context{}, v6("2001:db9::1", "2001:db8::5")))
 	require.Equal(t, deny, addr.Check(&vm.Context{}, v6("2001:db9::1", "2001:db9::5")))
+	value, ok := addr.Tables().LookupNetwork("h", netip.MustParseAddr("198.51.100.7"))
+	require.True(t, ok)
+	require.Equal(t, "7", value)
+	value, ok = addr.Tables().LookupNetwork("h", netip.MustParseAddr("2001:db8::1"))
+	require.True(t, ok)
+	require.Empty(t, value)
 
 	src = ruleset(`
 		table i create type iface
@@ -2584,7 +2594,7 @@ func Test_VM_Build_TableTypes(t *testing.T) {
 		vm.Config[net4, net6]{Environment: resolving},
 	)
 	require.NoError(t, err)
-	value, ok := iface.Tables().LookupInterface("i", "10")
+	value, ok = iface.Tables().LookupInterface("i", "10")
 	require.True(t, ok)
 	require.Equal(t, "L", value)
 	_, ok = iface.Tables().LookupInterface("i", "host.example.com")
@@ -3207,6 +3217,136 @@ func Test_VM_Check_TableArgLastLookup(t *testing.T) {
 			packet := tcp4("192.0.2.1", "192.0.2.2")
 			ctx := &vm.Context{IfName: "vlan0"}
 			require.Equal(t, tc.verdict, machine.Check(ctx, packet))
+		})
+	}
+}
+
+// verifies that skipto tablearg jumps where the last address or via table
+// lookup that found an entry names, in the order ipfw_chk looks them up.
+//
+// The source goes before the destination and both before the options. A
+// lookup found under a negation still names the target, a lookup an earlier
+// alternative made needless never happens, and an entry naming no rule
+// clears the target, falling through.
+func Test_VM_Check_TableArgAddress(t *testing.T) {
+	src := ruleset(`
+		table src add 192.0.2.0/24 :NET
+		table src add 192.0.2.128/25 :HALF
+		table src add 2001:db8::/32 :NET
+		table dst add 203.0.113.0/24 :DST
+		table dst add 2001:db8:1::/48 500
+		table odd add 203.0.113.0/24 :MISSING
+		table i create type iface
+		table i add vlan0 :IFACE
+		add skipto tablearg ip from %s
+		add deny ip from any to any
+		:NET
+		add pass ip from any to any
+		:HALF
+		add pass ip from any to any
+		:DST
+		add pass ip from any to any
+		:IFACE
+		add pass ip from any to any
+		add 500 pass ip from any to any
+	`)
+	jumped := traced{line: 9, action: ipfw.ActionSkipTo, matched: true}
+	fell := traced{line: 10, action: ipfw.ActionDeny, matched: true}
+	landed := func(line int) traced {
+		return traced{line: line, action: ipfw.ActionPass, matched: true}
+	}
+	v6 := func(src, dst string) vm.Packet {
+		return vm.NewIPv6Packet(netip.MustParseAddr(src), netip.MustParseAddr(dst))
+	}
+	cases := []struct {
+		name   string
+		body   string
+		packet vm.Packet
+		seen   []traced
+	}{
+		{
+			name:   "source entry",
+			body:   "table(src) to any",
+			packet: tcp4("192.0.2.1", "198.51.100.1"),
+			seen:   []traced{jumped, landed(12)},
+		},
+		{
+			name:   "most specific source entry",
+			body:   "table(src) to any",
+			packet: tcp4("192.0.2.130", "198.51.100.1"),
+			seen:   []traced{jumped, landed(14)},
+		},
+		{
+			name:   "IPv6 source entry",
+			body:   "table(src) to any",
+			packet: v6("2001:db8::1", "2001:db9::1"),
+			seen:   []traced{jumped, landed(12)},
+		},
+		{
+			name:   "source not in the table",
+			body:   "table(src) to any",
+			packet: tcp4("198.51.100.1", "198.51.100.2"),
+			seen: []traced{
+				{line: 9, action: ipfw.ActionSkipTo},
+				fell,
+			},
+		},
+		{
+			name:   "numbered destination entry",
+			body:   "any to table(dst)",
+			packet: v6("2001:db9::1", "2001:db8:1::1"),
+			seen:   []traced{jumped, landed(19)},
+		},
+		{
+			name:   "destination replaces source",
+			body:   "table(src) to table(dst)",
+			packet: tcp4("192.0.2.1", "203.0.113.1"),
+			seen:   []traced{jumped, landed(16)},
+		},
+		{
+			name:   "destination without lookup keeps source",
+			body:   "table(src) to 203.0.113.0/24",
+			packet: tcp4("192.0.2.1", "203.0.113.1"),
+			seen:   []traced{jumped, landed(12)},
+		},
+		{
+			name:   "destination naming no rule clears source",
+			body:   "table(src) to table(odd)",
+			packet: tcp4("192.0.2.1", "203.0.113.1"),
+			seen:   []traced{jumped, fell},
+		},
+		{
+			name:   "via table replaces addresses",
+			body:   "table(src) to table(dst) via table(i)",
+			packet: tcp4("192.0.2.1", "203.0.113.1"),
+			seen:   []traced{jumped, landed(18)},
+		},
+		{
+			name:   "option without lookup keeps addresses",
+			body:   "table(src) to any in",
+			packet: tcp4("192.0.2.1", "203.0.113.1"),
+			seen:   []traced{jumped, landed(12)},
+		},
+		{
+			name:   "negated lookup found names the target",
+			body:   "{ not table(src) or 192.0.2.0/24 } to any",
+			packet: tcp4("192.0.2.1", "203.0.113.1"),
+			seen:   []traced{jumped, landed(12)},
+		},
+		{
+			name:   "alternative before the lookup skips it",
+			body:   "{ 192.0.2.0/24 or table(src) } to any",
+			packet: tcp4("192.0.2.1", "203.0.113.1"),
+			seen:   []traced{jumped, fell},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			machine := build(t, fmt.Sprintf(src, tc.body), none, ipfw.WithLabels())
+			tracer := &recordingTracer{}
+			_, matched := machine.CheckTrace(&vm.Context{IfName: "vlan0"}, tc.packet, tracer)
+			require.True(t, matched)
+			require.Equal(t, tc.seen, tracer.seen)
 		})
 	}
 }
