@@ -7,12 +7,14 @@ Guidance for AI coding agents working on `ipfw`, including the required contribu
 
 - **Never commit directly to `main` or push to `main`.** Every change, including documentation and
   agent instructions, reaches `main` only through a pull request.
-- Before the first edit, fetch `origin` and create a dedicated task branch from fresh `origin/main`
-  in a linked worktree under `/extra_vda1/esafronov/worktrees/`. Make all edits and commits there.
-  Use one branch and one PR per independently deliverable change.
+- Before the first task-file write, fetch `origin` and create a dedicated task branch from fresh
+  `origin/main` in a linked worktree: `.claude/worktrees/<name>` for Claude Code or
+  `.agent-state/worktrees/<name>` for Codex and OpenCode. Make all edits and commits there. Use one
+  branch and one PR per independently deliverable change.
 - Keep the primary checkout for inspection. Do not edit, commit, or switch branches there, and do
   not move it. Preserve existing local changes, commits, and unrelated worktrees.
-- Before editing or committing, check the working directory, `git worktree list --porcelain`, and
+- Before the first write in the task worktree and again before committing, check
+  `git rev-parse --show-toplevel`, the working directory, `git worktree list --porcelain`, and
   `git branch --show-current`. Continue only in the task's linked worktree on its dedicated branch.
 - Push the task branch and open a PR against `main`. Follow the user's merge instructions and pass
   the required checks before merging.
