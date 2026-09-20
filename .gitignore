@@ -2,6 +2,7 @@
 # only the skills are tracked.
 /.roadmap
 /.githooks
+/.agent-state
 /.claude/*
 !/.claude/skills
 
