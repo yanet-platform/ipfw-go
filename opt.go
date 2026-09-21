@@ -203,8 +203,8 @@ func parseOptionGroup(
 	}
 }
 
-// parseOption parses one optionally negated option, the keyword matching
-// by prefix and a failure pointing at the keyword.
+// parseOption parses one optionally negated option, with a failure pointing
+// at the keyword.
 func parseOption(
 	ctx *optionContext,
 	s string,
@@ -244,11 +244,8 @@ func parseOption(
 	return buf, fail{}
 }
 
-// argumentOption tells an option with an argument by its keyword and
-// returns its kind with the keyword's length, zero for none.
-//
-// The first byte narrows the candidate spellings. Longer spellings are
-// checked before their prefixes.
+// argumentOption tells an option with an argument by its complete keyword
+// and returns its kind with the keyword's length, zero for none.
 func argumentOption(s string) (OptKind, int) {
 	if s == "" {
 		return 0, 0
@@ -259,41 +256,43 @@ func argumentOption(s string) (OptKind, int) {
 			return OptComment, len("//")
 		}
 	case 's':
-		if hasPrefix(s, "src-port") {
+		if _, ok := optionKeyword(s, "src-port"); ok {
 			return OptSourcePort, len("src-port")
 		}
 	case 'd':
-		if hasPrefix(s, "dst-port") {
+		if _, ok := optionKeyword(s, "dst-port"); ok {
 			return OptDestinationPort, len("dst-port")
 		}
 	case 'i':
-		switch {
-		case hasPrefix(s, "icmptypes"):
+		if _, ok := optionKeyword(s, "icmptypes"); ok {
 			return OptICMPTypes, len("icmptypes")
-		case hasPrefix(s, "icmptype"):
+		}
+		if _, ok := optionKeyword(s, "icmptype"); ok {
 			return OptICMPTypes, len("icmptype")
-		case hasPrefix(s, "icmp6types"):
+		}
+		if _, ok := optionKeyword(s, "icmp6types"); ok {
 			return OptICMP6Types, len("icmp6types")
-		case hasPrefix(s, "icmp6type"):
+		}
+		if _, ok := optionKeyword(s, "icmp6type"); ok {
 			return OptICMP6Types, len("icmp6type")
 		}
 	case 'k':
-		if hasPrefix(s, "keep-state") {
+		if _, ok := optionKeyword(s, "keep-state"); ok {
 			return OptKeepState, len("keep-state")
 		}
 	case 'p':
-		if hasPrefix(s, "proto") {
+		if _, ok := optionKeyword(s, "proto"); ok {
 			return OptProto, len("proto")
 		}
 	case 't':
-		switch {
-		case hasPrefix(s, "tcpflags"):
+		if _, ok := optionKeyword(s, "tcpflags"); ok {
 			return OptTCPFlags, len("tcpflags")
-		case hasPrefix(s, "tcpflgs"):
+		}
+		if _, ok := optionKeyword(s, "tcpflgs"); ok {
 			return OptTCPFlags, len("tcpflgs")
 		}
 	case 'v':
-		if hasPrefix(s, "via") {
+		if _, ok := optionKeyword(s, "via"); ok {
 			return OptVia, len("via")
 		}
 	}
@@ -633,9 +632,7 @@ func parsePortsOption(
 	}
 }
 
-// keywordOption tells an option without an argument by its keyword.
-//
-// Longer spellings are checked before their prefixes.
+// keywordOption tells an option without an argument by its complete keyword.
 func keywordOption(s string) (OptKind, string, bool) {
 	if s == "" {
 		return 0, s, false
@@ -648,12 +645,12 @@ func keywordOption(s string) (OptKind, string, bool) {
 	case 'd':
 		keyword, kind = "diverted", OptDiverted
 	case 'e':
-		if rest, ok := prefix(s, "established"); ok {
+		if rest, ok := optionKeyword(s, "established"); ok {
 			return OptEstablished, rest, true
 		}
 		keyword, kind = "estab", OptEstablished
 	case 'f':
-		if rest, ok := prefix(s, "fragment"); ok {
+		if rest, ok := optionKeyword(s, "fragment"); ok {
 			return OptFrag, rest, true
 		}
 		keyword, kind = "frag", OptFrag
@@ -664,11 +661,29 @@ func keywordOption(s string) (OptKind, string, bool) {
 	default:
 		return 0, s, false
 	}
-	rest, ok := prefix(s, keyword)
+	rest, ok := optionKeyword(s, keyword)
 	if !ok {
 		return 0, s, false
 	}
 	return kind, rest, true
+}
+
+// optionKeyword consumes a built-in spelling only at an option token boundary.
+//
+// Whitespace ends ordinary tokens. A closing brace ends a tight group, `//`
+// starts an adjacent comment, and `|` ends a member only as a complete separator.
+func optionKeyword(s, keyword string) (string, bool) {
+	rest, ok := prefix(s, keyword)
+	if !ok {
+		return s, false
+	}
+	if rest == "" || isASCIISpace(rest[0]) || rest[0] == '}' || hasPrefix(rest, "//") {
+		return rest, true
+	}
+	if rest[0] == '|' && atTokenEnd(rest[1:]) {
+		return rest, true
+	}
+	return s, false
 }
 
 // Opt is one rule option with the argument of its kind.

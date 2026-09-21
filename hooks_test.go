@@ -1150,7 +1150,7 @@ func Test_OptionHook_Errors(t *testing.T) {
 	}
 }
 
-// verifies that the exported option parser passes the hook through.
+// verifies that the exported option parser passes unknown keywords to the hook unchanged.
 func Test_ParseOptions_Hook(t *testing.T) {
 	var state ipfw.ReduceState
 	n, err := ipfw.ParseOptions("setup in", &state, customOptions)
@@ -1159,6 +1159,24 @@ func Test_ParseOptions_Hook(t *testing.T) {
 	require.Equal(t, ipfw.ReduceState{
 		Options: []ipfw.Opt{{Kind: ipfw.OptCustom, Text: "setup"}, {Block: 1, Kind: ipfw.OptIn}},
 	}, state)
+
+	for _, input := range []string{"inhouse", "protohouse"} {
+		t.Run(input, func(t *testing.T) {
+			var got string
+			hook := func(rest string) (ipfw.Opt, int, error) {
+				got = rest
+				return ipfw.Opt{Kind: ipfw.OptCustom, Text: rest}, len(rest), nil
+			}
+			var state ipfw.ReduceState
+			n, err := ipfw.ParseOptions(input, &state, hook)
+			require.NoError(t, err)
+			require.Equal(t, len(input), n)
+			require.Equal(t, input, got)
+			require.Equal(t, ipfw.ReduceState{
+				Options: []ipfw.Opt{{Kind: ipfw.OptCustom, Text: input}},
+			}, state)
+		})
+	}
 }
 
 // verifies that a line with custom options parses into a warmed-up state

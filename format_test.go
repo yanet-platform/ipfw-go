@@ -617,6 +617,26 @@ func Test_Formatter_AppendRecord_Options(t *testing.T) {
 			"add pass tcp from any to any 22 established",
 		},
 		{
+			"add allow tcp from any to any fragile",
+			"add pass tcp from any to any fragile",
+		},
+		{
+			"add allow tcp from any to any in-in",
+			"add pass tcp from any to any in-in",
+		},
+		{
+			"add allow tcp from any to any estab-estab",
+			"add pass tcp from any to any estab-estab",
+		},
+		{
+			"add allow tcp from any to any tcpflgs-tcpflgs",
+			"add pass tcp from any to any tcpflgs-tcpflgs",
+		},
+		{
+			"add allow tcp from any to any proto-proto",
+			"add pass tcp from any to any proto-proto",
+		},
+		{
 			"add pass ip from any to any { in or out } via eth0",
 			"add pass ip from any to any { in or out } via eth0",
 		},
@@ -1213,38 +1233,6 @@ func Test_Formatter_AppendRecord_InvalidValues(t *testing.T) {
 			err: ipfw.ErrInvalidName,
 		},
 		{
-			name: "destination port named after an option keyword",
-			mutate: func(record *ipfw.ParsedRecord) {
-				record.Body.DestinationPorts = []ipfw.PortMatch{{Lo: ipfw.Port{Name: "in"}, Hi: ipfw.Port{Name: "in"}}}
-			},
-			err: ipfw.ErrInvalidName,
-		},
-		{
-			name: "destination port extending an option keyword",
-			mutate: func(record *ipfw.ParsedRecord) {
-				record.Body.DestinationPorts = []ipfw.PortMatch{{Lo: ipfw.Port{Name: "fragile"}, Hi: ipfw.Port{Name: "fragile"}}}
-			},
-			err: ipfw.ErrInvalidName,
-		},
-		{
-			name: "destination port named after established alias",
-			mutate: func(record *ipfw.ParsedRecord) {
-				record.Body.DestinationPorts = []ipfw.PortMatch{
-					{Lo: ipfw.Port{Name: "estab"}, Hi: ipfw.Port{Name: "estab"}},
-				}
-			},
-			err: ipfw.ErrInvalidName,
-		},
-		{
-			name: "destination port named after tcpflags alias",
-			mutate: func(record *ipfw.ParsedRecord) {
-				record.Body.DestinationPorts = []ipfw.PortMatch{
-					{Lo: ipfw.Port{Name: "tcpflgs"}, Hi: ipfw.Port{Name: "tcpflgs"}},
-				}
-			},
-			err: ipfw.ErrInvalidName,
-		},
-		{
 			name: "via exact named like a table lookup",
 			mutate: func(record *ipfw.ParsedRecord) {
 				record.Body.Options = []ipfw.Opt{viaExact("table(t)")}
@@ -1766,8 +1754,9 @@ func Test_Formatter_CustomOptAppender(t *testing.T) {
 	require.ErrorIs(t, err, ipfw.ErrInvalidName)
 
 	record.Body.Options = []ipfw.Opt{{Kind: ipfw.OptCustom, Text: "inhouse", Arg: "42"}}
-	_, err = ipfw.NewFormatter(ipfw.WithCustomOptAppender(appendCustom)).Record(record)
-	require.ErrorIs(t, err, ipfw.ErrInvalidName)
+	text, err = ipfw.NewFormatter(ipfw.WithCustomOptAppender(appendCustom)).Record(record)
+	require.NoError(t, err)
+	require.Equal(t, "add pass ip from any to any inhouse 42", text)
 
 	record.Body.Options = []ipfw.Opt{{Kind: ipfw.OptCustom, Text: "//", Arg: "memo"}}
 	_, err = ipfw.NewFormatter(ipfw.WithCustomOptAppender(appendCustom)).Record(record)
@@ -1866,7 +1855,7 @@ func Test_Formatter_CustomOptBareNotPlacement(t *testing.T) {
 
 // verifies that native custom options stay protected from header and legacy grammar prefixes.
 func Test_Formatter_CustomOptNativeBody(t *testing.T) {
-	customTexts := []string{"tcp from any to any", "logger", "not"}
+	customTexts := []string{"tcp from any to any", "logger", "not", "inhouse", "protohouse"}
 	hook := func(rest string) (ipfw.Opt, int, error) {
 		for _, text := range customTexts {
 			if strings.HasPrefix(rest, text) {
@@ -1881,6 +1870,8 @@ func Test_Formatter_CustomOptNativeBody(t *testing.T) {
 	cases := [][2]string{
 		{"add pass { tcp from any to any }", "add pass { tcp from any to any }"},
 		{"add pass { logger }", "add pass { logger }"},
+		{"add pass inhouse", "add pass { inhouse }"},
+		{"add pass protohouse", "add pass { protohouse }"},
 		{"add pass not// comment", "add pass not// comment"},
 		{
 			"add pass tcp from any to any not// comment",

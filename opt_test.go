@@ -164,10 +164,9 @@ func Test_ParseOptions_Table(t *testing.T) {
 			},
 		},
 		{
-			name:    "estab alias before a suffix",
-			input:   "estabx",
-			n:       5,
-			options: []ipfw.Opt{established},
+			name:  "estab alias with a suffix",
+			input: "estabx",
+			err:   ipfw.ErrUnknownOption,
 		},
 		{
 			name:    "fragment alias before a comment",
@@ -297,10 +296,9 @@ func Test_ParseOptions_Table(t *testing.T) {
 			options: []ipfw.Opt{established, at(1, 0, established)},
 		},
 		{
-			name:    "keyword matches by prefix",
-			input:   "establishedx",
-			n:       11,
-			options: []ipfw.Opt{established},
+			name:  "keyword with a suffix",
+			input: "establishedx",
+			err:   ipfw.ErrUnknownOption,
 		},
 		{name: "empty input", input: "", n: 0},
 		{name: "newline alone", input: "\n", n: 0},
@@ -362,6 +360,18 @@ func Test_ParseOptions_Table(t *testing.T) {
 			input:   "{established or established}",
 			n:       28,
 			options: []ipfw.Opt{established, {Pattern: 1, Kind: ipfw.OptEstablished}},
+		},
+		{
+			name:    "tight group closure",
+			input:   "{in}",
+			n:       4,
+			options: []ipfw.Opt{{Kind: ipfw.OptIn}},
+		},
+		{
+			name:    "tight pipe separator",
+			input:   "{ in| out }",
+			n:       11,
+			options: []ipfw.Opt{{Kind: ipfw.OptIn}, {Pattern: 1, Kind: ipfw.OptOut}},
 		},
 		{
 			name:  "group then a plain option",
@@ -974,11 +984,12 @@ func Test_ParseOptions_Table(t *testing.T) {
 			err:   ipfw.ErrExpectedPrefix,
 		},
 		{
-			name:    "in with a suffix is in",
-			input:   "inet",
-			n:       2,
-			options: []ipfw.Opt{{Kind: ipfw.OptIn}},
+			name:  "in with a suffix",
+			input: "inet",
+			err:   ipfw.ErrUnknownOption,
 		},
+		{name: "inhouse", input: "inhouse", err: ipfw.ErrUnknownOption},
+		{name: "protohouse", input: "protohouse", err: ipfw.ErrUnknownOption},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

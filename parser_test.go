@@ -3890,19 +3890,23 @@ func Test_Parser_Next_Options(t *testing.T) {
 			},
 		},
 		{
-			name:  "fragment alias suffix remains trailing content",
+			name:  "service extending fragment alias",
 			input: "add allow ip from any to any fragmentx\n",
-			err: &ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedNewlineOrEOF,
-				Line:   1,
-				Column: 37,
-				Text:   "add allow ip from any to any fragmentx",
-			},
 			state: ipfw.ReduceState{
-				IPProtos:     []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
-				Sources:      anyToAny,
-				Destinations: anyToAny,
-				Options:      []ipfw.Opt{{Kind: ipfw.OptFrag}},
+				IPProtos:         []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:          anyToAny,
+				Destinations:     anyToAny,
+				DestinationPorts: []ipfw.PortMatch{portService("fragmentx")},
+			},
+		},
+		{
+			name:  "service extending in keyword",
+			input: "add allow ip from any to any inet\n",
+			state: ipfw.ReduceState{
+				IPProtos:         []ipfw.ProtoIPMatch{{Proto: ipfw.ProtoIPAny}},
+				Sources:          anyToAny,
+				Destinations:     anyToAny,
+				DestinationPorts: []ipfw.PortMatch{portService("inet")},
 			},
 		},
 		{
@@ -4428,16 +4432,6 @@ func Test_Parser_Next_OptionErrors(t *testing.T) {
 				Line:   1,
 				Column: 43,
 				Text:   "add allow tcp from any to any { established",
-			},
-		},
-		{
-			name:  "in with a suffix is in then trailing content",
-			input: "add allow ip from any to any inet",
-			expected: ipfw.ParseError{
-				Kind:   ipfw.ErrExpectedNewlineOrEOF,
-				Line:   1,
-				Column: 31,
-				Text:   "add allow ip from any to any inet",
 			},
 		},
 		{
