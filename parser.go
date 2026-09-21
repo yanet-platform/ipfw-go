@@ -221,7 +221,10 @@ func parseLineEnd(s string) (string, bool) {
 // hookLine hands a line the grammar does not know to the command hook, the
 // record becoming the hook's and the rest starting where it stopped.
 func (m *Parser) hookLine(s string, state State) (string, fail) {
-	line, _ := takeLine(s)
+	line, afterLine := takeLine(s)
+	if afterLine != "" && strings.HasSuffix(line, "\r") {
+		line = line[:len(line)-1]
+	}
 	rec, n, err := m.opts.CommandHook(line, state)
 	n = min(max(n, 0), len(line))
 	if err != nil {
