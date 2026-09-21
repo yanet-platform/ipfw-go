@@ -528,6 +528,84 @@ func Test_CommandHook_HashComment(t *testing.T) {
 	next(t, parser, eof)
 }
 
+// verifies that command-hook consumption bounds exclude the complete CRLF ending.
+func Test_CommandHook_CRLFConsumptionBounds(t *testing.T) {
+	boom := errors.New("command failed")
+	cases := []struct {
+		name     string
+		consumed int
+		err      error
+		succeeds bool
+		kind     ipfw.ErrorKind
+		column   int
+		parseErr error
+	}{
+		{
+			name:     "negative success declines",
+			consumed: -1,
+			kind:     ipfw.ErrExpectedLine,
+		},
+		{
+			name:     "oversized success consumes the command prefix",
+			consumed: 1000,
+			succeeds: true,
+		},
+		{
+			name:     "negative failure starts at the command prefix",
+			consumed: -1,
+			err:      boom,
+			kind:     ipfw.ErrState,
+			parseErr: boom,
+		},
+		{
+			name:     "oversized failure ends at the command prefix",
+			consumed: 1000,
+			err:      boom,
+			kind:     ipfw.ErrState,
+			column:   6,
+			parseErr: boom,
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			hook := func(line string, _ ipfw.State) (ipfw.Record, int, error) {
+				require.Equal(t, "CUSTOM", line)
+				return ipfw.Record{}, testCase.consumed, testCase.err
+			}
+			parser := ipfw.NewParser(
+				"CUSTOM\r\n:AFTER\n",
+				ipfw.WithCommandHook(hook),
+				ipfw.WithLabels(),
+			)
+			record, err := parser.Next(ipfw.DiscardState{})
+			if testCase.succeeds {
+				require.Nil(t, err)
+				require.Equal(t, ipfw.Record{
+					Line: 1,
+					Text: "CUSTOM",
+					Kind: ipfw.RecordEmpty,
+				}, *record)
+			} else {
+				require.Nil(t, record)
+				require.Equal(t, &ipfw.ParseError{
+					Kind:   testCase.kind,
+					Err:    testCase.parseErr,
+					Line:   1,
+					Column: testCase.column,
+					Text:   "CUSTOM",
+				}, err)
+			}
+			next(t, parser, ipfw.Record{
+				Line:  2,
+				Text:  ":AFTER",
+				Kind:  ipfw.RecordLabel,
+				Label: "AFTER",
+			})
+			next(t, parser, eof)
+		})
+	}
+}
+
 // verifies that command-hook consumption and errors stay within the prefix before the hash.
 func Test_CommandHook_HashCommentErrors(t *testing.T) {
 	boom := errors.New("command failed")
@@ -539,25 +617,11 @@ func Test_CommandHook_HashCommentErrors(t *testing.T) {
 		column   int
 	}{
 		{
-			name:     "negative consumption",
-			consumed: -1,
-			err:      boom,
-			kind:     ipfw.ErrState,
-			column:   0,
-		},
-		{
 			name:     "error at chosen offset",
 			consumed: 5,
 			err:      boom,
 			kind:     ipfw.ErrState,
 			column:   5,
-		},
-		{
-			name:     "error beyond prefix",
-			consumed: 1000,
-			err:      boom,
-			kind:     ipfw.ErrState,
-			column:   12,
 		},
 		{name: "declined command", kind: ipfw.ErrExpectedLine},
 		{
@@ -1175,6 +1239,120 @@ func Test_ParseOptions_Hook(t *testing.T) {
 			require.Equal(t, ipfw.ReduceState{
 				Options: []ipfw.Opt{{Kind: ipfw.OptCustom, Text: input}},
 			}, state)
+		})
+	}
+}
+
+// verifies that option-hook consumption is saturated to its input for every outcome.
+func Test_OptionHook_ConsumptionBounds(t *testing.T) {
+	cases := []struct {
+		name     string
+		consumed int
+		hookErr  error
+		n        int
+		err      error
+		options  []ipfw.Opt
+	}{
+		{
+			name:     "negative success declines",
+			consumed: -1,
+			err:      ipfw.ErrUnknownOption,
+		},
+		{
+			name:     "oversized success consumes the supplied input",
+			consumed: 1000,
+			n:        len("custom"),
+			options:  []ipfw.Opt{{Kind: ipfw.OptCustom, Text: "custom"}},
+		},
+		{
+			name:     "negative decline starts at the supplied input",
+			consumed: -1,
+			hookErr:  ipfw.ErrUnknownOption,
+			err:      ipfw.ErrUnknownOption,
+		},
+		{
+			name:     "oversized decline ends at the supplied input",
+			consumed: 1000,
+			hookErr:  ipfw.ErrUnknownOption,
+			n:        len("custom"),
+			err:      ipfw.ErrUnknownOption,
+		},
+		{
+			name:     "negative failure starts at the supplied input",
+			consumed: -1,
+			hookErr:  ipfw.ErrExpectedOpt,
+			err:      ipfw.ErrExpectedOpt,
+		},
+		{
+			name:     "oversized failure ends at the supplied input",
+			consumed: 1000,
+			hookErr:  ipfw.ErrExpectedOpt,
+			n:        len("custom"),
+			err:      ipfw.ErrExpectedOpt,
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			hook := func(rest string) (ipfw.Opt, int, error) {
+				require.Equal(t, "custom", rest)
+				return ipfw.Opt{Kind: ipfw.OptCustom, Text: rest},
+					testCase.consumed,
+					testCase.hookErr
+			}
+			var state ipfw.ReduceState
+			n, err := ipfw.ParseOptions("custom", &state, hook)
+			require.Equal(t, testCase.n, n)
+			require.ErrorIs(t, err, testCase.err)
+			require.Equal(t, ipfw.ReduceState{Options: testCase.options}, state)
+		})
+	}
+}
+
+// verifies that direct option parsing keeps hook input and result offsets on one physical line.
+func Test_ParseOptions_HookLineBound(t *testing.T) {
+	cases := []struct {
+		name    string
+		input   string
+		hookErr error
+		err     error
+		options []ipfw.Opt
+	}{
+		{
+			name:    "LF success",
+			input:   "custom\nout",
+			options: []ipfw.Opt{{Kind: ipfw.OptCustom, Text: "custom"}},
+		},
+		{
+			name:    "CRLF success",
+			input:   "custom\r\nout",
+			options: []ipfw.Opt{{Kind: ipfw.OptCustom, Text: "custom"}},
+		},
+		{
+			name:    "LF failure",
+			input:   "custom\nout",
+			hookErr: ipfw.ErrExpectedOpt,
+			err:     ipfw.ErrExpectedOpt,
+		},
+		{
+			name:    "CRLF failure",
+			input:   "custom\r\nout",
+			hookErr: ipfw.ErrExpectedOpt,
+			err:     ipfw.ErrExpectedOpt,
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			var hookInput string
+			hook := func(rest string) (ipfw.Opt, int, error) {
+				hookInput = rest
+				return ipfw.Opt{Kind: ipfw.OptCustom, Text: rest}, 1000, testCase.hookErr
+			}
+			var state ipfw.ReduceState
+			n, err := ipfw.ParseOptions(testCase.input, &state, hook)
+			require.Equal(t, len("custom"), n)
+			require.ErrorIs(t, err, testCase.err)
+			require.Equal(t, "custom", hookInput)
+			require.Equal(t, ipfw.ReduceState{Options: testCase.options}, state)
 		})
 	}
 }

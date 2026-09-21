@@ -162,9 +162,13 @@ the option when constructing the parser, including parsers passed to `vm.Build`.
 | `WithOptionHook(hook)` | Unknown rule options are rejected | The hook parses unknown option keywords and their arguments |
 | `WithProtoChecker(checker)` | A rule body's grammar goes by its shape | The first protocol selects a legacy or option-only body, as in FreeBSD |
 
-`Reset` retains the configured options. Hooks own the syntax they consume and must report
-how much input they used. Enabled built-in syntax takes precedence over command hooks.
-A command hook can supply a `RecordLabel` explicitly when built-in labels are disabled.
+`Reset` retains the configured options. Hooks own the syntax they consume and report a byte offset
+into the text they receive. The parser clamps it to that text: negative values act as zero and
+oversized values as its length. A zero success declines the input, while an error uses the offset
+only for its position. Parser hook input never includes hash metadata or a later physical line.
+`ParseOptions` similarly limits its hook to the text before the first line ending.
+Enabled built-in syntax takes precedence over command hooks. A command hook can supply a
+`RecordLabel` explicitly when built-in labels are disabled.
 
 Numeric `skipto`, `skipto tablearg`, `check-state :flow` and `keep-state :flow` keep their
 default behavior. FreeBSD supports numbered jumps and named dynamic states. Symbolic rule

@@ -73,14 +73,18 @@ func (m OptKind) String() string {
 // ParseOptions parses the trailing option list of a rule body into state.
 //
 // The hook takes the keywords the grammar does not know, nil leaving them
-// unknown. The or-blocks are numbered from zero, so the options of one rule
-// go through one call. It returns the number of bytes consumed, or on failure
-// its offset together with the error, an ErrorKind unless the state returned
-// something else.
+// unknown. Its input ends before the first LF or CRLF. The or-blocks are
+// numbered from zero, so the options of one rule go through one call. It
+// returns the number of bytes consumed, or on failure its offset together with
+// the error, an ErrorKind unless the state returned something else.
 func ParseOptions(s string, state State, hook OptionHook) (int, error) {
+	line, afterLine := takeLine(s)
+	if afterLine != "" && strings.HasSuffix(line, "\r") {
+		line = line[:len(line)-1]
+	}
 	var ctx optionContext
-	rest, err := parseOptions(&ctx, s, state, hook)
-	return consumed(s, rest, err)
+	rest, err := parseOptions(&ctx, line, state, hook)
+	return consumed(line, rest, err)
 }
 
 // parseOptions parses the option list up to the end of the input or of the
