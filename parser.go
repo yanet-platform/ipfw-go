@@ -100,6 +100,7 @@ func NewParser(src string, options ...ParserOption) *Parser {
 func (m *Parser) Reset(src string) {
 	m.rest = src
 	m.line = 0
+	m.record = Record{}
 }
 
 // Next parses the next physical line, pushing the rule body into state.

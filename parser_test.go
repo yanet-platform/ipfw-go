@@ -50,6 +50,38 @@ func Test_Parser_Next_EOF(t *testing.T) {
 	next(t, parser, eof)
 }
 
+// verifies that a reset invalidates the borrowed record and retains parser options.
+func Test_Parser_Reset_RecordLifetime(t *testing.T) {
+	parser := ipfw.NewParser(
+		"table OLD add 192.0.2.1 VALUE# prior\n",
+		ipfw.WithLabels(),
+	)
+	record, err := parser.Next(ipfw.DiscardState{})
+	require.Nil(t, err)
+	require.Equal(t, ipfw.Record{
+		Line:    1,
+		Text:    "table OLD add 192.0.2.1 VALUE# prior",
+		Kind:    ipfw.RecordTable,
+		Comment: " prior",
+		Table: ipfw.Table{
+			Name:  "OLD",
+			Kind:  ipfw.TableAdd,
+			Key:   ipfw.TableKey{Kind: ipfw.TableKeyNetwork4, Text: "192.0.2.1"},
+			Value: "VALUE",
+		},
+	}, *record)
+
+	parser.Reset(":NEXT# replacement\n")
+	require.Equal(t, ipfw.Record{}, *record)
+	next(t, parser, ipfw.Record{
+		Line:    1,
+		Text:    ":NEXT# replacement",
+		Kind:    ipfw.RecordLabel,
+		Comment: " replacement",
+		Label:   "NEXT",
+	})
+}
+
 // verifies that blank lines, with or without whitespace or a final newline,
 // are empty records with their line numbers and an empty text.
 func Test_Parser_Next_EmptyLines(t *testing.T) {
