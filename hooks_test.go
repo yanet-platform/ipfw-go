@@ -966,18 +966,42 @@ func Test_OptionHook_CallSequence(t *testing.T) {
 	setup := ipfw.Opt{Kind: ipfw.OptCustom, Text: "setup"}
 	uid := ipfw.Opt{Kind: ipfw.OptCustom, Text: "uid", Arg: "root"}
 	service := ipfw.Port{Name: "mystery"}
+	unknownOption := func(string) (ipfw.Opt, int, error) {
+		return ipfw.Opt{}, len("mystery"), ipfw.ErrUnknownOption
+	}
 	cases := []struct {
-		name     string
-		input    string
-		calls    []string
-		record   *ipfw.Record
-		parseErr *ipfw.ParseError
-		state    ipfw.ReduceState
+		name          string
+		input         string
+		hook          ipfw.OptionHook
+		parserOptions []ipfw.ParserOption
+		calls         []string
+		record        *ipfw.Record
+		parseErr      *ipfw.ParseError
+		state         ipfw.ReduceState
 	}{
 		{
 			name:  "option-only accepted",
 			input: "add allow setup\n",
 			calls: []string{"setup\n", "setup\n"},
+			record: &ipfw.Record{
+				Line:        1,
+				Text:        "add allow setup",
+				Kind:        ipfw.RecordInstruction,
+				Instruction: ipfw.Instruction{Action: ipfw.Action{Kind: ipfw.ActionPass}},
+			},
+			state: ipfw.ReduceState{
+				Sources:      anyTarget,
+				Destinations: anyTarget,
+				Options:      []ipfw.Opt{setup},
+			},
+		},
+		{
+			name:  "option-only accepted with proto checker",
+			input: "add allow setup\n",
+			parserOptions: []ipfw.ParserOption{
+				ipfw.WithProtoChecker(ipfw.ProtoCheckerFunc(func(string) bool { return false })),
+			},
+			calls: []string{"setup\n"},
 			record: &ipfw.Record{
 				Line:        1,
 				Text:        "add allow setup",
@@ -1013,6 +1037,7 @@ func Test_OptionHook_CallSequence(t *testing.T) {
 		{
 			name:  "option-only declined",
 			input: "add allow mystery\n",
+			hook:  unknownOption,
 			calls: []string{"mystery\n"},
 			parseErr: &ipfw.ParseError{
 				Kind:   ipfw.ErrExpectedWhitespace,
@@ -1022,6 +1047,46 @@ func Test_OptionHook_CallSequence(t *testing.T) {
 			},
 			state: ipfw.ReduceState{
 				Protos: []ipfw.ProtoMatch{{Proto: ipfw.Proto{Name: "mystery"}}},
+			},
+		},
+		{
+			name:  "option-only group declined second member",
+			input: "add allow { setup or mystery }\n",
+			calls: []string{
+				"setup or mystery }\n",
+				"setup or mystery }\n",
+				"mystery }\n",
+			},
+			parseErr: &ipfw.ParseError{
+				Kind:   ipfw.ErrUnknownOption,
+				Line:   1,
+				Column: 21,
+				Text:   "add allow { setup or mystery }",
+			},
+			state: ipfw.ReduceState{
+				Sources:      anyTarget,
+				Destinations: anyTarget,
+				Options:      []ipfw.Opt{setup},
+			},
+		},
+		{
+			name:  "option-only group failed second member",
+			input: "add allow { setup or uid  }\n",
+			calls: []string{
+				"setup or uid  }\n",
+				"setup or uid  }\n",
+				"uid  }\n",
+			},
+			parseErr: &ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedOpt,
+				Line:   1,
+				Column: 25,
+				Text:   "add allow { setup or uid  }",
+			},
+			state: ipfw.ReduceState{
+				Sources:      anyTarget,
+				Destinations: anyTarget,
+				Options:      []ipfw.Opt{setup},
 			},
 		},
 		{
@@ -1081,6 +1146,7 @@ func Test_OptionHook_CallSequence(t *testing.T) {
 		{
 			name:  "legacy declined",
 			input: "add allow tcp from any to any mystery\n",
+			hook:  unknownOption,
 			calls: []string{"mystery\n"},
 			record: &ipfw.Record{
 				Line:        1,
@@ -1093,6 +1159,50 @@ func Test_OptionHook_CallSequence(t *testing.T) {
 				Sources:          anyTarget,
 				Destinations:     anyTarget,
 				DestinationPorts: []ipfw.PortMatch{{Lo: service, Hi: service}},
+			},
+		},
+		{
+			name:  "legacy group declined second member",
+			input: "add allow tcp from any to any { setup or mystery }\n",
+			calls: []string{
+				"setup or mystery }\n",
+				"mystery }\n",
+				"setup or mystery }\n",
+				"mystery }\n",
+			},
+			parseErr: &ipfw.ParseError{
+				Kind:   ipfw.ErrUnknownOption,
+				Line:   1,
+				Column: 41,
+				Text:   "add allow tcp from any to any { setup or mystery }",
+			},
+			state: ipfw.ReduceState{
+				Protos:       tcp,
+				Sources:      anyTarget,
+				Destinations: anyTarget,
+				Options:      []ipfw.Opt{setup},
+			},
+		},
+		{
+			name:  "legacy group failed second member",
+			input: "add allow tcp from any to any { setup or uid  }\n",
+			calls: []string{
+				"setup or uid  }\n",
+				"uid  }\n",
+				"setup or uid  }\n",
+				"uid  }\n",
+			},
+			parseErr: &ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedOpt,
+				Line:   1,
+				Column: 45,
+				Text:   "add allow tcp from any to any { setup or uid  }",
+			},
+			state: ipfw.ReduceState{
+				Protos:       tcp,
+				Sources:      anyTarget,
+				Destinations: anyTarget,
+				Options:      []ipfw.Opt{setup},
 			},
 		},
 		{
@@ -1114,13 +1224,18 @@ func Test_OptionHook_CallSequence(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
+			baseHook := testCase.hook
+			if baseHook == nil {
+				baseHook = customOptions
+			}
 			var calls []string
 			hook := func(rest string) (ipfw.Opt, int, error) {
 				calls = append(calls, rest)
-				return customOptions(rest)
+				return baseHook(rest)
 			}
+			options := append([]ipfw.ParserOption{ipfw.WithOptionHook(hook)}, testCase.parserOptions...)
 			var state ipfw.ReduceState
-			record, parseErr := ipfw.NewParser(testCase.input, ipfw.WithOptionHook(hook)).Next(&state)
+			record, parseErr := ipfw.NewParser(testCase.input, options...).Next(&state)
 			require.Equal(t, testCase.record, record)
 			require.Equal(t, testCase.parseErr, parseErr)
 			require.Equal(t, testCase.state, state)
@@ -1135,6 +1250,7 @@ func Test_OptionHook_NondeterministicResult(t *testing.T) {
 		name     string
 		input    string
 		results  []error
+		calls    []string
 		record   *ipfw.Record
 		parseErr *ipfw.ParseError
 		state    ipfw.ReduceState
@@ -1143,6 +1259,7 @@ func Test_OptionHook_NondeterministicResult(t *testing.T) {
 			name:    "option-only probe failure then acceptance",
 			input:   "add allow setup\n",
 			results: []error{ipfw.ErrExpectedOpt, nil},
+			calls:   []string{"setup\n", "setup\n"},
 			record: &ipfw.Record{
 				Line:        1,
 				Text:        "add allow setup",
@@ -1159,6 +1276,7 @@ func Test_OptionHook_NondeterministicResult(t *testing.T) {
 			name:    "legacy probe acceptance then decline",
 			input:   "add allow tcp from any to any setup\n",
 			results: []error{nil, ipfw.ErrUnknownOption},
+			calls:   []string{"setup\n", "setup\n"},
 			parseErr: &ipfw.ParseError{
 				Kind:   ipfw.ErrUnknownOption,
 				Line:   1,
@@ -1174,10 +1292,10 @@ func Test_OptionHook_NondeterministicResult(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			calls := 0
-			hook := func(string) (ipfw.Opt, int, error) {
-				err := testCase.results[calls]
-				calls++
+			var calls []string
+			hook := func(rest string) (ipfw.Opt, int, error) {
+				err := testCase.results[len(calls)]
+				calls = append(calls, rest)
 				return ipfw.Opt{Kind: ipfw.OptCustom, Text: "setup"}, len("setup"), err
 			}
 			var state ipfw.ReduceState
@@ -1185,7 +1303,7 @@ func Test_OptionHook_NondeterministicResult(t *testing.T) {
 			require.Equal(t, testCase.record, record)
 			require.Equal(t, testCase.parseErr, parseErr)
 			require.Equal(t, testCase.state, state)
-			require.Equal(t, len(testCase.results), calls)
+			require.Equal(t, testCase.calls, calls)
 		})
 	}
 }
