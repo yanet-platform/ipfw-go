@@ -17,6 +17,11 @@ type CommandHook func(line string, state State) (Record, int, error)
 // The Parser supplies only the current physical line. Without `#`, its LF
 // or CRLF is included when present. With `#`, input ends before the hash,
 // so neither its payload nor the newline is included.
+// The Parser may call a hook more than once for one occurrence while selecting
+// a body grammar or distinguishing an option from a destination port. Calls
+// must be side-effect-free and deterministic: equal input produces the same
+// option, count and error outcome. Every result applies immediately. The parser
+// neither compares repeated results nor revisits an earlier decision if they differ.
 // The returned count is a byte offset into the supplied text, valid from zero
 // through its byte length. Values outside that range are clamped before use.
 // With no error, zero declines the token and a positive count accepts it.

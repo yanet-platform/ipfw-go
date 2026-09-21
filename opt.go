@@ -325,9 +325,6 @@ func parseKeywordOption(
 
 // parseCustomOption hands an unknown keyword to the hook, reserving the
 // negation and the place for the parser to set on what the hook returns.
-//
-// The hook runs during the speculative pass over the options as well, so
-// it must be free of side effects.
 func parseCustomOption(
 	ctx *optionContext,
 	s string,
