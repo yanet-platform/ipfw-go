@@ -170,6 +170,14 @@ only for its position. Parser hook input never includes hash metadata or a later
 Enabled built-in syntax takes precedence over command hooks. A command hook can supply a
 `RecordLabel` explicitly when built-in labels are disabled.
 
+An option hook also acts as a parser probe. At the start of a possible option-only body, only the
+first group member is probed to choose the body grammar. After a legacy destination, the whole
+prospective option group is probed to distinguish it from ports. A positive success or any error
+other than `ErrUnknownOption` commits the parser to an option pass, which calls the hook again for
+each custom option it reaches. A zero success or `ErrUnknownOption` instead permits a legacy
+header or destination port. Hooks must therefore be side-effect-free and deterministic. The
+parser applies each result immediately and does not backtrack if repeated results differ.
+
 Numeric `skipto`, `skipto tablearg`, `check-state :flow` and `keep-state :flow` keep their
 default behavior. FreeBSD supports numbered jumps and named dynamic states. Symbolic rule
 labels are a project extension. See the upstream
