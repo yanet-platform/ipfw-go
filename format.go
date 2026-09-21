@@ -675,18 +675,12 @@ func isCustomTargetText(text string) bool {
 	return rest == ""
 }
 
-// appendPorts writes one port section: a comma-joined list under a single
-// negation, a destination first member named after an option keyword
-// rejected because the option probe eats it.
+// appendPorts writes one port section, requiring every range to share its negation.
 func appendPorts(dst []byte, matches []PortMatch, side bodySide) ([]byte, error) {
 	for idx := range matches {
 		if matches[idx].Neg != matches[0].Neg {
 			return dst, ErrInconsistentNegation
 		}
-	}
-	if side == destinationSide &&
-		(matchesOptionKeyword(matches[0].Lo.Name) || matchesArgumentOption(matches[0].Lo.Name)) {
-		return dst, ErrInvalidName
 	}
 	if matches[0].Neg {
 		dst = append(dst, "not "...)
