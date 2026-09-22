@@ -1306,9 +1306,11 @@ func Test_Parser_All_StopsAtError(t *testing.T) {
 	parser := ipfw.NewParser(source, ipfw.WithLabels())
 	var records []ipfw.Record
 	var errs []*ipfw.ParseError
-	for rec, err := range parser.Records(ipfw.DiscardState{}) {
-		if rec != nil {
-			records = append(records, *rec)
+	for record, err := range parser.Records(ipfw.DiscardState{}) {
+		if err == nil {
+			records = append(records, record)
+		} else {
+			require.Equal(t, ipfw.Record{}, record)
 		}
 		errs = append(errs, err)
 	}
@@ -1341,6 +1343,94 @@ func Test_Parser_All_EOFAndBreak(t *testing.T) {
 		break
 	}
 	require.Equal(t, 1, count)
+}
+
+// verifies that records retained from an iterator remain unchanged after normal completion.
+func Test_Parser_Records_RetainAfterEOF(t *testing.T) {
+	source := ruleset(`
+		:A
+		:B
+	`)
+	parser := ipfw.NewParser(source, ipfw.WithLabels())
+	var records []ipfw.Record
+	for record, err := range parser.Records(ipfw.DiscardState{}) {
+		require.Nil(t, err)
+		records = append(records, record)
+	}
+	require.Equal(t, []ipfw.Record{
+		{Line: 1, Text: ":A", Kind: ipfw.RecordLabel, Label: "A"},
+		{Line: 2, Text: ":B", Kind: ipfw.RecordLabel, Label: "B"},
+	}, records)
+}
+
+// verifies that a parse error does not overwrite a record retained from the iterator.
+func Test_Parser_Records_RetainAfterError(t *testing.T) {
+	source := ruleset(`
+		:A
+		bad
+	`)
+	parser := ipfw.NewParser(source, ipfw.WithLabels())
+	var record ipfw.Record
+	var parseErr *ipfw.ParseError
+	for nextRecord, err := range parser.Records(ipfw.DiscardState{}) {
+		if err != nil {
+			require.Equal(t, ipfw.Record{}, nextRecord)
+			parseErr = err
+			continue
+		}
+		record = nextRecord
+	}
+	require.ErrorIs(t, parseErr, ipfw.ErrExpectedLine)
+	require.Equal(t, ipfw.Record{
+		Line:  1,
+		Text:  ":A",
+		Kind:  ipfw.RecordLabel,
+		Label: "A",
+	}, record)
+}
+
+// verifies that resuming a parser does not overwrite a record retained before an early break.
+func Test_Parser_Records_RetainAfterBreak(t *testing.T) {
+	source := ruleset(`
+		:A
+		:B
+	`)
+	parser := ipfw.NewParser(source, ipfw.WithLabels())
+	var record ipfw.Record
+	for nextRecord, err := range parser.Records(ipfw.DiscardState{}) {
+		require.Nil(t, err)
+		record = nextRecord
+		break
+	}
+	next(t, parser, ipfw.Record{Line: 2, Text: ":B", Kind: ipfw.RecordLabel, Label: "B"})
+	require.Equal(t, ipfw.Record{
+		Line:  1,
+		Text:  ":A",
+		Kind:  ipfw.RecordLabel,
+		Label: "A",
+	}, record)
+}
+
+// verifies that iterating over record values adds no allocation after warmup.
+func Test_Parser_Records_NoAllocs(t *testing.T) {
+	source := ruleset(`
+		:A
+		:B
+	`)
+	parser := ipfw.NewParser(source, ipfw.WithLabels())
+	count := 0
+	allocations := testing.AllocsPerRun(100, func() {
+		parser.Reset(source)
+		count = 0
+		for _, err := range parser.Records(ipfw.DiscardState{}) {
+			if err != nil {
+				return
+			}
+			count++
+		}
+	})
+	require.Equal(t, 2, count)
+	require.Zero(t, allocations)
 }
 
 // verifies that the collecting state keeps tokens in order and that a reset

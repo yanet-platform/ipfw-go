@@ -110,7 +110,8 @@ func (m *Parser) Reset(src string) {
 // Next or Reset, copy it to keep it. Once the input is exhausted the record
 // is of kind RecordEOF. A line that does not parse is skipped as a whole and
 // reported as a *ParseError, a concrete pointer to compare with nil before
-// storing it in an error.
+// storing it in an error. Use [Parser.Records] when records must remain
+// unchanged as iteration advances.
 func (m *Parser) Next(state State) (*Record, *ParseError) {
 	m.record = Record{}
 	if m.rest == "" {
@@ -706,17 +707,22 @@ func trimRightSpace(s string) string {
 	return s[:end]
 }
 
-// Records iterates over the records until the input ends or a line fails, the
-// failure being the last value yielded.
-func (m *Parser) Records(state State) iter.Seq2[*Record, *ParseError] {
-	return func(yield func(*Record, *ParseError) bool) {
+// Records iterates over caller-owned records until the input ends or a line fails.
+//
+// Every yielded record is a value copy and may be retained after iteration
+// resumes or ends. Its strings still borrow the parser input. A failure is
+// yielded last with a zero Record. Iteration itself does not allocate. Use
+// [Parser.Next] when records are consumed one at a time and avoiding the value
+// copy matters.
+func (m *Parser) Records(state State) iter.Seq2[Record, *ParseError] {
+	return func(yield func(Record, *ParseError) bool) {
 		for {
 			record, err := m.Next(state)
 			if err != nil {
-				yield(nil, err)
+				yield(Record{}, err)
 				return
 			}
-			if record.Kind == RecordEOF || !yield(record, nil) {
+			if record.Kind == RecordEOF || !yield(*record, nil) {
 				return
 			}
 		}

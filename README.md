@@ -147,6 +147,10 @@ The `//` action must be a complete token, so `add //note` is rejected.
 LF, CRLF and a final line without a newline each produce one record. Copy the returned `Record`
 before the next `Next` or `Reset` if it must be kept. Its strings continue to borrow the original
 input.
+`Records` instead yields each non-EOF record by value. The values may be retained after the
+iterator resumes, stops early or reports a parse error, and their strings continue to borrow the
+original input. A parse error is the final pair and accompanies a zero `Record`. Iteration itself
+does not allocate.
 A reusable `State` must be reset explicitly between records, including after a parse error.
 
 ### Parser configuration
