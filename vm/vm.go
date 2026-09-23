@@ -210,6 +210,24 @@ func (m *program[V4, V6]) Mark() rule {
 	}
 }
 
+// Drop discards every token of the unclosed rule body.
+func (m *program[V4, V6]) Drop(open rule) {
+	clear(m.ipProtos[open.IPProtos.Start:])
+	m.ipProtos = m.ipProtos[:open.IPProtos.Start]
+	clear(m.protos[open.Protos.Start:])
+	m.protos = m.protos[:open.Protos.Start]
+	clear(m.sources[open.Sources.Start:])
+	m.sources = m.sources[:open.Sources.Start]
+	clear(m.destinations[open.Destinations.Start:])
+	m.destinations = m.destinations[:open.Destinations.Start]
+	clear(m.sourcePorts[open.SourcePorts.Start:])
+	m.sourcePorts = m.sourcePorts[:open.SourcePorts.Start]
+	clear(m.destinationPorts[open.DestinationPorts.Start:])
+	m.destinationPorts = m.destinationPorts[:open.DestinationPorts.Start]
+	clear(m.options[open.Options.Start:])
+	m.options = m.options[:open.Options.Start]
+}
+
 // DropComments removes the comments that decide nothing from the options of
 // the rule, so that a commented rule keeps an empty run of options.
 //
@@ -384,6 +402,9 @@ func Build[V4, V6 Network](p *ipfw.Parser, cfg Config[V4, V6]) (*VM[V4, V6], err
 		if parseErr != nil {
 			return nil, &BuildError{Line: parseErr.Line, Text: parseErr.Text, Err: parseErr}
 		}
+		if rec.Kind != ipfw.RecordInstruction {
+			sink.Drop()
+		}
 		switch rec.Kind {
 		case ipfw.RecordEOF:
 			sink.LinkNumbers()
@@ -473,6 +494,11 @@ func newBuilder[V4, V6 Network](
 // Program returns the program assembled so far.
 func (m *builder[V4, V6]) Program() program[V4, V6] {
 	return m.program
+}
+
+// Drop abandons the rule-body tokens of the current record.
+func (m *builder[V4, V6]) Drop() {
+	m.program.Drop(m.start)
 }
 
 // Add closes the rule of the instruction just read over the tokens
