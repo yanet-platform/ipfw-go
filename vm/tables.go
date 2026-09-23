@@ -13,6 +13,8 @@ import (
 // the address, the one with the fewest host bits, as the radix tables of
 // ipfw(8) do. Of equally specific networks the last added wins, as ipfw -q
 // updates an entry added again. Interfaces are looked up by exact name.
+// Concurrent lookups are safe. The caller must synchronize updates with
+// lookups and other updates.
 type DefaultTableRegistry[V4, V6 Network] struct {
 	networks   map[string]*networkTable[V4, V6]
 	interfaces map[string]map[string]string

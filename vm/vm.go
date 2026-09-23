@@ -26,6 +26,9 @@ type Network interface {
 //
 // An update error stops the build at its table command. Updates accepted
 // before the error are not rolled back.
+// Implementations must support concurrent lookups. Concurrent updates must
+// be synchronized with lookups and other updates by the implementation or
+// its caller.
 type TableRegistry[V4, V6 any] interface {
 	// LookupNetwork reports the value of the table's entry holding addr, the
 	// most specific one when several do, as ipfw(8) looks up a prefix, false
@@ -115,12 +118,13 @@ func (m *BuildError) Unwrap() error {
 	return m.Err
 }
 
-// VM evaluates packets against a built ruleset. Check is safe for
-// concurrent use.
+// VM evaluates packets against a built ruleset.
 //
 // The VM is stateless: a matching count rule goes on with the next rule
 // without counting anything, and a check-state rule, having no body, never
-// matches.
+// matches. Checks may run concurrently. Their table lookups must support
+// concurrent use, and table updates must not overlap them unless the registry
+// or caller synchronizes access.
 type VM[V4, V6 Network] struct {
 	program program[V4, V6]
 	labels  map[string]int
@@ -734,8 +738,10 @@ func (m *builder[V4, V6]) OnOption(opt ipfw.Opt) error {
 	return m.program.OnOption(opt)
 }
 
-// Tables is the registry the ruleset filled, the one configured or a
-// fresh default.
+// Tables returns the registry the ruleset filled, either the configured one
+// or a fresh default.
+//
+// Post-build updates must follow the registry's concurrency contract.
 func (m *VM[V4, V6]) Tables() TableRegistry[V4, V6] {
 	return m.tables
 }
