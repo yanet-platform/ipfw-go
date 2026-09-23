@@ -1,6 +1,8 @@
 package ipfw
 
 import (
+	"errors"
+	"fmt"
 	"math"
 	"strconv"
 	"testing"
@@ -8,6 +10,39 @@ import (
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
 )
+
+// verifies that failFrom retains a wrapped kind, its context and its cause.
+func Test_FailFrom_WrappedKind(t *testing.T) {
+	cause := errors.New("boom")
+	err := fmt.Errorf("network parser: %w", ErrExpectedIPv4Network.Wrap(cause))
+	failure := failFrom(err, "token")
+	require.True(t, failure.Failed())
+	require.Equal(t, ErrExpectedIPv4Network, failure.Kind)
+	require.Equal(t, "token", failure.At)
+	require.Equal(t, err, failure.Err)
+	require.Equal(t, err, failure.ToError())
+	require.ErrorIs(t, failure.ToError(), ErrExpectedIPv4Network)
+	require.ErrorIs(t, failure.ToError(), cause)
+}
+
+// verifies that context around a kind value retains its classification.
+func Test_FailFrom_ContextualKind(t *testing.T) {
+	err := fmt.Errorf("network parser: %w", ErrExpectedIPv4Network)
+	failure := failFrom(err, "token")
+	require.True(t, failure.Failed())
+	require.Equal(t, ErrExpectedIPv4Network, failure.Kind)
+	require.Equal(t, err, failure.Err)
+	require.Equal(t, err, failure.ToError())
+}
+
+// verifies that wrapping with the no-error kind does not hide the cause.
+func Test_FailFrom_ZeroWrappedKind(t *testing.T) {
+	cause := errors.New("boom")
+	failure := failFrom(ErrorKind(0).Wrap(cause), "token")
+	require.True(t, failure.Failed())
+	require.Equal(t, ErrState, failure.Kind)
+	require.Equal(t, cause, failure.Err)
+}
 
 // verifies that a prefix is consumed only when the input starts with it and
 // the input is returned unchanged otherwise.

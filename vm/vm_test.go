@@ -1,6 +1,7 @@
 package vm_test
 
 import (
+	"errors"
 	"fmt"
 	"net/netip"
 	"slices"
@@ -19,6 +20,14 @@ type (
 	net4 = xnetip.Network4
 	net6 = xnetip.Network6
 )
+
+type networkParserError struct {
+	text string
+}
+
+func (m *networkParserError) Error() string {
+	return m.text
+}
 
 // nets plugs xnetip into the VM.
 var nets = ipfw.NetworkParserFuncs[net4, net6]{
@@ -3982,6 +3991,70 @@ func Test_VM_Build_ParseError(t *testing.T) {
 		Column: 4,
 		Text:   "add foobar :any",
 	}, *parseErr)
+}
+
+// verifies that network parser causes survive rule and table build errors.
+func Test_VM_Build_NetworkErrorCause(t *testing.T) {
+	cases := []struct {
+		name       string
+		rules      string
+		kind       ipfw.ErrorKind
+		parseError bool
+	}{
+		{
+			name:       "IPv4 rule",
+			rules:      "add pass ip from 192.0.2.1 to any\n",
+			kind:       ipfw.ErrExpectedIPv4Network,
+			parseError: true,
+		},
+		{
+			name:       "IPv6 rule",
+			rules:      "add pass ip from any to 2001:db8::1\n",
+			kind:       ipfw.ErrExpectedIPv6Network,
+			parseError: true,
+		},
+		{
+			name:  "IPv4 table key",
+			rules: "table t add 192.0.2.1\n",
+			kind:  ipfw.ErrExpectedIPv4Network,
+		},
+		{
+			name:  "IPv6 table key",
+			rules: "table t add 2001:db8::1\n",
+			kind:  ipfw.ErrExpectedIPv6Network,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cause := &networkParserError{text: "network parser failed"}
+			environment := ipfw.Environment[net4, net6]{
+				Networks: ipfw.NetworkParserFuncs[net4, net6]{
+					Parse4: func(string) (net4, error) { return net4{}, cause },
+					Parse6: func(string) (net6, error) { return net6{}, cause },
+				},
+			}
+			_, err := vm.Build(
+				ipfw.NewParser(tc.rules),
+				vm.Config[net4, net6]{Environment: environment},
+			)
+			require.Error(t, err)
+			var buildErr *vm.BuildError
+			require.ErrorAs(t, err, &buildErr)
+			require.ErrorIs(t, err, tc.kind)
+			require.ErrorIs(t, err, cause)
+			var kind ipfw.ErrorKind
+			require.ErrorAs(t, err, &kind)
+			require.Equal(t, tc.kind, kind)
+			var parserErr *networkParserError
+			require.ErrorAs(t, err, &parserErr)
+			require.Same(t, cause, parserErr)
+			var parseErr *ipfw.ParseError
+			require.Equal(t, tc.parseError, errors.As(err, &parseErr))
+			if tc.parseError {
+				require.Equal(t, tc.kind, parseErr.Kind)
+			}
+		})
+	}
 }
 
 // verifies that a numeric protocol needs no resolver.

@@ -595,22 +595,22 @@ func (m *builder[V4, V6]) createTable(table *ipfw.Table) error {
 // through the network parser and a name through the target resolver, every
 // network it stands for taking the value.
 //
-// Network text the parser rejects is the error kind of its family, the
-// resolver's error comes back as is.
+// Rejected network text keeps its family kind and the network parser error.
+// The target resolver's error comes back as is.
 func (m *builder[V4, V6]) addAddress(table *ipfw.Table, value string) error {
 	target := ipfw.Target{Kind: ipfw.TargetCustom, Text: table.Key.Text}
 	switch table.Key.Kind {
 	case ipfw.TableKeyNetwork4:
 		network, err := m.networks.ParseNetwork4(table.Key.Text)
 		if err != nil {
-			return ipfw.ErrExpectedIPv4Network
+			return ipfw.ErrExpectedIPv4Network.Wrap(err)
 		}
 		m.tables.AddNetwork4(table.Name, network, value)
 		return nil
 	case ipfw.TableKeyNetwork6:
 		network, err := m.networks.ParseNetwork6(table.Key.Text)
 		if err != nil {
-			return ipfw.ErrExpectedIPv6Network
+			return ipfw.ErrExpectedIPv6Network.Wrap(err)
 		}
 		m.tables.AddNetwork6(table.Name, network, value)
 		return nil

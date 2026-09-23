@@ -208,10 +208,61 @@ func (m ErrorKind) Error() string {
 	}
 }
 
+// Wrap adds this classification while preserving an existing error chain.
+//
+// The zero kind leaves the chain unchanged, nil produces the kind itself,
+// and an identical top-level classification is not repeated.
+func (m ErrorKind) Wrap(cause error) error {
+	if m == 0 {
+		return cause
+	}
+	if cause == nil {
+		return m
+	}
+	switch classified := cause.(type) {
+	case ErrorKind:
+		if classified == m {
+			return cause
+		}
+	case *kindError:
+		if classified.kind == m {
+			return cause
+		}
+	}
+	return &kindError{kind: m, err: cause}
+}
+
+type kindError struct {
+	kind ErrorKind
+	err  error
+}
+
+func (m *kindError) Error() string {
+	return m.kind.Error() + ": " + m.err.Error()
+}
+
+func (m *kindError) Is(target error) bool {
+	kind, ok := target.(ErrorKind)
+	return ok && kind == m.kind
+}
+
+func (m *kindError) As(target any) bool {
+	kind, ok := target.(*ErrorKind)
+	if !ok {
+		return false
+	}
+	*kind = m.kind
+	return true
+}
+
+func (m *kindError) Unwrap() error {
+	return m.err
+}
+
 // ParseError is a parse failure located in the input.
 type ParseError struct {
 	Kind ErrorKind
-	// Err is the error a State or a hook returned, nil unless Kind is ErrState.
+	// Err is the error a State or a hook returned, nil for grammar failures.
 	Err error
 	// Line is 1-based.
 	Line int
@@ -223,11 +274,18 @@ type ParseError struct {
 
 // Error renders the position, the message and the attached error, if any.
 func (m *ParseError) Error() string {
-	message := strconv.Itoa(m.Line) + ":" + strconv.Itoa(m.Column) + ": " + m.Kind.Error()
-	if m.Err != nil {
-		message += ": " + m.Err.Error()
+	return strconv.Itoa(m.Line) + ":" + strconv.Itoa(m.Column) + ": " + errorKindMessage(
+		m.Kind,
+		m.Err,
+	)
+}
+
+func errorKindMessage(kind ErrorKind, cause error) string {
+	classified := kind.Wrap(cause)
+	if classified == nil {
+		return kind.Error()
 	}
-	return message
+	return classified.Error()
 }
 
 // Is matches target against the kind.

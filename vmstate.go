@@ -47,10 +47,10 @@ type TargetResolver[V4, V6 any] interface {
 	// ResolveTarget returns the networks of both families the target stands
 	// for, none meaning a target that matches nothing.
 	//
-	// An error rejects the target, an ErrorKind keeping its kind. The
-	// slices belong to the resolver and are read before its next call. A
-	// custom target's text is the token as written, whether from a rule
-	// or from the key of an address table.
+	// An error rejects the target. An ErrorKind, including one from
+	// [ErrorKind.Wrap], keeps its kind. The slices belong to the resolver and
+	// are read before its next call. A custom target's text is the token as
+	// written, whether from a rule or from the key of an address table.
 	ResolveTarget(target Target) ([]V4, []V6, error)
 }
 
@@ -259,8 +259,9 @@ func (m *Resolver[V4, V6]) resolvePort(port Port) (uint16, error) {
 //
 // A keyword, a table or a network is one match, a name one per network it
 // stands for and none for a name standing for nothing, all of them under
-// the target's pattern and negation. Rejected network text is the error
-// kind of its family, a name with no resolver is ErrUnresolvedTarget.
+// the target's pattern and negation. Rejected network text keeps its family
+// kind and the network parser error, a name with no resolver is
+// ErrUnresolvedTarget.
 func (m *Resolver[V4, V6]) resolveTarget(target Target, side bodySide) error {
 	match := TargetMatch[V4, V6]{
 		Neg:     target.Neg,
@@ -271,13 +272,13 @@ func (m *Resolver[V4, V6]) resolveTarget(target Target, side bodySide) error {
 	case TargetNetwork4:
 		network, err := m.environment.Networks.ParseNetwork4(target.Text)
 		if err != nil {
-			return ErrExpectedIPv4Network
+			return ErrExpectedIPv4Network.Wrap(err)
 		}
 		match.Net4 = network
 	case TargetNetwork6:
 		network, err := m.environment.Networks.ParseNetwork6(target.Text)
 		if err != nil {
-			return ErrExpectedIPv6Network
+			return ErrExpectedIPv6Network.Wrap(err)
 		}
 		match.Net6 = network
 	case TargetTable:

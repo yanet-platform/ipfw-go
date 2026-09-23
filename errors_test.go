@@ -9,6 +9,28 @@ import (
 	"github.com/yanet-platform/ipfw-go"
 )
 
+type familyMatchingError struct{}
+
+func (familyMatchingError) Error() string {
+	return "network parser failed"
+}
+
+func (familyMatchingError) Is(target error) bool {
+	return target == ipfw.ErrExpectedIPv4Network
+}
+
+type opaqueWrappingError struct {
+	Cause error
+}
+
+func (m opaqueWrappingError) Error() string {
+	return "network parser failed"
+}
+
+func (m opaqueWrappingError) Unwrap() error {
+	return m.Cause
+}
+
 // verifies that every error kind renders its documented message and an
 // unknown value renders its number.
 func Test_ErrorKind_Error(t *testing.T) {
@@ -165,6 +187,22 @@ func Test_ErrorKind_Error(t *testing.T) {
 	}
 }
 
+// verifies that a wrapped kind retains both its classification and cause.
+func Test_ErrorKind_Wrap(t *testing.T) {
+	cause := errors.New("boom")
+	err := ipfw.ErrExpectedIPv4Network.Wrap(cause)
+	require.EqualError(t, err, "expected IPv4 network: boom")
+	require.ErrorIs(t, err, ipfw.ErrExpectedIPv4Network)
+	require.ErrorIs(t, err, cause)
+	var kind ipfw.ErrorKind
+	require.ErrorAs(t, err, &kind)
+	require.Equal(t, ipfw.ErrExpectedIPv4Network, kind)
+	require.Equal(t, cause, errors.Unwrap(err))
+	require.Equal(t, err, ipfw.ErrExpectedIPv4Network.Wrap(err))
+	require.Equal(t, ipfw.ErrExpectedIPv4Network, ipfw.ErrExpectedIPv4Network.Wrap(nil))
+	require.NoError(t, ipfw.ErrorKind(0).Wrap(nil))
+}
+
 // verifies that the defined kinds all have a non-empty message and no two
 // kinds share one, so a message identifies its kind.
 func Test_ErrorKind_MessagesAreDistinct(t *testing.T) {
@@ -207,6 +245,48 @@ func Test_ParseError_Error(t *testing.T) {
 			},
 			expected: "3:12: state error: boom",
 		},
+		{
+			name: "specific kind with cause",
+			err: &ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedIPv4Network,
+				Err:    ipfw.ErrExpectedIPv4Network.Wrap(errors.New("boom")),
+				Line:   3,
+				Column: 12,
+			},
+			expected: "3:12: expected IPv4 network: boom",
+		},
+		{
+			name: "state kind with wrapped cause",
+			err: &ipfw.ParseError{
+				Kind:   ipfw.ErrState,
+				Err:    ipfw.ErrState.Wrap(errors.New("boom")),
+				Line:   3,
+				Column: 12,
+			},
+			expected: "3:12: state error: boom",
+		},
+		{
+			name: "custom family match retains canonical message",
+			err: &ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedIPv4Network,
+				Err:    familyMatchingError{},
+				Line:   3,
+				Column: 12,
+			},
+			expected: "3:12: expected IPv4 network: network parser failed",
+		},
+		{
+			name: "opaque wrapper retains canonical message",
+			err: &ipfw.ParseError{
+				Kind: ipfw.ErrExpectedIPv4Network,
+				Err: opaqueWrappingError{
+					Cause: ipfw.ErrExpectedIPv4Network,
+				},
+				Line:   3,
+				Column: 12,
+			},
+			expected: "3:12: expected IPv4 network: network parser failed",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -223,7 +303,7 @@ func Test_ParseError_Is(t *testing.T) {
 	require.NotErrorIs(t, err, ipfw.ErrState)
 }
 
-// verifies that the attached state error is reachable through the error
+// verifies that the attached cause is reachable through the error
 // chain and that a plain parse error unwraps to nothing.
 func Test_ParseError_Unwrap(t *testing.T) {
 	cause := errors.New("boom")
