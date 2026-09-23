@@ -213,6 +213,44 @@ func Test_Diagnostic_StateError(t *testing.T) {
 	), ipfw.NewDiag(err).String())
 }
 
+// verifies that a classified cause is rendered without repeating its kind.
+func Test_Diagnostic_WrappedKind(t *testing.T) {
+	err := &ipfw.ParseError{
+		Kind:   ipfw.ErrExpectedIPv4Network,
+		Err:    ipfw.ErrExpectedIPv4Network.Wrap(errors.New("network parser failed")),
+		Line:   1,
+		Column: 17,
+		Text:   "add pass ip from 300.1.1.1 to any",
+	}
+	require.Equal(t, lines(
+		"error: expected IPv4 network: network parser failed",
+		"  --> 1:18",
+		"   |",
+		" 1 | add pass ip from 300.1.1.1 to any",
+		"   |                  ^^^^^^^^^",
+	), ipfw.NewDiag(err).String())
+}
+
+// verifies that an opaque wrapper cannot hide the canonical kind message.
+func Test_Diagnostic_OpaqueWrappedKind(t *testing.T) {
+	err := &ipfw.ParseError{
+		Kind: ipfw.ErrExpectedIPv4Network,
+		Err: opaqueWrappingError{
+			Cause: ipfw.ErrExpectedIPv4Network,
+		},
+		Line:   1,
+		Column: 17,
+		Text:   "add pass ip from 300.1.1.1 to any",
+	}
+	require.Equal(t, lines(
+		"error: expected IPv4 network: network parser failed",
+		"  --> 1:18",
+		"   |",
+		" 1 | add pass ip from 300.1.1.1 to any",
+		"   |                  ^^^^^^^^^",
+	), ipfw.NewDiag(err).String())
+}
+
 // verifies that the gutter grows with the line number and the arrow moves
 // with it.
 func Test_Diagnostic_WideGutter(t *testing.T) {

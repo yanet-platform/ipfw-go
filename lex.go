@@ -1,5 +1,7 @@
 package ipfw
 
+import "errors"
+
 // fail is a parse failure inside a line, the zero value being success.
 type fail struct {
 	// Kind is what went wrong.
@@ -7,7 +9,7 @@ type fail struct {
 	// At is the input left at the point of detection, from which the line
 	// parser derives the column.
 	At string
-	// Err is the error a State or a hook returned, set with ErrState.
+	// Err is the error a State or a hook returned.
 	Err error
 }
 
@@ -20,6 +22,12 @@ func (m fail) Failed() bool {
 // attached error when a State or a hook produced one, the kind otherwise.
 func (m fail) ToError() error {
 	if m.Err != nil {
+		if m.Kind != ErrState {
+			var kind ErrorKind
+			if !errors.As(m.Err, &kind) || kind != m.Kind {
+				return m.Kind.Wrap(m.Err)
+			}
+		}
 		return m.Err
 	}
 	return m.Kind
@@ -37,14 +45,18 @@ func consumed(s, rest string, err fail) (int, error) {
 // failFrom turns the error a State or a hook returned into a failure at the
 // rejected token.
 //
-// An ErrorKind keeps its kind, anything else is an ErrState carrying the
-// error.
+// An ErrorKind keeps its kind, a wrapped kind keeps its cause, and anything
+// else is an ErrState carrying the error.
 func failFrom(err error, at string) fail {
 	if err == nil {
 		return fail{}
 	}
 	if kind, ok := err.(ErrorKind); ok {
 		return fail{Kind: kind, At: at}
+	}
+	var kind ErrorKind
+	if errors.As(err, &kind) && kind != 0 {
+		return fail{Kind: kind, At: at, Err: err}
 	}
 	return fail{Kind: ErrState, At: at, Err: err}
 }

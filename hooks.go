@@ -8,8 +8,9 @@ package ipfw
 // through its byte length. Values outside that range are clamped before use.
 // With no error, zero declines the line and a positive count accepts it. A
 // record of kind RecordEmpty accepts without reporting a command. With an
-// error, the count only positions it, and an ErrorKind keeps its kind. Negative
-// counts therefore act as zero and oversized counts as the input length.
+// error, the count only positions it, and an ErrorKind, including one from
+// [ErrorKind.Wrap], keeps its kind. Negative counts therefore act as zero and
+// oversized counts as the input length.
 type CommandHook func(line string, state State) (Record, int, error)
 
 // OptionHook parses a custom option at the start of rest.
@@ -26,6 +27,7 @@ type CommandHook func(line string, state State) (Record, int, error)
 // through its byte length. Values outside that range are clamped before use.
 // With no error, zero declines the token and a positive count accepts it.
 // ErrUnknownOption also declines the token. Any error uses the count only as
-// its position. Negative counts therefore act as zero and oversized counts as
-// the input length.
+// its position, and an ErrorKind, including one from [ErrorKind.Wrap], keeps
+// its kind. Negative counts therefore act as zero and oversized counts as the
+// input length.
 type OptionHook func(rest string) (Opt, int, error)

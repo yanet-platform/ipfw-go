@@ -141,11 +141,7 @@ func (m Diag) String() string {
 	style.reset(&b, style.Error)
 	b.WriteString(style.Message)
 	b.WriteString(": ")
-	b.WriteString(m.err.Kind.Error())
-	if m.err.Err != nil {
-		b.WriteString(": ")
-		b.WriteString(m.err.Err.Error())
-	}
+	b.WriteString(errorKindMessage(m.err.Kind, m.err.Err))
 	style.reset(&b, style.Message)
 
 	b.WriteByte('\n')

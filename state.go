@@ -8,8 +8,9 @@ import "slices"
 // succeeds. A later syntax or callback failure leaves earlier effects intact
 // because parsing does not roll them back. Callers must discard or reset those
 // effects after an error. Every callback may reject a token. [Parser.Next]
-// uses a returned [ErrorKind] directly and otherwise reports [ErrState] with
-// the callback error attached. Subparsers return the callback error directly.
+// uses a returned [ErrorKind], including one from [ErrorKind.Wrap], directly
+// and otherwise reports [ErrState] with the callback error attached. Subparsers
+// return the callback error directly.
 type State interface {
 	// OnIPProto receives an IP version keyword.
 	OnIPProto(m ProtoIPMatch) error

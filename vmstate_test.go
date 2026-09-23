@@ -17,6 +17,14 @@ type (
 	net6 = xnetip.Network6
 )
 
+type networkParserError struct {
+	text string
+}
+
+func (m *networkParserError) Error() string {
+	return m.text
+}
+
 // nets plugs xnetip into the typed state.
 var nets = ipfw.NetworkParserFuncs[net4, net6]{
 	Parse4: xnetip.ParseNetwork4,
@@ -714,7 +722,7 @@ func Test_Resolver_Targets(t *testing.T) {
 	}
 }
 
-// verifies that unknown names and invalid networks preserve positioned grammar errors.
+// verifies that resolver failures retain their kind and source position.
 func Test_Resolver_Errors(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -722,18 +730,6 @@ func Test_Resolver_Errors(t *testing.T) {
 		resolvers ipfw.Environment[net4, net6]
 		expected  ipfw.ParseError
 	}{
-		{
-			name:      "invalid IPv4 network",
-			input:     "add allow ip from 300.1.1.1 to any\n",
-			resolvers: networksOnly,
-			expected:  ipfw.ParseError{Kind: ipfw.ErrExpectedIPv4Network, Line: 1, Column: 18, Text: "add allow ip from 300.1.1.1 to any"},
-		},
-		{
-			name:      "invalid IPv6 network",
-			input:     "add allow ip from any to 2001:db8:::1\n",
-			resolvers: networksOnly,
-			expected:  ipfw.ParseError{Kind: ipfw.ErrExpectedIPv6Network, Line: 1, Column: 25, Text: "add allow ip from any to 2001:db8:::1"},
-		},
 		{
 			name:      "protocol name without a resolver",
 			input:     "add allow tcp from any to any\n",
@@ -812,6 +808,73 @@ func Test_Resolver_Errors(t *testing.T) {
 			require.Equal(t, tc.expected, rejected(t, tc.input, tc.resolvers))
 		})
 	}
+}
+
+// verifies that a rejected network retains its family and parser cause.
+func Test_Resolver_NetworkErrorCause(t *testing.T) {
+	cases := []struct {
+		name   string
+		input  string
+		kind   ipfw.ErrorKind
+		column int
+	}{
+		{
+			name:   "IPv4",
+			input:  "add allow ip from 300.1.1.1 to any\n",
+			kind:   ipfw.ErrExpectedIPv4Network,
+			column: 18,
+		},
+		{
+			name:   "IPv6",
+			input:  "add allow ip from any to 2001:db8:::1\n",
+			kind:   ipfw.ErrExpectedIPv6Network,
+			column: 25,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cause := &networkParserError{text: "network parser failed"}
+			environment := ipfw.Environment[net4, net6]{
+				Networks: ipfw.NetworkParserFuncs[net4, net6]{
+					Parse4: func(string) (net4, error) { return net4{}, cause },
+					Parse6: func(string) (net6, error) { return net6{}, cause },
+				},
+			}
+			var sink ipfw.ReduceVMState[net4, net6]
+			_, err := ipfw.NewParser(tc.input).Next(ipfw.NewResolver(&sink, environment))
+			require.Error(t, err)
+			require.Equal(t, tc.kind, err.Kind)
+			require.Equal(t, tc.column, err.Column)
+			require.ErrorIs(t, err, tc.kind)
+			require.ErrorIs(t, err, cause)
+			var parserErr *networkParserError
+			require.ErrorAs(t, err, &parserErr)
+			require.Same(t, cause, parserErr)
+		})
+	}
+}
+
+// verifies that the target family overrides conflicting kinds from the parser cause.
+func Test_Resolver_NetworkErrorCause_ConflictingKinds(t *testing.T) {
+	cause := &networkParserError{text: "network parser failed"}
+	environment := ipfw.Environment[net4, net6]{
+		Networks: ipfw.NetworkParserFuncs[net4, net6]{
+			Parse4: func(string) (net4, error) {
+				return net4{}, errors.Join(
+					ipfw.ErrExpectedIPv6Network,
+					ipfw.ErrExpectedIPv4Network.Wrap(cause),
+				)
+			},
+			Parse6: xnetip.ParseNetwork6,
+		},
+	}
+	var sink ipfw.ReduceVMState[net4, net6]
+	_, err := ipfw.NewParser("add allow ip from 300.1.1.1 to any\n").Next(
+		ipfw.NewResolver(&sink, environment),
+	)
+	require.Error(t, err)
+	require.Equal(t, ipfw.ErrExpectedIPv4Network, err.Kind)
+	require.ErrorIs(t, err, cause)
 }
 
 // verifies that Reset empties the slices and keeps their capacity.
