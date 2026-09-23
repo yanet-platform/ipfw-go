@@ -5387,30 +5387,51 @@ func emptyToNil(state ipfw.ReduceState) ipfw.ReduceState {
 }
 
 func ExampleParser_Next() {
-	parser := ipfw.NewParser("add 100 deny log tcp from 192.0.2.0/24 to any 22 // bots\nadd pass ip from any to any\n")
+	parser := ipfw.NewParser(
+		"add 100 deny log tcp from 192.0.2.0/24 to any 22 // bots\n" +
+			"add deny udp from any\n" +
+			"add pass ip from any to any\n",
+	)
 	var state ipfw.ReduceState
+	var records []ipfw.Record
+	var states []ipfw.ReduceState
 	for {
-		rec, err := parser.Next(&state)
+		record, err := parser.Next(&state)
 		if err != nil {
-			fmt.Println(ipfw.NewDiag(err))
-			return
+			fmt.Printf(
+				"line %d: discarded %d provisional callbacks\n",
+				err.Line,
+				len(state.Protos)+len(state.Sources),
+			)
+			state.Reset()
+			continue
 		}
-		if rec.Kind == ipfw.RecordEOF {
+		if record.Kind == ipfw.RecordEOF {
 			break
 		}
+		records = append(records, *record)
+		states = append(states, state.Clone())
+		state.Reset()
+	}
+	for idx, record := range records {
 		note := ""
-		for _, opt := range state.Options {
+		for _, opt := range states[idx].Options {
 			if opt.Kind == ipfw.OptComment {
 				note = opt.Text
 			}
 		}
 		fmt.Printf("%d: %s, log %v, from %q, %d destination ports, comment %q\n",
-			rec.Instruction.Num, rec.Instruction.Action, rec.Instruction.Log.Enabled,
-			state.Sources[0].Text, len(state.DestinationPorts), note)
-		state.Reset()
+			record.Instruction.Num,
+			record.Instruction.Action,
+			record.Instruction.Log.Enabled,
+			states[idx].Sources[0].Text,
+			len(states[idx].DestinationPorts),
+			note,
+		)
 	}
 	// Output:
 	//
+	// line 2: discarded 2 provisional callbacks
 	// 100: deny, log true, from "192.0.2.0/24", 1 destination ports, comment " bots"
 	// 0: pass, log false, from "", 0 destination ports, comment ""
 }

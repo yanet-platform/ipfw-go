@@ -151,7 +151,10 @@ input.
 iterator resumes, stops early or reports a parse error, and their strings continue to borrow the
 original input. A parse error is the final pair and accompanies a zero `Record`. Iteration itself
 does not allocate.
-A reusable `State` must be reset explicitly between records, including after a parse error.
+`Next` and the exported subparsers emit `State` callbacks incrementally. A later syntax or callback
+failure does not roll back earlier effects from the same call. Treat collected state as provisional
+until the call succeeds, then commit it. Discard or reset it after an error. A reusable `State` must
+also be reset between successful records.
 
 ### Parser configuration
 
