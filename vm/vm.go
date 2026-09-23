@@ -3,6 +3,7 @@ package vm
 import (
 	"cmp"
 	"errors"
+	"fmt"
 	"math"
 	"net/netip"
 	"slices"
@@ -74,15 +75,45 @@ type Config[V4, V6 any] struct {
 	// Tables is the table registry, nil meaning a fresh default one. An
 	// update error fails the build at its table command.
 	Tables TableRegistry[V4, V6]
-	// DefaultVerdict is the action when no rule matches, the zero value
+	// DefaultVerdict is pass or deny when no rule matches, the zero value
 	// meaning deny.
 	DefaultVerdict ipfw.Action
 	// UnresolvedJumps is the policy for a skipto no later rule or label
-	// satisfies.
+	// satisfies. Only a declared policy is valid.
 	UnresolvedJumps UnresolvedJumps
 	// OptionMatcher matches custom options, nil making them a build error.
 	OptionMatcher OptionMatcher
 }
+
+// Validate checks the configuration values whose valid sets are known without
+// reading a ruleset.
+//
+// An unknown value returns an error matching [ErrInvalidConfig]. A zero default
+// verdict is valid because a build interprets it as deny.
+func (m Config[V4, V6]) Validate() error {
+	switch m.DefaultVerdict.Kind {
+	case 0, ipfw.ActionPass, ipfw.ActionDeny:
+	default:
+		return fmt.Errorf(
+			"%w: default verdict action kind %d is not terminal",
+			ErrInvalidConfig,
+			m.DefaultVerdict.Kind,
+		)
+	}
+	switch m.UnresolvedJumps {
+	case UnresolvedJumpsError, UnresolvedJumpsFallThrough:
+	default:
+		return fmt.Errorf(
+			"%w: unresolved jumps policy %d is unknown",
+			ErrInvalidConfig,
+			m.UnresolvedJumps,
+		)
+	}
+	return nil
+}
+
+// ErrInvalidConfig reports a configuration option outside its documented set.
+var ErrInvalidConfig = errors.New("invalid configuration")
 
 // The errors a build reports, wrapped in a BuildError.
 var (
@@ -395,7 +426,12 @@ func (m span) Empty() bool {
 //
 // The parser chooses the grammar of every rule body, so the ipfw(8) choice by
 // the first protocol needs a parser built with ipfw.WithProtoChecker.
+// Invalid configuration is rejected before any ruleset input is consumed or
+// table update attempted.
 func Build[V4, V6 Network](p *ipfw.Parser, cfg Config[V4, V6]) (*VM[V4, V6], error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 	tables, verdict := cfg.Tables, cfg.DefaultVerdict
 	if tables == nil {
 		tables = NewDefaultTableRegistry[V4, V6]()
