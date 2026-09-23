@@ -2702,6 +2702,110 @@ func Test_VM_Build_UnsupportedKinds(t *testing.T) {
 	}
 }
 
+// verifies that tokens emitted by a command hook for a non-instruction
+// record do not become part of the next instruction.
+func Test_VM_Build_CommandHookNonInstructionState(t *testing.T) {
+	cases := []struct {
+		name   string
+		record ipfw.Record
+	}{
+		{
+			name:   "empty",
+			record: ipfw.Record{Kind: ipfw.RecordEmpty},
+		},
+		{
+			name:   "comment",
+			record: ipfw.Record{Kind: ipfw.RecordComment},
+		},
+		{
+			name:   "label",
+			record: ipfw.Record{Kind: ipfw.RecordLabel, Label: "HOOK"},
+		},
+		{
+			name: "table",
+			record: ipfw.Record{
+				Kind:  ipfw.RecordTable,
+				Table: ipfw.Table{Name: "hook", Kind: ipfw.TableCreate, Type: ipfw.TableTypeAddr},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hook := func(line string, state ipfw.State) (ipfw.Record, int, error) {
+				if line != "custom" {
+					return ipfw.Record{}, 0, nil
+				}
+				if err := state.OnSourceTarget(ipfw.Target{Kind: ipfw.TargetAny}); err != nil {
+					return ipfw.Record{}, 0, err
+				}
+				return tc.record, len(line), nil
+			}
+			source := ruleset(`
+				custom
+				add pass ip from 192.0.2.0/24 to any
+				add deny ip from any to any
+			`)
+			machine, err := vm.Build(
+				ipfw.NewParser(source, ipfw.WithCommandHook(hook)),
+				vm.Config[net4, net6]{Environment: resolving},
+			)
+			require.NoError(t, err)
+			require.Equal(
+				t,
+				pass,
+				machine.Check(&vm.Context{}, tcp4("192.0.2.1", "203.0.113.1")),
+			)
+			require.Equal(
+				t,
+				deny,
+				machine.Check(&vm.Context{}, tcp4("198.51.100.1", "203.0.113.1")),
+			)
+		})
+	}
+}
+
+// verifies that tokens emitted by a command hook remain part of its instruction.
+func Test_VM_Build_CommandHookInstructionState(t *testing.T) {
+	hook := func(line string, state ipfw.State) (ipfw.Record, int, error) {
+		if line != "custom" {
+			return ipfw.Record{}, 0, nil
+		}
+		if err := state.OnSourceTarget(ipfw.Target{
+			Kind: ipfw.TargetNetwork4,
+			Text: "192.0.2.0/24",
+		}); err != nil {
+			return ipfw.Record{}, 0, err
+		}
+		if err := state.OnDestinationTarget(ipfw.Target{Kind: ipfw.TargetAny}); err != nil {
+			return ipfw.Record{}, 0, err
+		}
+		record := ipfw.Record{
+			Kind:        ipfw.RecordInstruction,
+			Instruction: ipfw.Instruction{Action: pass},
+		}
+		return record, len(line), nil
+	}
+	source := ruleset(`
+		custom
+		add deny ip from any to any
+	`)
+	machine, err := vm.Build(
+		ipfw.NewParser(source, ipfw.WithCommandHook(hook)),
+		vm.Config[net4, net6]{Environment: resolving},
+	)
+	require.NoError(t, err)
+	require.Equal(
+		t,
+		pass,
+		machine.Check(&vm.Context{}, tcp4("192.0.2.1", "203.0.113.1")),
+	)
+	require.Equal(
+		t,
+		deny,
+		machine.Check(&vm.Context{}, tcp4("198.51.100.1", "203.0.113.1")),
+	)
+}
+
 // setupHook parses the custom option `setup`.
 func setupHook(rest string) (ipfw.Opt, int, error) {
 	if strings.HasPrefix(rest, "setup") {
