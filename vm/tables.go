@@ -53,24 +53,27 @@ func (m *DefaultTableRegistry[V4, V6]) LookupInterface(table, ifname string) (st
 }
 
 // AddNetwork4 implements TableRegistry.
-func (m *DefaultTableRegistry[V4, V6]) AddNetwork4(table string, network V4, value string) {
+func (m *DefaultTableRegistry[V4, V6]) AddNetwork4(table string, network V4, value string) error {
 	m.network(table).V4.Add(network, value)
+	return nil
 }
 
 // AddNetwork6 implements TableRegistry.
-func (m *DefaultTableRegistry[V4, V6]) AddNetwork6(table string, network V6, value string) {
+func (m *DefaultTableRegistry[V4, V6]) AddNetwork6(table string, network V6, value string) error {
 	m.network(table).V6.Add(network, value)
+	return nil
 }
 
 // AddInterface implements TableRegistry, a later entry for the same name
 // replacing the earlier one.
-func (m *DefaultTableRegistry[V4, V6]) AddInterface(table, ifname, value string) {
+func (m *DefaultTableRegistry[V4, V6]) AddInterface(table, ifname, value string) error {
 	interfaces, ok := m.interfaces[table]
 	if !ok {
 		interfaces = map[string]string{}
 		m.interfaces[table] = interfaces
 	}
 	interfaces[ifname] = value
+	return nil
 }
 
 // network returns the network table, created when missing.

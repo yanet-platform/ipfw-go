@@ -2516,7 +2516,7 @@ func Test_VM_Check_Tables(t *testing.T) {
 // VM consults, and that a value loses its leading colon.
 func Test_VM_Build_Tables(t *testing.T) {
 	tables := vm.NewDefaultTableRegistry[net4, net6]()
-	tables.AddNetwork4("pre", must4(t, "203.0.113.0/24"), "")
+	require.NoError(t, tables.AddNetwork4("pre", must4(t, "203.0.113.0/24"), ""))
 	src := ruleset(`
 		table i create type iface
 		table i add vlan1 :LABEL
@@ -2662,6 +2662,146 @@ func Test_VM_Build_TableTypes(t *testing.T) {
 			var buildErr *vm.BuildError
 			require.ErrorAs(t, err, &buildErr)
 			require.Equal(t, 1, buildErr.Line)
+		})
+	}
+}
+
+type tableRegistryOperation uint8
+
+const (
+	tableRegistryNetwork4 tableRegistryOperation = iota
+	tableRegistryNetwork6
+	tableRegistryInterface
+)
+
+type tableRegistryError struct{}
+
+func (m *tableRegistryError) Error() string {
+	return "table registry rejected update"
+}
+
+type rejectingTableRegistry struct {
+	*vm.DefaultTableRegistry[net4, net6]
+	operation tableRegistryOperation
+	cause     error
+}
+
+func newRejectingTableRegistry(
+	operation tableRegistryOperation,
+	cause error,
+) *rejectingTableRegistry {
+	return &rejectingTableRegistry{
+		DefaultTableRegistry: vm.NewDefaultTableRegistry[net4, net6](),
+		operation:            operation,
+		cause:                cause,
+	}
+}
+
+// AddNetwork4 rejects its selected update and otherwise delegates it.
+func (m *rejectingTableRegistry) AddNetwork4(table string, network net4, value string) error {
+	if m.operation == tableRegistryNetwork4 {
+		return m.cause
+	}
+	return m.DefaultTableRegistry.AddNetwork4(table, network, value)
+}
+
+// AddNetwork6 rejects its selected update and otherwise delegates it.
+func (m *rejectingTableRegistry) AddNetwork6(table string, network net6, value string) error {
+	if m.operation == tableRegistryNetwork6 {
+		return m.cause
+	}
+	return m.DefaultTableRegistry.AddNetwork6(table, network, value)
+}
+
+// AddInterface rejects its selected update and otherwise delegates it.
+func (m *rejectingTableRegistry) AddInterface(table, ifname, value string) error {
+	if m.operation == tableRegistryInterface {
+		return m.cause
+	}
+	return m.DefaultTableRegistry.AddInterface(table, ifname, value)
+}
+
+// verifies that a rejected table update fails the build at its command and
+// preserves the registry error.
+func Test_VM_Build_TableRegistryError(t *testing.T) {
+	cases := []struct {
+		name        string
+		rules       string
+		environment ipfw.Environment[net4, net6]
+		operation   tableRegistryOperation
+		text        string
+	}{
+		{
+			name: "direct IPv4 network",
+			rules: ruleset(`
+				table t create type addr
+				table t add 192.0.2.0/24
+			`),
+			environment: resolving,
+			operation:   tableRegistryNetwork4,
+			text:        "table t add 192.0.2.0/24",
+		},
+		{
+			name: "direct IPv6 network",
+			rules: ruleset(`
+				table t create type addr
+				table t add 2001:db8::/32
+			`),
+			environment: resolving,
+			operation:   tableRegistryNetwork6,
+			text:        "table t add 2001:db8::/32",
+		},
+		{
+			name: "resolved IPv4 network",
+			rules: ruleset(`
+				table t create type addr
+				table t add custom:first
+			`),
+			environment: resolvingTargets,
+			operation:   tableRegistryNetwork4,
+			text:        "table t add custom:first",
+		},
+		{
+			name: "resolved IPv6 network",
+			rules: ruleset(`
+				table t create type addr
+				table t add host.example.com
+			`),
+			environment: resolvingTargets,
+			operation:   tableRegistryNetwork6,
+			text:        "table t add host.example.com",
+		},
+		{
+			name: "interface",
+			rules: ruleset(`
+				table t create type iface
+				table t add vlan1
+			`),
+			environment: resolving,
+			operation:   tableRegistryInterface,
+			text:        "table t add vlan1",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			cause := &tableRegistryError{}
+			machine, err := vm.Build(
+				ipfw.NewParser(testCase.rules),
+				vm.Config[net4, net6]{
+					Environment: testCase.environment,
+					Tables:      newRejectingTableRegistry(testCase.operation, cause),
+				},
+			)
+			require.Nil(t, machine)
+			require.Error(t, err)
+			var buildErr *vm.BuildError
+			require.ErrorAs(t, err, &buildErr)
+			require.Equal(t, 2, buildErr.Line)
+			require.Equal(t, testCase.text, buildErr.Text)
+			require.ErrorIs(t, err, cause)
+			var registryErr *tableRegistryError
+			require.ErrorAs(t, err, &registryErr)
+			require.Same(t, cause, registryErr)
 		})
 	}
 }
@@ -3697,7 +3837,7 @@ func Test_VM_Check_TableArg(t *testing.T) {
 		})
 	}
 
-	two.Tables().AddInterface("j", "vlan4", "ONE")
+	require.NoError(t, two.Tables().AddInterface("j", "vlan4", "ONE"))
 	require.Equal(t, pass, two.Check(&vm.Context{IfName: "vlan4"}, packet))
 
 	src = ruleset(`
