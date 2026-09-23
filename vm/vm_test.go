@@ -4612,9 +4612,9 @@ func Benchmark_VM_CheckTrace_SourceReject(b *testing.B) {
 	require.NoError(b, err)
 	packet := syntheticPackets["tcp4 syn"]
 	tracer := &recordingTracer{}
-	action, matched := machine.CheckTrace(syntheticContext, packet, tracer)
-	require.Equal(b, ipfw.Action{}, action)
-	require.False(b, matched)
+	action, terminated := machine.CheckTrace(syntheticContext, packet, tracer)
+	require.Equal(b, deny, action)
+	require.False(b, terminated)
 	require.Len(b, tracer.seen, 1024)
 	b.ReportAllocs()
 	for b.Loop() {
