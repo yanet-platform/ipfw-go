@@ -276,8 +276,11 @@ ctx := &vm.Context{
 }
 packet := vm.NewIPv4Packet(src, dst).WithTCP(ipfw.TCPSyn, 40000, 22) // or your own vm.Packet
 verdict := machine.Check(ctx, packet)                                // ipfw.Action: pass or deny
-action, matched := machine.CheckTrace(ctx, packet, tracer)           // every rule evaluated
+action, terminated := machine.CheckTrace(ctx, packet, tracer)        // every rule evaluated
 ```
+
+`CheckTrace` returns the same effective verdict as `Check`. Its boolean reports whether a rule
+terminated the search rather than the configured default verdict being used.
 
 A rule without a number is numbered one past the previous rule, where FreeBSD adds `net.inet.ip.fw.autoinc_step`, 100 by default: rulesets that leave most rules unnumbered and number a few, as YANET rulesets do, rely on it. An explicit number may not go back. A numeric `skipto`, and a `skipto tablearg` whose table value is a number, lands as in FreeBSD on the first later rule numbered at or after the target, the next rule when the target is not past the jumping rule's own number. A static jump no later rule reaches is a build error, or falls through under `UnresolvedJumpsFallThrough`, and a tablearg one ends the search with the default verdict.
 

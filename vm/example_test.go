@@ -80,8 +80,8 @@ func ExampleVM_CheckTrace() {
 	packet := vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.10"), netip.MustParseAddr("203.0.113.1")).
 		WithTCP(ipfw.TCPSyn, 40000, 22)
 	ctx := &vm.Context{Direction: vm.In, IfName: "eth0"}
-	action, matched := machine.CheckTrace(ctx, packet, printTracer{})
-	fmt.Println(action, matched)
+	action, terminated := machine.CheckTrace(ctx, packet, printTracer{})
+	fmt.Println(action, terminated)
 	// Output:
 	//
 	// 1: - add deny ip from 198.51.100.0/24 to any
