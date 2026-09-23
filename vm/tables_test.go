@@ -34,10 +34,10 @@ func must6(t *testing.T, s string) net6 {
 // address's family holding it, and nothing in a missing or empty table.
 func Test_Tables_LookupNetwork(t *testing.T) {
 	tables := vm.NewDefaultTableRegistry[net4, net6]()
-	tables.AddNetwork4("t", must4(t, "192.0.2.0/24"), "100")
-	tables.AddNetwork4("t", must4(t, "198.51.100.0/25"), "")
-	tables.AddNetwork6("t", must6(t, "2001:db8::/32"), "SIX")
-	tables.AddInterface("empty", "vlan1", "")
+	require.NoError(t, tables.AddNetwork4("t", must4(t, "192.0.2.0/24"), "100"))
+	require.NoError(t, tables.AddNetwork4("t", must4(t, "198.51.100.0/25"), ""))
+	require.NoError(t, tables.AddNetwork6("t", must6(t, "2001:db8::/32"), "SIX"))
+	require.NoError(t, tables.AddInterface("empty", "vlan1", ""))
 
 	cases := []struct {
 		name  string
@@ -68,13 +68,13 @@ func Test_Tables_LookupNetwork(t *testing.T) {
 // host bits decides whatever the order added, the last added among equal ones.
 func Test_Tables_LookupNetwork_LongestPrefix(t *testing.T) {
 	tables := vm.NewDefaultTableRegistry[net4, net6]()
-	tables.AddNetwork4("t", must4(t, "192.0.2.128/25"), "HALF")
-	tables.AddNetwork4("t", must4(t, "0.0.0.0/0"), "DEFAULT")
-	tables.AddNetwork4("t", must4(t, "192.0.2.0/24"), "NET")
-	tables.AddNetwork4("t", must4(t, "192.0.2.200/32"), "HOST")
-	tables.AddNetwork4("t", must4(t, "192.0.2.128/25"), "AGAIN")
-	tables.AddNetwork6("t", must6(t, "2001:db8::/32"), "NET6")
-	tables.AddNetwork6("t", must6(t, "2001:db8:1::/48"), "SITE6")
+	require.NoError(t, tables.AddNetwork4("t", must4(t, "192.0.2.128/25"), "HALF"))
+	require.NoError(t, tables.AddNetwork4("t", must4(t, "0.0.0.0/0"), "DEFAULT"))
+	require.NoError(t, tables.AddNetwork4("t", must4(t, "192.0.2.0/24"), "NET"))
+	require.NoError(t, tables.AddNetwork4("t", must4(t, "192.0.2.200/32"), "HOST"))
+	require.NoError(t, tables.AddNetwork4("t", must4(t, "192.0.2.128/25"), "AGAIN"))
+	require.NoError(t, tables.AddNetwork6("t", must6(t, "2001:db8::/32"), "NET6"))
+	require.NoError(t, tables.AddNetwork6("t", must6(t, "2001:db8:1::/48"), "SITE6"))
 
 	cases := []struct {
 		addr  string
@@ -98,10 +98,10 @@ func Test_Tables_LookupNetwork_LongestPrefix(t *testing.T) {
 // nothing for another name or a missing table.
 func Test_Tables_LookupInterface(t *testing.T) {
 	tables := vm.NewDefaultTableRegistry[net4, net6]()
-	tables.AddInterface("i", "vlan1", "LABEL")
-	tables.AddInterface("i", "vlan2", "")
-	tables.AddInterface("i", "vlan1", "AGAIN")
-	tables.AddNetwork4("nets", must4(t, "192.0.2.0/24"), "")
+	require.NoError(t, tables.AddInterface("i", "vlan1", "LABEL"))
+	require.NoError(t, tables.AddInterface("i", "vlan2", ""))
+	require.NoError(t, tables.AddInterface("i", "vlan1", "AGAIN"))
+	require.NoError(t, tables.AddNetwork4("nets", must4(t, "192.0.2.0/24"), ""))
 
 	value, ok := tables.LookupInterface("i", "vlan1")
 	require.True(t, ok)
@@ -120,10 +120,10 @@ func Test_Tables_LookupInterface(t *testing.T) {
 // verifies that lookups allocate nothing.
 func Test_Tables_NoAllocs(t *testing.T) {
 	tables := vm.NewDefaultTableRegistry[net4, net6]()
-	tables.AddNetwork4("t", must4(t, "192.0.2.0/24"), "NET")
-	tables.AddNetwork4("t", must4(t, "192.0.2.0/25"), "HALF")
-	tables.AddNetwork6("t", must6(t, "2001:db8::/32"), "NET6")
-	tables.AddInterface("i", "vlan1", "LABEL")
+	require.NoError(t, tables.AddNetwork4("t", must4(t, "192.0.2.0/24"), "NET"))
+	require.NoError(t, tables.AddNetwork4("t", must4(t, "192.0.2.0/25"), "HALF"))
+	require.NoError(t, tables.AddNetwork6("t", must6(t, "2001:db8::/32"), "NET6"))
+	require.NoError(t, tables.AddInterface("i", "vlan1", "LABEL"))
 	addr4, addr6 := netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("2001:db8::1")
 	hits := 0
 	allocs := testing.AllocsPerRun(100, func() {
@@ -147,11 +147,25 @@ func Test_Tables_NoAllocs(t *testing.T) {
 func Benchmark_Tables_LookupNetwork(b *testing.B) {
 	tables := vm.NewDefaultTableRegistry[net4, net6]()
 	for idx := range 128 {
-		tables.AddNetwork4("t", parse4(fmt.Sprintf("192.0.2.%d/32", idx)), strconv.Itoa(idx))
-		tables.AddNetwork6("t", parse6(fmt.Sprintf("2001:db8::%x/128", idx)), strconv.Itoa(idx))
+		require.NoError(
+			b,
+			tables.AddNetwork4(
+				"t",
+				parse4(fmt.Sprintf("192.0.2.%d/32", idx)),
+				strconv.Itoa(idx),
+			),
+		)
+		require.NoError(
+			b,
+			tables.AddNetwork6(
+				"t",
+				parse6(fmt.Sprintf("2001:db8::%x/128", idx)),
+				strconv.Itoa(idx),
+			),
+		)
 	}
-	tables.AddNetwork4("t", parse4("192.0.2.0/24"), "WIDE")
-	tables.AddNetwork6("t", parse6("2001:db8::/32"), "WIDE")
+	require.NoError(b, tables.AddNetwork4("t", parse4("192.0.2.0/24"), "WIDE"))
+	require.NoError(b, tables.AddNetwork6("t", parse6("2001:db8::/32"), "WIDE"))
 	cases := []struct {
 		name string
 		addr string

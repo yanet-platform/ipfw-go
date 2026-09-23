@@ -23,6 +23,9 @@ type Network interface {
 
 // TableRegistry holds the tables of a ruleset, filled while building and
 // consulted while matching.
+//
+// An update error stops the build at its table command. Updates accepted
+// before the error are not rolled back.
 type TableRegistry[V4, V6 any] interface {
 	// LookupNetwork reports the value of the table's entry holding addr, the
 	// most specific one when several do, as ipfw(8) looks up a prefix, false
@@ -31,11 +34,11 @@ type TableRegistry[V4, V6 any] interface {
 	// LookupInterface reports the value of an interface in the table.
 	LookupInterface(table, ifname string) (string, bool)
 	// AddNetwork4 adds an IPv4 network with its value to the table.
-	AddNetwork4(table string, network V4, value string)
+	AddNetwork4(table string, network V4, value string) error
 	// AddNetwork6 adds an IPv6 network with its value to the table.
-	AddNetwork6(table string, network V6, value string)
+	AddNetwork6(table string, network V6, value string) error
 	// AddInterface adds an interface with its value to the table.
-	AddInterface(table, ifname, value string)
+	AddInterface(table, ifname, value string) error
 }
 
 // Tracer sees every rule a check evaluates.
@@ -65,7 +68,8 @@ type OptionMatcher func(opt ipfw.Opt, ctx *Context, pkt Packet) bool
 type Config[V4, V6 any] struct {
 	// Environment is what the names of the ruleset are interpreted in.
 	Environment ipfw.Environment[V4, V6]
-	// Tables is the table registry, nil meaning a fresh default one.
+	// Tables is the table registry, nil meaning a fresh default one. An
+	// update error fails the build at its table command.
 	Tables TableRegistry[V4, V6]
 	// DefaultVerdict is the action when no rule matches, the zero value
 	// meaning deny.
@@ -96,8 +100,8 @@ type BuildError struct {
 	Line int
 	// Text is the line without leading and trailing whitespace.
 	Text string
-	// Err is the cause: a *ipfw.ParseError, which wraps a vm error when a
-	// token is one the VM does not take, or a vm error of the whole line.
+	// Err is the cause, a *ipfw.ParseError for a token failure or the error
+	// that rejected the whole line.
 	Err error
 }
 
@@ -570,8 +574,7 @@ func (m *builder[V4, V6]) Table(table *ipfw.Table) error {
 	case ipfw.TableAdd:
 		value := strings.TrimPrefix(table.Value, ":")
 		if m.tableTypes[table.Name] == ipfw.TableTypeIface {
-			m.tables.AddInterface(table.Name, table.Key.Text, value)
-			return nil
+			return m.tables.AddInterface(table.Name, table.Key.Text, value)
 		}
 		return m.addAddress(table, value)
 	}
@@ -592,11 +595,12 @@ func (m *builder[V4, V6]) createTable(table *ipfw.Table) error {
 }
 
 // addAddress adds the key of an address table with the value, network text
-// through the network parser and a name through the target resolver, every
-// network it stands for taking the value.
+// through the network parser and a name through the target resolver.
 //
-// Rejected network text keeps its family kind and the network parser error.
-// The target resolver's error comes back as is.
+// Resolved networks are added in order. An update error returns after any
+// earlier updates have been applied. Rejected network text keeps its family
+// kind and the network parser error. The target resolver's error comes back as
+// is.
 func (m *builder[V4, V6]) addAddress(table *ipfw.Table, value string) error {
 	target := ipfw.Target{Kind: ipfw.TargetCustom, Text: table.Key.Text}
 	switch table.Key.Kind {
@@ -605,15 +609,13 @@ func (m *builder[V4, V6]) addAddress(table *ipfw.Table, value string) error {
 		if err != nil {
 			return ipfw.ErrExpectedIPv4Network.Wrap(err)
 		}
-		m.tables.AddNetwork4(table.Name, network, value)
-		return nil
+		return m.tables.AddNetwork4(table.Name, network, value)
 	case ipfw.TableKeyNetwork6:
 		network, err := m.networks.ParseNetwork6(table.Key.Text)
 		if err != nil {
 			return ipfw.ErrExpectedIPv6Network.Wrap(err)
 		}
-		m.tables.AddNetwork6(table.Name, network, value)
-		return nil
+		return m.tables.AddNetwork6(table.Name, network, value)
 	case ipfw.TableKeyHostname:
 		target.Kind = ipfw.TargetHostname
 	}
@@ -625,10 +627,14 @@ func (m *builder[V4, V6]) addAddress(table *ipfw.Table, value string) error {
 		return err
 	}
 	for _, network := range nets4 {
-		m.tables.AddNetwork4(table.Name, network, value)
+		if err := m.tables.AddNetwork4(table.Name, network, value); err != nil {
+			return err
+		}
 	}
 	for _, network := range nets6 {
-		m.tables.AddNetwork6(table.Name, network, value)
+		if err := m.tables.AddNetwork6(table.Name, network, value); err != nil {
+			return err
+		}
 	}
 	return nil
 }
