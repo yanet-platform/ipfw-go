@@ -46,12 +46,15 @@ type Target struct {
 //
 // It returns the number of bytes consumed, or on failure its offset together
 // with the error, an ErrorKind unless the state returned something else.
+// Callback effects are provisional until it succeeds. A failure does not roll
+// them back, so callers must discard or reset them after an error.
 func ParseSourceTargets(s string, state State) (int, error) {
 	rest, err := parseTargets(s, state, sourceSide)
 	return consumed(s, rest, err)
 }
 
-// ParseDestinationTargets is ParseSourceTargets for the destination part.
+// ParseDestinationTargets is ParseSourceTargets for the destination part with
+// the same callback lifecycle.
 func ParseDestinationTargets(s string, state State) (int, error) {
 	rest, err := parseTargets(s, state, destinationSide)
 	return consumed(s, rest, err)

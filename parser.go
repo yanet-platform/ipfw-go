@@ -111,7 +111,9 @@ func (m *Parser) Reset(src string) {
 // is of kind RecordEOF. A line that does not parse is skipped as a whole and
 // reported as a *ParseError, a concrete pointer to compare with nil before
 // storing it in an error. Use [Parser.Records] when records must remain
-// unchanged as iteration advances.
+// unchanged as iteration advances. State callback effects are provisional
+// until Next succeeds. A later syntax or callback failure does not roll them
+// back, so callers must discard or reset them after an error.
 func (m *Parser) Next(state State) (*Record, *ParseError) {
 	m.record = Record{}
 	if m.rest == "" {

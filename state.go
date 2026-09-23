@@ -4,8 +4,12 @@ import "slices"
 
 // State receives the tokens of a rule body as the parser recognizes them.
 //
-// Every callback may reject a token: an ErrorKind becomes a ParseError of
-// that kind at the token, any other error is attached to an ErrState.
+// Callbacks are provisional until [Parser.Next] or an exported subparser
+// succeeds. A later syntax or callback failure leaves earlier effects intact
+// because parsing does not roll them back. Callers must discard or reset those
+// effects after an error. Every callback may reject a token. [Parser.Next]
+// uses a returned [ErrorKind] directly and otherwise reports [ErrState] with
+// the callback error attached. Subparsers return the callback error directly.
 type State interface {
 	// OnIPProto receives an IP version keyword.
 	OnIPProto(m ProtoIPMatch) error

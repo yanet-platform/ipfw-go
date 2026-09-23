@@ -76,7 +76,9 @@ func (m OptKind) String() string {
 // unknown. Its input ends before the first LF or CRLF. The or-blocks are
 // numbered from zero, so the options of one rule go through one call. It
 // returns the number of bytes consumed, or on failure its offset together with
-// the error, an ErrorKind unless the state returned something else.
+// the error, an ErrorKind unless the state returned something else. Callback
+// effects are provisional until it succeeds. A failure does not roll them
+// back, so callers must discard or reset them after an error.
 func ParseOptions(s string, state State, hook OptionHook) (int, error) {
 	line, afterLine := takeLine(s)
 	if afterLine != "" && strings.HasSuffix(line, "\r") {

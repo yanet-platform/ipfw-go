@@ -63,6 +63,8 @@ type ProtoMatch struct {
 //
 // It returns the number of bytes consumed, or on failure its offset together
 // with the error, an ErrorKind unless the state returned something else.
+// Callback effects are provisional until it succeeds. A failure does not roll
+// them back, so callers must discard or reset them after an error.
 func ParseProtocols(s string, state State) (int, error) {
 	rest, err := parseProtocols(s, state)
 	return consumed(s, rest, err)

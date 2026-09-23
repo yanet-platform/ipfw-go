@@ -35,12 +35,15 @@ type PortMatch struct {
 //
 // It returns the number of bytes consumed, or on failure its offset together
 // with the error, an ErrorKind unless the state returned something else.
+// Callback effects are provisional until it succeeds. A failure does not roll
+// them back, so callers must discard or reset them after an error.
 func ParseSourcePorts(s string, state State) (int, error) {
 	rest, err := parsePorts(s, state, sourceSide)
 	return consumed(s, rest, err)
 }
 
-// ParseDestinationPorts is ParseSourcePorts for the destination part.
+// ParseDestinationPorts is ParseSourcePorts for the destination part with the
+// same callback lifecycle.
 func ParseDestinationPorts(s string, state State) (int, error) {
 	rest, err := parsePorts(s, state, destinationSide)
 	return consumed(s, rest, err)
