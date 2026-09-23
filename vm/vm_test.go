@@ -383,6 +383,112 @@ func Test_VM_Check_DefaultVerdict(t *testing.T) {
 	require.Equal(t, ipfw.Action{}, action)
 }
 
+// verifies that the zero configuration and every declared option value pass
+// standalone validation.
+func Test_Config_Validate_DeclaredValues(t *testing.T) {
+	cases := []struct {
+		name   string
+		config vm.Config[net4, net6]
+	}{
+		{name: "zero configuration"},
+		{
+			name: "pass and unresolved-jump error",
+			config: vm.Config[net4, net6]{
+				DefaultVerdict:  pass,
+				UnresolvedJumps: vm.UnresolvedJumpsError,
+			},
+		},
+		{
+			name: "deny and unresolved-jump fallthrough",
+			config: vm.Config[net4, net6]{
+				DefaultVerdict:  deny,
+				UnresolvedJumps: vm.UnresolvedJumpsFallThrough,
+			},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.NoError(t, testCase.config.Validate())
+		})
+	}
+}
+
+// verifies that invalid configuration is rejected before the parser or table
+// registry is touched.
+func Test_VM_Build_InvalidConfig(t *testing.T) {
+	cases := []struct {
+		name    string
+		config  vm.Config[net4, net6]
+		message string
+	}{
+		{
+			name:    "count default verdict",
+			config:  vm.Config[net4, net6]{DefaultVerdict: ipfw.Action{Kind: ipfw.ActionCount}},
+			message: "invalid configuration: default verdict action kind 3 is not terminal",
+		},
+		{
+			name:    "skipto default verdict",
+			config:  vm.Config[net4, net6]{DefaultVerdict: ipfw.Action{Kind: ipfw.ActionSkipTo}},
+			message: "invalid configuration: default verdict action kind 4 is not terminal",
+		},
+		{
+			name: "check-state default verdict",
+			config: vm.Config[net4, net6]{
+				DefaultVerdict: ipfw.Action{Kind: ipfw.ActionCheckState},
+			},
+			message: "invalid configuration: default verdict action kind 5 is not terminal",
+		},
+		{
+			name:    "unknown default verdict",
+			config:  vm.Config[net4, net6]{DefaultVerdict: ipfw.Action{Kind: 255}},
+			message: "invalid configuration: default verdict action kind 255 is not terminal",
+		},
+		{
+			name: "unknown unresolved jump policy",
+			config: vm.Config[net4, net6]{
+				UnresolvedJumps: vm.UnresolvedJumps(255),
+			},
+			message: "invalid configuration: unresolved jumps policy 255 is unknown",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			const source = "table t add 192.0.2.0/24\n"
+			validationErr := testCase.config.Validate()
+			require.ErrorIs(t, validationErr, vm.ErrInvalidConfig)
+			require.EqualError(t, validationErr, testCase.message)
+
+			parser := ipfw.NewParser(source)
+			tables := vm.NewDefaultTableRegistry[net4, net6]()
+			testCase.config.Environment = resolving
+			testCase.config.Tables = tables
+
+			machine, err := vm.Build(parser, testCase.config)
+			require.Nil(t, machine)
+			require.ErrorIs(t, err, vm.ErrInvalidConfig)
+			require.EqualError(t, err, testCase.message)
+			_, ok := tables.LookupNetwork("t", netip.MustParseAddr("192.0.2.1"))
+			require.False(t, ok)
+
+			record, parseErr := parser.Next(ipfw.DiscardState{})
+			require.Nil(t, parseErr)
+			require.Equal(t, ipfw.Record{
+				Line: 1,
+				Text: "table t add 192.0.2.0/24",
+				Kind: ipfw.RecordTable,
+				Table: ipfw.Table{
+					Name: "t",
+					Kind: ipfw.TableAdd,
+					Key: ipfw.TableKey{
+						Kind: ipfw.TableKeyNetwork4,
+						Text: "192.0.2.0/24",
+					},
+				},
+			}, *record)
+		})
+	}
+}
+
 // nopTracer ignores every rule.
 type nopTracer struct{}
 
