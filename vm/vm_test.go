@@ -369,18 +369,21 @@ func Test_VM_Check_OptionOnly(t *testing.T) {
 }
 
 // verifies that nothing matching yields the default verdict, deny unless
-// configured, and that CheckTrace reports no termination then.
+// configured, while tracing reports no rule termination.
 func Test_VM_Check_DefaultVerdict(t *testing.T) {
 	packet := tcp4("192.0.2.1", "192.0.2.1")
 	empty := build(t, "", none)
 	require.Equal(t, deny, empty.Check(&vm.Context{}, packet))
 	require.Equal(t, 0, empty.Len())
+	action, terminated := empty.CheckTrace(&vm.Context{}, packet, nopTracer{})
+	require.False(t, terminated)
+	require.Equal(t, deny, action)
 
 	permissive := build(t, "add deny udp from any to any\n", vm.Config[net4, net6]{DefaultVerdict: pass})
 	require.Equal(t, pass, permissive.Check(&vm.Context{}, packet))
-	action, matched := permissive.CheckTrace(&vm.Context{}, packet, nopTracer{})
-	require.False(t, matched)
-	require.Equal(t, ipfw.Action{}, action)
+	action, terminated = permissive.CheckTrace(&vm.Context{}, packet, nopTracer{})
+	require.False(t, terminated)
+	require.Equal(t, pass, action)
 }
 
 // verifies that the zero configuration and every declared option value pass
@@ -4402,7 +4405,8 @@ func Test_VM_Check_NoAllocs(t *testing.T) {
 			require.Zero(t, allocs)
 
 			allocs = testing.AllocsPerRun(100, func() {
-				if action, matched := machine.CheckTrace(syntheticContext, packet, nopTracer{}); matched && action != expected {
+				action, _ := machine.CheckTrace(syntheticContext, packet, nopTracer{})
+				if action != expected {
 					mismatches++
 				}
 			})

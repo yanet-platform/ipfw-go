@@ -790,19 +790,19 @@ func (m *VM[V4, V6]) Len() int {
 // Check runs the packet through the rules and returns the verdict, the
 // default one when no rule terminates the search.
 func (m *VM[V4, V6]) Check(ctx *Context, pkt Packet) ipfw.Action {
-	if action, matched := m.CheckTrace(ctx, pkt, nil); matched {
-		return action
-	}
-	return m.verdict
+	action, _ := m.CheckTrace(ctx, pkt, nil)
+	return action
 }
 
-// CheckTrace is Check reporting every rule evaluated to tracer, nil
-// reporting nothing, and whether a rule terminated the search.
+// CheckTrace reports each evaluated rule while returning the effective verdict
+// and whether a rule terminated the search.
 //
 // A matching skipto continues at its linked rule, a skipto tablearg at
 // the rule the last table lookup of the rule that found an entry named,
 // every jump going forward: a tablearg with no target, or one at or before
 // the rule, falls through, and one past the last rule ends the search.
+// A nil tracer reports nothing. When no rule terminates, it returns the
+// configured default and false.
 func (m *VM[V4, V6]) CheckTrace(ctx *Context, pkt Packet, tracer Tracer) (ipfw.Action, bool) {
 	var fields packetFields
 	fields.Read(pkt)
@@ -837,7 +837,7 @@ func (m *VM[V4, V6]) CheckTrace(ctx *Context, pkt Packet, tracer Tracer) (ipfw.A
 			pc++
 		}
 	}
-	return ipfw.Action{}, false
+	return m.verdict, false
 }
 
 // packetFields is what the matchers read from a packet, taken once per
