@@ -145,8 +145,9 @@ func build(
 }
 
 var (
-	pass = ipfw.Action{Kind: ipfw.ActionPass}
-	deny = ipfw.Action{Kind: ipfw.ActionDeny}
+	pass  = ipfw.Action{Kind: ipfw.ActionPass}
+	deny  = ipfw.Action{Kind: ipfw.ActionDeny}
+	reset = ipfw.Action{Kind: ipfw.ActionReset}
 )
 
 // tcp4 is a TCP SYN from src to dst over IPv4.
@@ -384,6 +385,12 @@ func Test_VM_Check_DefaultVerdict(t *testing.T) {
 	action, terminated = permissive.CheckTrace(&vm.Context{}, packet, nopTracer{})
 	require.False(t, terminated)
 	require.Equal(t, pass, action)
+
+	resetting := build(t, "add deny udp from any to any\n", vm.Config[net4, net6]{DefaultVerdict: reset})
+	require.Equal(t, reset, resetting.Check(&vm.Context{}, packet))
+	action, terminated = resetting.CheckTrace(&vm.Context{}, packet, nopTracer{})
+	require.False(t, terminated)
+	require.Equal(t, reset, action)
 }
 
 // verifies that the zero configuration and every declared option value pass
@@ -407,6 +414,10 @@ func Test_Config_Validate_DeclaredValues(t *testing.T) {
 				DefaultVerdict:  deny,
 				UnresolvedJumps: vm.UnresolvedJumpsFallThrough,
 			},
+		},
+		{
+			name:   "reset",
+			config: vm.Config[net4, net6]{DefaultVerdict: reset},
 		},
 	}
 	for _, testCase := range cases {
@@ -566,6 +577,28 @@ func Test_VM_Check_Count(t *testing.T) {
 
 	counting := build(t, "add count ip from any to any\n", vm.Config[net4, net6]{DefaultVerdict: pass})
 	require.Equal(t, pass, counting.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.1")))
+}
+
+// verifies that a matching reset rule ends the search with its own verdict and
+// that a reset rule which does not match falls through.
+func Test_VM_Check_Reset(t *testing.T) {
+	src := ruleset(`
+		add reset udp from any to any
+		add reset tcp from 198.51.100.0/24 to any
+		add reset tcp from any to any
+		add pass ip from any to any
+	`)
+	machine := build(t, src, none)
+	tracer := &recordingTracer{}
+	action, terminated := machine.CheckTrace(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.1"), tracer)
+	require.True(t, terminated)
+	require.Equal(t, reset, action)
+	require.Equal(t, []traced{
+		{line: 1, action: ipfw.ActionReset, matched: false},
+		{line: 2, action: ipfw.ActionReset, matched: false},
+		{line: 3, action: ipfw.ActionReset, matched: true},
+	}, tracer.seen)
+	require.Equal(t, reset, machine.Check(&vm.Context{}, tcp4("192.0.2.1", "192.0.2.1")))
 }
 
 // verifies that numbered comment-only rules accept jumps and count both families before continuing.

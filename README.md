@@ -282,7 +282,7 @@ ctx := &vm.Context{
 	LocalAddrs: localAddrs,
 }
 packet := vm.NewIPv4Packet(src, dst).WithTCP(ipfw.TCPSyn, 40000, 22) // or your own vm.Packet
-verdict := machine.Check(ctx, packet)                                // ipfw.Action: pass or deny
+verdict := machine.Check(ctx, packet)                                // ipfw.Action: pass, deny or reset
 action, terminated := machine.CheckTrace(ctx, packet, tracer)        // every rule evaluated
 ```
 
