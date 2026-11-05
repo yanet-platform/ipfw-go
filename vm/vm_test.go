@@ -84,7 +84,7 @@ func (fakeTargets) ResolveTarget(target ipfw.Target) ([]net4, []net6, error) {
 		return []net4{parse4("192.0.2.1/32")}, []net6{parse6("2001:db8::1/128")}, nil
 	case "custom:first":
 		return []net4{parse4("192.0.2.0/24"), parse4("198.51.100.0/24")}, nil, nil
-	case "nothing.example.com", "empty.example.com":
+	case "nothing.example.com", "empty.example.com", "custom:empty":
 		return nil, nil, nil
 	}
 	return nil, nil, ipfw.ErrExpectedTarget
@@ -2344,13 +2344,13 @@ func Test_VM_Check_ResolvedTargets(t *testing.T) {
 			verdict: deny,
 		},
 		{
-			name: "negated name standing for nothing never matches either",
+			name: "negated name standing for nothing matches valid addresses",
 			rules: ruleset(`
 				add pass tcp from not nothing.example.com to any
 				add deny ip from any to any
 			`),
 			packet:  tcp4("192.0.2.1", "203.0.113.1"),
-			verdict: deny,
+			verdict: pass,
 		},
 	}
 	for _, tc := range cases {
@@ -2358,6 +2358,138 @@ func Test_VM_Check_ResolvedTargets(t *testing.T) {
 			machine, err := vm.Build(ipfw.NewParser(tc.rules), vm.Config[net4, net6]{Environment: resolvingTargets})
 			require.NoError(t, err)
 			require.Equal(t, tc.verdict, machine.Check(&vm.Context{}, tc.packet))
+		})
+	}
+}
+
+// verifies that empty membership retains whole-pattern negation for valid addresses.
+func Test_VM_Check_ResolvedEmptyTargets(t *testing.T) {
+	fixtures := []struct {
+		name    string
+		source  bool
+		inside  vm.Packet
+		outside vm.Packet
+	}{
+		{
+			name:    "IPv4 source",
+			source:  true,
+			inside:  tcp4("192.0.2.1", "203.0.113.1"),
+			outside: tcp4("192.0.2.2", "203.0.113.1"),
+		},
+		{
+			name:   "IPv6 source",
+			source: true,
+			inside: vm.NewIPv6Packet(
+				netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8::3"),
+			),
+			outside: vm.NewIPv6Packet(
+				netip.MustParseAddr("2001:db8::2"), netip.MustParseAddr("2001:db8::3"),
+			),
+		},
+		{
+			name:    "IPv4 destination",
+			inside:  tcp4("203.0.113.1", "192.0.2.1"),
+			outside: tcp4("203.0.113.1", "192.0.2.2"),
+		},
+		{
+			name: "IPv6 destination",
+			inside: vm.NewIPv6Packet(
+				netip.MustParseAddr("2001:db8::3"), netip.MustParseAddr("2001:db8::1"),
+			),
+			outside: vm.NewIPv6Packet(
+				netip.MustParseAddr("2001:db8::3"), netip.MustParseAddr("2001:db8::2"),
+			),
+		},
+	}
+	cases := []struct {
+		name    string
+		target  string
+		inside  ipfw.Action
+		outside ipfw.Action
+	}{
+		{name: "nonempty hostname", target: "host.example.com", inside: pass, outside: deny},
+		{name: "positive empty", target: "nothing.example.com", inside: deny, outside: deny},
+		{name: "negated empty hostname", target: "not nothing.example.com", inside: pass, outside: pass},
+		{name: "negated empty custom target", target: "not custom:empty", inside: pass, outside: pass},
+		{
+			name:    "empty before nonempty member",
+			target:  "not nothing.example.com,host.example.com",
+			inside:  deny,
+			outside: pass,
+		},
+		{
+			name:    "empty after nonempty member",
+			target:  "not host.example.com,nothing.example.com",
+			inside:  deny,
+			outside: pass,
+		},
+		{
+			name:    "all empty negated list",
+			target:  "not nothing.example.com,empty.example.com",
+			inside:  pass,
+			outside: pass,
+		},
+		{
+			name:    "all empty positive list",
+			target:  "nothing.example.com,empty.example.com",
+			inside:  deny,
+			outside: deny,
+		},
+		{
+			name:    "negated empty first OR pattern",
+			target:  "{ not nothing.example.com or host.example.com }",
+			inside:  pass,
+			outside: pass,
+		},
+		{
+			name:    "negated empty last OR pattern",
+			target:  "{ host.example.com or not nothing.example.com }",
+			inside:  pass,
+			outside: pass,
+		},
+	}
+	for _, fixture := range fixtures {
+		for _, testCase := range cases {
+			t.Run(fixture.name+"/"+testCase.name, func(t *testing.T) {
+				source, destination := "any", "any"
+				if fixture.source {
+					source = testCase.target
+				} else {
+					destination = testCase.target
+				}
+				rules := fmt.Sprintf("add pass ip from %s to %s\n", source, destination)
+				machine, err := vm.Build(
+					ipfw.NewParser(rules),
+					vm.Config[net4, net6]{Environment: resolvingTargets},
+				)
+				require.NoError(t, err)
+				require.Equal(t, testCase.inside, machine.Check(&vm.Context{}, fixture.inside))
+				require.Equal(t, testCase.outside, machine.Check(&vm.Context{}, fixture.outside))
+			})
+		}
+	}
+}
+
+// verifies that resolver errors reject the build rather than becoming empty membership.
+func Test_VM_Build_ResolvedTargetErrors(t *testing.T) {
+	for _, body := range []string{
+		"unknown.example.com to any",
+		"not unknown.example.com to any",
+		"any to unknown.example.com",
+		"any to not unknown.example.com",
+	} {
+		t.Run(body, func(t *testing.T) {
+			text := "add pass ip from " + body
+			machine, err := vm.Build(
+				ipfw.NewParser(text),
+				vm.Config[net4, net6]{Environment: resolvingTargets},
+			)
+			require.Nil(t, machine)
+			require.ErrorIs(t, err, ipfw.ErrExpectedTarget)
+			var buildError *vm.BuildError
+			require.ErrorAs(t, err, &buildError)
+			require.Equal(t, 1, buildError.Line)
+			require.Equal(t, text, buildError.Text)
 		})
 	}
 }
@@ -2452,6 +2584,27 @@ func Test_VM_Check_Resolved_NoAllocs(t *testing.T) {
 	})
 	require.Equal(t, pass, verdict)
 	require.Zero(t, allocs)
+}
+
+// verifies that checking negated empty membership allocates nothing for either family.
+func Test_VM_Check_ResolvedEmpty_NoAllocs(t *testing.T) {
+	machine, err := vm.Build(
+		ipfw.NewParser("add pass ip from not nothing.example.com to not custom:empty\n"),
+		vm.Config[net4, net6]{Environment: resolvingTargets},
+	)
+	require.NoError(t, err)
+	ctx := &vm.Context{}
+	for _, packet := range []vm.Packet{
+		tcp4("192.0.2.1", "203.0.113.1"),
+		vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8::2")),
+	} {
+		verdict := deny
+		allocations := testing.AllocsPerRun(100, func() {
+			verdict = machine.Check(ctx, packet)
+		})
+		require.Equal(t, pass, verdict)
+		require.Zero(t, allocations)
+	}
 }
 
 // verifies that me and me6 match the addresses the context lists, in the
@@ -2826,6 +2979,32 @@ func Test_VM_Build_TableTypes(t *testing.T) {
 			var buildErr *vm.BuildError
 			require.ErrorAs(t, err, &buildErr)
 			require.Equal(t, 1, buildErr.Line)
+		})
+	}
+}
+
+// verifies that successful empty table keys make no address updates.
+func Test_VM_Build_EmptyTargetTableKeys(t *testing.T) {
+	for _, operation := range []tableRegistryOperation{
+		tableRegistryNetwork4,
+		tableRegistryNetwork6,
+	} {
+		t.Run(fmt.Sprintf("operation=%d", operation), func(t *testing.T) {
+			registry := newRejectingTableRegistry(operation, &tableRegistryError{})
+			machine, err := vm.Build(
+				ipfw.NewParser("table empty add nothing.example.com\ntable empty add custom:empty\n"),
+				vm.Config[net4, net6]{Environment: resolvingTargets, Tables: registry},
+			)
+			require.NoError(t, err)
+			require.NotNil(t, machine)
+			for _, address := range []netip.Addr{
+				netip.MustParseAddr("192.0.2.1"),
+				netip.MustParseAddr("2001:db8::1"),
+			} {
+				value, found := machine.Tables().LookupNetwork("empty", address)
+				require.False(t, found)
+				require.Empty(t, value)
+			}
 		})
 	}
 }
@@ -3544,6 +3723,18 @@ func Test_VM_Check_CommentOption(t *testing.T) {
 type countingTableRegistry struct {
 	vm.TableRegistry[net4, net6]
 	lookupInterfaceCalls int
+	lookupNetworkCalls   int
+}
+
+// LookupNetwork records an address lookup before delegating it.
+func (m *countingTableRegistry) LookupNetwork(table string, address netip.Addr) (string, bool) {
+	m.lookupNetworkCalls++
+	return m.TableRegistry.LookupNetwork(table, address)
+}
+
+// LookupNetworkCalls returns how many address lookups were delegated.
+func (m *countingTableRegistry) LookupNetworkCalls() int {
+	return m.lookupNetworkCalls
 }
 
 // LookupInterface records an interface lookup before delegating it.
@@ -3575,6 +3766,59 @@ func Test_VM_Check_OptionShortCircuit_TableArg(t *testing.T) {
 	ctx := &vm.Context{Direction: vm.In, IfName: "vlan0"}
 	require.Equal(t, deny, machine.Check(ctx, packet))
 	require.Zero(t, tables.LookupInterfaceCalls())
+}
+
+// verifies that negated empty membership suppresses later tablearg address lookups.
+func Test_VM_Check_ResolvedEmpty_TableArg(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		target  string
+		verdict ipfw.Action
+		lookups int
+	}{
+		{
+			name:    "empty pattern before table",
+			target:  "{ not nothing.example.com or table(jump) }",
+			verdict: deny,
+		},
+		{
+			name:    "table before empty pattern",
+			target:  "{ table(jump) or not nothing.example.com }",
+			verdict: pass,
+			lookups: 2,
+		},
+	} {
+		for _, source := range []bool{true, false} {
+			for _, packet := range []vm.Packet{
+				tcp4("192.0.2.1", "192.0.2.2"),
+				vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8::2")),
+			} {
+				name := fmt.Sprintf("%s/source=%t/version=%d", testCase.name, source, packet.Version())
+				t.Run(name, func(t *testing.T) {
+					tables := &countingTableRegistry{
+						TableRegistry: vm.NewDefaultTableRegistry[net4, net6](),
+					}
+					from, to := "any", "any"
+					if source {
+						from = testCase.target
+					} else {
+						to = testCase.target
+					}
+					rules := "table jump add 192.0.2.0/24 100\n" +
+						"table jump add 2001:db8::/32 100\n" +
+						fmt.Sprintf("add skipto tablearg ip from %s to %s\n", from, to) +
+						"add deny ip from any to any\nadd 100 pass ip from any to any\n"
+					machine, err := vm.Build(ipfw.NewParser(rules), vm.Config[net4, net6]{
+						Environment: resolvingTargets,
+						Tables:      tables,
+					})
+					require.NoError(t, err)
+					require.Equal(t, testCase.verdict, machine.Check(&vm.Context{}, packet))
+					require.Equal(t, testCase.lookups, tables.LookupNetworkCalls())
+				})
+			}
+		}
+	}
 }
 
 // verifies that tablearg uses the last successful lookup that was actually evaluated.

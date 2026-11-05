@@ -51,6 +51,7 @@ type TargetResolver[V4, V6 any] interface {
 	// [ErrorKind.Wrap], keeps its kind. The slices belong to the resolver and
 	// are read before its next call. A custom target's text is the token as
 	// written, whether from a rule or from the key of an address table.
+	// Negation applies to the complete membership set, including an empty one.
 	ResolveTarget(target Target) ([]V4, []V6, error)
 }
 
@@ -63,6 +64,7 @@ type TargetMatch[V4, V6 any] struct {
 	// alternatives under one negation.
 	Pattern uint16
 	// Kind is the target kind, never a hostname or a custom one.
+	// TargetNone preserves a negated empty membership set.
 	Kind TargetKind
 	// Name is the lookup of a TargetTable as Target.Text holds it, the table
 	// name followed by a comma and the value when the lookup asks for one.
@@ -136,7 +138,8 @@ type Environment[V4, V6 any] struct {
 // the typed tokens to a VMState.
 //
 // It makes one sink call per token, a hostname or custom target giving one call per
-// network it stands for.
+// network it stands for. A successful empty result makes no call when positive
+// and one TargetNone call when negated, preserving its pattern and negation.
 type Resolver[V4, V6 any] struct {
 	sink        VMState[V4, V6]
 	environment Environment[V4, V6]
@@ -258,8 +261,9 @@ func (m *Resolver[V4, V6]) resolvePort(port Port) (uint16, error) {
 // callback of the side.
 //
 // A keyword, a table or a network is one match, a name one per network it
-// stands for and none for a name standing for nothing, all of them under
-// the target's pattern and negation. Rejected network text keeps its family
+// stands for, all of them under the target's pattern and negation. A negated
+// empty result emits a false member so the pattern can still be negated.
+// A positive empty result emits nothing. Rejected network text keeps its family
 // kind and the network parser error, a name with no resolver is
 // ErrUnresolvedTarget.
 func (m *Resolver[V4, V6]) resolveTarget(target Target, side bodySide) error {
@@ -290,6 +294,10 @@ func (m *Resolver[V4, V6]) resolveTarget(target Target, side bodySide) error {
 		nets4, nets6, err := m.environment.Targets.ResolveTarget(target)
 		if err != nil {
 			return err
+		}
+		if target.Neg && len(nets4) == 0 && len(nets6) == 0 {
+			match.Kind = TargetNone
+			return m.emitTarget(side, match)
 		}
 		for _, network := range nets4 {
 			match = TargetMatch[V4, V6]{

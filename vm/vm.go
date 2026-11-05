@@ -1305,9 +1305,8 @@ func matchProtos(matches []ipfw.ProtoNumberMatch, protocol uint8) bool {
 // at all, is one of the targets, none matching nothing.
 //
 // The consecutive targets of one pattern are alternatives: the address is in
-// any of them, or in none when the pattern is negated. A side left empty by a
-// name standing for nothing is a rule that never matches. An address of no
-// family is in no network, which family tells apart.
+// any of them, or in none when the pattern is negated. A side with no targets
+// never matches. An address of no family is in no network, which family tells apart.
 //
 // The scan is written once per family, matchTargets6 being the other one, so
 // that its loop tests the networks of one family and skips those of the other

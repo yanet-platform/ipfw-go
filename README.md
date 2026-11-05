@@ -260,6 +260,13 @@ rec, err := ipfw.NewParser(src).Next(ipfw.NewResolver(&typed, env))
 
 See `ExampleNewResolver`.
 
+A target resolver may successfully return no networks. Positive empty membership matches
+nothing, while its negation holds for valid addresses of either family. An error instead
+rejects the target. Address-list members form one membership set before the list's negation.
+The typed resolver emits no match for a positive empty result and one `TargetNone` match for
+a negated empty result, preserving its pattern and negation. Consumers of `VMState` must
+accept that additional false member. Empty address-table keys still insert no networks.
+
 ## The virtual machine
 
 `vm.Build` reads a whole ruleset into a `VM` and `Check` runs a packet through it. What the packet bytes do not carry — the direction, the interface, the host's own addresses for `me` and `me6` — travels in a `Context` next to the packet.

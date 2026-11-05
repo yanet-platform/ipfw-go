@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -636,8 +637,8 @@ func Test_Resolver_Names(t *testing.T) {
 // verifies that a resolver stands hostnames and targets of unknown shape
 // for networks of both families, one call per network.
 //
-// The negation is copied to each, and a name standing for nothing leaves
-// the side empty.
+// The negation is copied to each network, with an explicit false member
+// for a negated empty result.
 func Test_Resolver_Targets(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -673,6 +674,7 @@ func Test_Resolver_Targets(t *testing.T) {
 				"not empty.example.com,host.example.com } to any\n",
 			sources: []ipfw.TargetMatch[net4, net6]{
 				{Kind: ipfw.TargetNetwork4, Net4: must4("203.0.113.1")},
+				{Neg: true, Pattern: 1, Kind: ipfw.TargetNone},
 				{
 					Neg:     true,
 					Pattern: 1,
@@ -720,6 +722,137 @@ func Test_Resolver_Targets(t *testing.T) {
 			require.Equal(t, tc.destinations, state.Destinations)
 		})
 	}
+}
+
+// verifies that only negated empty results emit a false member with the original pattern.
+func Test_Resolver_EmptyTargetNegation(t *testing.T) {
+	for _, targetCase := range []struct {
+		name string
+		kind ipfw.TargetKind
+		text string
+	}{
+		{name: "hostname", kind: ipfw.TargetHostname, text: "empty.example.com"},
+		{name: "custom target", kind: ipfw.TargetCustom, text: "custom:empty"},
+	} {
+		for _, source := range []bool{true, false} {
+			for _, negated := range []bool{false, true} {
+				name := fmt.Sprintf("%s/source=%t/negated=%t", targetCase.name, source, negated)
+				t.Run(name, func(t *testing.T) {
+					target := ipfw.Target{
+						Neg: negated, Pattern: 7, Kind: targetCase.kind, Text: targetCase.text,
+					}
+					var seen []ipfw.Target
+					targets := exampleTargetResolver(func(target ipfw.Target) ([]net4, []net6, error) {
+						seen = append(seen, target)
+						return nil, nil, nil
+					})
+					var sink ipfw.ReduceVMState[net4, net6]
+					resolver := ipfw.NewResolver(&sink, ipfw.Environment[net4, net6]{Targets: targets})
+					var err error
+					if source {
+						err = resolver.OnSourceTarget(target)
+					} else {
+						err = resolver.OnDestinationTarget(target)
+					}
+					require.NoError(t, err)
+					require.Equal(t, []ipfw.Target{target}, seen)
+					var expected ipfw.ReduceVMState[net4, net6]
+					if negated {
+						matches := []ipfw.TargetMatch[net4, net6]{
+							{Neg: true, Pattern: 7, Kind: ipfw.TargetNone},
+						}
+						if source {
+							expected.Sources = matches
+						} else {
+							expected.Destinations = matches
+						}
+					}
+					require.Equal(t, expected, sink)
+				})
+			}
+		}
+	}
+}
+
+// verifies that a resolution error suppresses all returned networks and empty members.
+func Test_Resolver_TargetErrorNoMatches(t *testing.T) {
+	cause := errors.New("example target resolution failed")
+	for _, source := range []bool{true, false} {
+		t.Run(fmt.Sprintf("source=%t", source), func(t *testing.T) {
+			targets := exampleTargetResolver(func(ipfw.Target) ([]net4, []net6, error) {
+				return []net4{must4("192.0.2.1/32")}, []net6{must6("2001:db8::1/128")}, cause
+			})
+			var sink ipfw.ReduceVMState[net4, net6]
+			resolver := ipfw.NewResolver(&sink, ipfw.Environment[net4, net6]{Targets: targets})
+			target := ipfw.Target{Neg: true, Pattern: 7, Kind: ipfw.TargetHostname, Text: "host.example.com"}
+			var err error
+			if source {
+				err = resolver.OnSourceTarget(target)
+			} else {
+				err = resolver.OnDestinationTarget(target)
+			}
+			require.ErrorIs(t, err, cause)
+			require.Equal(t, ipfw.ReduceVMState[net4, net6]{}, sink)
+		})
+	}
+}
+
+// verifies that rejecting an empty member preserves the target position and provisional effects.
+func Test_Resolver_EmptyTargetSinkErrors(t *testing.T) {
+	for _, source := range []bool{true, false} {
+		t.Run(fmt.Sprintf("source=%t", source), func(t *testing.T) {
+			cause := errors.New("example sink rejected target")
+			sink := rejectingTargetSink{Cause: cause}
+			resolver := ipfw.NewResolver(&sink, everything)
+			input := "add pass ip from not empty.example.com to any"
+			expected := ipfw.ReduceVMState[net4, net6]{
+				IPProtos: ipAny,
+				Sources:  []ipfw.TargetMatch[net4, net6]{{Neg: true, Kind: ipfw.TargetNone}},
+			}
+			if !source {
+				input = "add pass ip from any to not empty.example.com"
+				expected.Sources = []ipfw.TargetMatch[net4, net6]{anyTarget}
+				expected.Destinations = []ipfw.TargetMatch[net4, net6]{
+					{Neg: true, Kind: ipfw.TargetNone},
+				}
+			}
+			record, err := ipfw.NewParser(input).Next(resolver)
+			require.Nil(t, record)
+			require.Equal(t, &ipfw.ParseError{
+				Kind: ipfw.ErrState, Err: cause, Line: 1,
+				Column: strings.Index(input, "empty.example.com"), Text: input,
+			}, err)
+			require.ErrorIs(t, err, cause)
+			require.Equal(t, expected, sink.ReduceVMState)
+		})
+	}
+}
+
+type rejectingTargetSink struct {
+	ipfw.ReduceVMState[net4, net6]
+	Cause error
+}
+
+// OnSourceTarget retains the empty member before rejecting it.
+func (m *rejectingTargetSink) OnSourceTarget(match ipfw.TargetMatch[net4, net6]) error {
+	if err := m.ReduceVMState.OnSourceTarget(match); err != nil {
+		return err
+	}
+	if match.Kind == ipfw.TargetNone {
+		return m.Cause
+	}
+	return nil
+}
+
+// OnDestinationTarget retains the empty member before rejecting it.
+func (m *rejectingTargetSink) OnDestinationTarget(match ipfw.TargetMatch[net4, net6]) error {
+	if err := m.ReduceVMState.OnDestinationTarget(match); err != nil {
+		return err
+	}
+	if match.Kind == ipfw.TargetNone {
+		return m.Cause
+	}
+	return nil
 }
 
 // verifies that resolver failures retain their kind and source position.
@@ -899,6 +1032,7 @@ func Test_Resolver_NoAllocs(t *testing.T) {
 		"add allow tcp from { custom:first or host.example.com,192.0.2.1 } ssh to" +
 			" 198.51.100.0/24,203.0.113.0/24 domain-70 proto udp dst-port ssh\n",
 		"add allow { not in or out } proto tcp dst-port ssh\n",
+		"add allow ip from not empty.example.com to not inet\n",
 	} {
 		parser := ipfw.NewParser(input, ipfw.WithProtoChecker(protoChecker(fakeProtos{})))
 		var sink ipfw.ReduceVMState[net4, net6]
