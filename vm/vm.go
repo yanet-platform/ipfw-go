@@ -75,8 +75,8 @@ type Config[V4, V6 any] struct {
 	// Tables is the table registry, nil meaning a fresh default one. An
 	// update error fails the build at its table command.
 	Tables TableRegistry[V4, V6]
-	// DefaultVerdict is pass or deny when no rule matches, the zero value
-	// meaning deny.
+	// DefaultVerdict is pass, deny or reset when no rule matches, the zero
+	// value meaning deny.
 	DefaultVerdict ipfw.Action
 	// UnresolvedJumps is the policy for a skipto no later rule or label
 	// satisfies. Only a declared policy is valid.
@@ -92,7 +92,7 @@ type Config[V4, V6 any] struct {
 // verdict is valid because a build interprets it as deny.
 func (m Config[V4, V6]) Validate() error {
 	switch m.DefaultVerdict.Kind {
-	case 0, ipfw.ActionPass, ipfw.ActionDeny:
+	case 0, ipfw.ActionPass, ipfw.ActionDeny, ipfw.ActionReset:
 	default:
 		return fmt.Errorf(
 			"%w: default verdict action kind %d is not terminal",
@@ -568,7 +568,8 @@ func (m *builder[V4, V6]) Add(rec *ipfw.Record) error {
 	closed := m.Close(m.start)
 	closed.Kind = rec.Instruction.Action.Kind
 	switch closed.Kind {
-	case ipfw.ActionPass, ipfw.ActionDeny, ipfw.ActionCount, ipfw.ActionCheckState:
+	case ipfw.ActionPass, ipfw.ActionDeny, ipfw.ActionReset, ipfw.ActionCount,
+		ipfw.ActionCheckState:
 	case ipfw.ActionSkipTo:
 		closed.Jump = uint32(idx + 1)
 		switch target := rec.Instruction.Action.SkipTo; target.Kind {
@@ -820,7 +821,7 @@ func (m *VM[V4, V6]) CheckTrace(ctx *Context, pkt Packet, tracer Tracer) (ipfw.A
 			continue
 		}
 		switch rule.Kind {
-		case ipfw.ActionPass, ipfw.ActionDeny:
+		case ipfw.ActionPass, ipfw.ActionDeny, ipfw.ActionReset:
 			return program.Action(pc), true
 		case ipfw.ActionSkipTo:
 			if rule.TableArg {

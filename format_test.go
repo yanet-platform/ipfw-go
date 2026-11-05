@@ -370,6 +370,8 @@ func Test_Formatter_AppendRecord_Actions(t *testing.T) {
 		{"add permit ip from any to any", "add pass ip from any to any"},
 		{"add drop ip from any to any", "add deny ip from any to any"},
 		{"add count ip from any to any", "add count ip from any to any"},
+		{"add reset ip from any to any", "add reset ip from any to any"},
+		{"add 100 reset log tcp from any to any", "add 100 reset log tcp from any to any"},
 		{"add 100 pass ip from any to any", "add 100 pass ip from any to any"},
 		{"add 0007 pass ip from any to any", "add 7 pass ip from any to any"},
 		{"add pass log ip from any to any", "add pass log ip from any to any"},
@@ -2117,7 +2119,7 @@ func genInstructionLine(t *rapid.T) string {
 	}
 	switch action := drawPick(
 		t, "action",
-		"pass", "allow", "accept", "deny", "drop", "count", "check-state", "skipto",
+		"pass", "allow", "accept", "deny", "drop", "reset", "count", "check-state", "skipto",
 	); action {
 	case "check-state":
 		line += action

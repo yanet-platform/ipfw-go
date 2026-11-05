@@ -315,6 +315,7 @@ var actionKeywords = [...]struct {
 	{"permit", ActionPass},
 	{"deny", ActionDeny},
 	{"drop", ActionDeny},
+	{"reset", ActionReset},
 	{"count", ActionCount},
 }
 

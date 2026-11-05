@@ -341,6 +341,8 @@ func appendAction(dst []byte, action Action) ([]byte, error) {
 		return append(dst, "pass"...), nil
 	case ActionDeny:
 		return append(dst, "deny"...), nil
+	case ActionReset:
+		return append(dst, "reset"...), nil
 	case ActionCount:
 		return append(dst, "count"...), nil
 	case ActionSkipTo:

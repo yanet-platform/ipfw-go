@@ -1703,6 +1703,23 @@ func Test_Parser_Next_ActionDeny(t *testing.T) {
 	require.Equal(t, expected, *rec)
 }
 
+// verifies that the reset action is recognized by prefix, as the deny spellings are.
+func Test_Parser_Next_ActionReset(t *testing.T) {
+	nextError(t, ipfw.NewParser("add reset _"), bodyError("add reset _", 10))
+	nextError(t, ipfw.NewParser("add resetall _"), ipfw.ParseError{
+		Kind:   ipfw.ErrExpectedWhitespace,
+		Line:   1,
+		Column: 9,
+		Text:   "add resetall _",
+	})
+	var state ipfw.ReduceState
+	rec, err := ipfw.NewParser("add reset ip from any to any").Next(&state)
+	require.Nil(t, err)
+	expected := passAnyToAny(1, "add reset ip from any to any")
+	expected.Instruction.Action = ipfw.Action{Kind: ipfw.ActionReset}
+	require.Equal(t, expected, *rec)
+}
+
 // verifies that the count action is recognized.
 func Test_Parser_Next_ActionCount(t *testing.T) {
 	nextError(t, ipfw.NewParser("add count _"), bodyError("add count _", 10))

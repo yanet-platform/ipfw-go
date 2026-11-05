@@ -7,9 +7,10 @@ type ActionKind uint8
 
 // The actions.
 //
-// Pass and deny terminate the search, count only bumps the rule counters and
-// continues with the next rule, skipto jumps, check-state consults the
-// dynamic state.
+// Pass, deny and reset terminate the search, count only bumps the rule
+// counters and continues with the next rule, skipto jumps, check-state
+// consults the dynamic state. Reset discards the packet as deny does and asks
+// for a TCP packet to be answered with a reset, which the caller sends.
 const (
 	_ ActionKind = iota
 	ActionPass
@@ -17,6 +18,7 @@ const (
 	ActionCount
 	ActionSkipTo
 	ActionCheckState
+	ActionReset
 )
 
 // Action is the rule action with its argument.
@@ -37,6 +39,8 @@ func (m Action) String() string {
 		return "pass"
 	case ActionDeny:
 		return "deny"
+	case ActionReset:
+		return "reset"
 	case ActionCount:
 		return "count"
 	case ActionSkipTo:

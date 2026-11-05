@@ -17,6 +17,7 @@ func Test_Action_String(t *testing.T) {
 	}{
 		{name: "pass", action: ipfw.Action{Kind: ipfw.ActionPass}, text: "pass"},
 		{name: "deny", action: ipfw.Action{Kind: ipfw.ActionDeny}, text: "deny"},
+		{name: "reset", action: ipfw.Action{Kind: ipfw.ActionReset}, text: "reset"},
 		{name: "count", action: ipfw.Action{Kind: ipfw.ActionCount}, text: "count"},
 		{
 			name: "skipto label",
