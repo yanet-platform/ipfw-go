@@ -1092,8 +1092,8 @@ func tcp4Flags(flags ipfw.TCPFlag) vm.Packet {
 	return vm.NewIPv4Packet(netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")).WithTCP(flags, 50000, 22)
 }
 
-// verifies that established matches a TCP packet with ACK or RST set and
-// nothing else, negated the other way round.
+// verifies that established excludes TCP with SYN set and ACK and RST clear,
+// negated the other way round.
 func Test_VM_Check_Established(t *testing.T) {
 	src := ruleset(`
 		add allow tcp from any to any established
@@ -1115,6 +1115,61 @@ func Test_VM_Check_Established(t *testing.T) {
 	require.Equal(t, pass, negated.Check(&vm.Context{}, tcp4Flags(ipfw.TCPSyn)))
 	require.Equal(t, deny, negated.Check(&vm.Context{}, tcp4Flags(ipfw.TCPAck)))
 	require.Equal(t, pass, negated.Check(&vm.Context{}, udp))
+}
+
+// verifies that established excludes SYN without ACK or RST, requiring
+// readable TCP flags in either address family.
+func Test_VM_Check_EstablishedFlags(t *testing.T) {
+	zeroFlags := tcp4Flags(0)
+	flags, available := zeroFlags.TCPFlags()
+	require.True(t, available)
+	require.Zero(t, flags)
+
+	// A header ending before the flags byte must not appear to have zero flags.
+	unavailableFlags := zeroFlags.(vm.RawIPv4Packet)[:20+13]
+	flags, available = unavailableFlags.TCPFlags()
+	require.False(t, available)
+	require.Zero(t, flags)
+
+	ipv6FIN := vm.NewIPv6Packet(
+		netip.MustParseAddr("2001:db8::1"),
+		netip.MustParseAddr("2001:db8::2"),
+	).WithTCP(ipfw.TCPFin, 50000, 22)
+
+	machine := build(t, ruleset(`
+		add allow ip from any to any established
+		add deny ip from any to any
+	`), none)
+	negated := build(t, ruleset(`
+		add allow ip from any to any not established
+		add deny ip from any to any
+	`), none)
+	cases := []struct {
+		name    string
+		packet  vm.Packet
+		verdict ipfw.Action
+	}{
+		{name: "zero flags", packet: zeroFlags, verdict: pass},
+		{name: "FIN only", packet: tcp4Flags(ipfw.TCPFin), verdict: pass},
+		{name: "SYN FIN", packet: tcp4Flags(ipfw.TCPSyn | ipfw.TCPFin), verdict: deny},
+		{name: "FIN ACK", packet: tcp4Flags(ipfw.TCPFin | ipfw.TCPAck), verdict: pass},
+		{name: "IPv6 FIN only", packet: ipv6FIN, verdict: pass},
+		{name: "unavailable flags", packet: unavailableFlags, verdict: deny},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Run("established", func(t *testing.T) {
+				require.Equal(t, tc.verdict, machine.Check(&vm.Context{}, tc.packet))
+			})
+			t.Run("not established", func(t *testing.T) {
+				verdict := pass
+				if tc.verdict == pass {
+					verdict = deny
+				}
+				require.Equal(t, verdict, negated.Check(&vm.Context{}, tc.packet))
+			})
+		})
+	}
 }
 
 // verifies that via matches the context's interface by exact name or by

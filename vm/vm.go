@@ -1129,8 +1129,8 @@ func (m *VM[V4, V6]) matchOptions(
 // matchOption reports whether the option, its negation aside, holds for
 // the packet in the context, and the tablearg target it yields.
 //
-// established is a TCP packet with ACK or RST set, tcpflags one satisfying
-// its set and clear requirements, src-port and dst-port a packet whose port
+// established matches TCP unless SYN is set with ACK and RST clear. tcpflags
+// satisfies its set and clear requirements, src-port and dst-port a packet whose port
 // is in the range, proto one of the protocol number, in and out the direction
 // of the check, via the context's interface by name, by mask or through a
 // table, frag a non-first fragment, icmptypes an ICMP packet of a type in the
@@ -1151,7 +1151,8 @@ func (m *VM[V4, V6]) matchOption(
 		return m.matcher(*opt, ctx, pkt), noTarget
 	case ipfw.OptEstablished:
 		fields.ReadFlags(pkt)
-		return fields.HasFlags && fields.Flags&(ipfw.TCPAck|ipfw.TCPRst) != 0, noTarget
+		return fields.HasFlags &&
+			fields.Flags&(ipfw.TCPSyn|ipfw.TCPAck|ipfw.TCPRst) != ipfw.TCPSyn, noTarget
 	case ipfw.OptTCPFlags:
 		fields.ReadFlags(pkt)
 		return fields.HasFlags &&
