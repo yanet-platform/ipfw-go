@@ -21,6 +21,9 @@ const (
 	TableTypeNumber
 	TableTypeFlow
 	TableTypeMAC
+	// TableTypeCustom is a type a table-type hook took, its text in the
+	// table's TypeText.
+	TableTypeCustom
 )
 
 // TableKeyKind classifies the key of a table entry by its shape, the type of
@@ -56,6 +59,8 @@ type Table struct {
 	Kind TableKind
 	// Type is set by create.
 	Type TableType
+	// TypeText is the text a table-type hook took, set with TableTypeCustom.
+	TypeText string
 	// Key is set by add.
 	Key TableKey
 	// Value is the optional value of an add.

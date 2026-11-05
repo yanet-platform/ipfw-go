@@ -1194,12 +1194,13 @@ func appendTable(dst []byte, table Table) ([]byte, error) {
 	dst = append(dst, table.Name...)
 	switch table.Kind {
 	case TableCreate:
-		if table.Key != (TableKey{}) || table.Value != "" {
+		if table.Key != (TableKey{}) || table.Value != "" ||
+			table.Type != TableTypeCustom && table.TypeText != "" {
 			return dst, ErrUnexpectedBody
 		}
 		dst = append(dst, " create"...)
 		if table.Type != TableTypeUnset {
-			keyword, err := tableTypeText(table.Type)
+			keyword, err := tableTypeText(table.Type, table.TypeText)
 			if err != nil {
 				return dst, err
 			}
@@ -1208,7 +1209,7 @@ func appendTable(dst []byte, table Table) ([]byte, error) {
 		}
 		return dst, nil
 	case TableAdd:
-		if table.Type != TableTypeUnset {
+		if table.Type != TableTypeUnset || table.TypeText != "" {
 			return dst, ErrUnexpectedBody
 		}
 		if table.Value != "" && !isTokenText(table.Value) {
@@ -1229,8 +1230,12 @@ func appendTable(dst []byte, table Table) ([]byte, error) {
 	}
 }
 
-// tableTypeText returns the keyword of a table type.
-func tableTypeText(tableType TableType) (string, error) {
+// tableTypeText returns the keyword of a table type or the text of a custom
+// one.
+//
+// A custom type is written as one token that no built-in keyword starts,
+// which is what reaches a table-type hook again when the text is parsed.
+func tableTypeText(tableType TableType, custom string) (string, error) {
 	switch tableType {
 	case TableTypeAddr:
 		return "addr", nil
@@ -1242,6 +1247,11 @@ func tableTypeText(tableType TableType) (string, error) {
 		return "flow", nil
 	case TableTypeMAC:
 		return "mac", nil
+	case TableTypeCustom:
+		if _, _, kind := parseTableType(custom); kind == 0 || !isTokenText(custom) {
+			return "", ErrInvalidName
+		}
+		return custom, nil
 	default:
 		return "", ErrUnknownTableType
 	}

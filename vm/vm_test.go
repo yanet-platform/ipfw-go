@@ -2976,6 +2976,25 @@ func Test_VM_Build_Tables(t *testing.T) {
 // name standing for nothing adds nothing, the resolver's error fails the
 // build at the line, and so do a missing resolver and a type the VM cannot
 // hold.
+// verifies that a type a table-type hook took fails the build at its create,
+// the VM holding only address and interface tables.
+func Test_VM_Build_CustomTableType(t *testing.T) {
+	hook := func(rest string) (int, error) {
+		if strings.HasPrefix(rest, "color") {
+			return len("color"), nil
+		}
+		return 0, nil
+	}
+	_, err := vm.Build(
+		ipfw.NewParser("table c create type color\n", ipfw.WithTableTypeHook(hook)),
+		vm.Config[net4, net6]{Environment: resolving},
+	)
+	require.ErrorIs(t, err, vm.ErrUnsupportedTableType)
+	var buildErr *vm.BuildError
+	require.ErrorAs(t, err, &buildErr)
+	require.Equal(t, 1, buildErr.Line)
+}
+
 func Test_VM_Build_TableTypes(t *testing.T) {
 	v6 := func(src, dst string) vm.Packet {
 		packet := vm.NewIPv6Packet(netip.MustParseAddr(src), netip.MustParseAddr(dst))

@@ -31,3 +31,17 @@ type CommandHook func(line string, state State) (Record, int, error)
 // its kind. Negative counts therefore act as zero and oversized counts as the
 // input length.
 type OptionHook func(rest string) (Opt, int, error)
+
+// TableTypeHook parses a custom table type at the start of rest.
+//
+// The Parser calls it once for each `type` of a create command whose value no
+// built-in type keyword starts, with the rest of the physical line after the
+// whitespace, without its line ending and its `#` metadata. The table keeps
+// the accepted text as its TypeText.
+// The returned count is a byte offset into the supplied text, valid from zero
+// through its byte length. Values outside that range are clamped before use.
+// With no error, zero declines the type and a positive count accepts it. With
+// an error, the count only positions it, and an ErrorKind, including one from
+// [ErrorKind.Wrap], keeps its kind. Negative counts therefore act as zero and
+// oversized counts as the input length.
+type TableTypeHook func(rest string) (int, error)

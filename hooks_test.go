@@ -1742,3 +1742,265 @@ func Test_OptionHook_NoAllocs(t *testing.T) {
 		})
 	}
 }
+
+// colorTypes is a table-type hook taking the invented types color and shade,
+// declining any other.
+func colorTypes(rest string) (int, error) {
+	if strings.HasPrefix(rest, "color") {
+		return len("color"), nil
+	}
+	if strings.HasPrefix(rest, "shade") {
+		return len("shade"), nil
+	}
+	return 0, nil
+}
+
+// customTable is the create record of table t with the custom type text.
+func customTable(text, typeText string) ipfw.Record {
+	return ipfw.Record{
+		Line: 1,
+		Text: text,
+		Kind: ipfw.RecordTable,
+		Table: ipfw.Table{
+			Name:     "t",
+			Kind:     ipfw.TableCreate,
+			Type:     ipfw.TableTypeCustom,
+			TypeText: typeText,
+		},
+	}
+}
+
+// verifies that a type no built-in keyword starts goes to the hook, the table
+// keeping the text it took and the last type of the line winning.
+func Test_TableTypeHook_Custom(t *testing.T) {
+	builtIn := customTable("table t create type color type addr", "")
+	builtIn.Table.Type = ipfw.TableTypeAddr
+	hashed := customTable("table t create type color # note", "color")
+	hashed.Comment = " note"
+	cases := []struct {
+		name     string
+		input    string
+		expected ipfw.Record
+	}{
+		{
+			name:     "custom type",
+			input:    "table t create type color\n",
+			expected: customTable("table t create type color", "color"),
+		},
+		{
+			name:     "built-in type after a custom one",
+			input:    "table t create type color type addr\n",
+			expected: builtIn,
+		},
+		{
+			name:     "custom type after a built-in one",
+			input:    "table t create type addr type shade\n",
+			expected: customTable("table t create type addr type shade", "shade"),
+		},
+		{
+			name:     "hash metadata",
+			input:    "table t create type color # note\n",
+			expected: hashed,
+		},
+		{
+			name:     "CRLF",
+			input:    "table t create type color\r\n",
+			expected: customTable("table t create type color", "color"),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var state ipfw.ReduceState
+			parser := ipfw.NewParser(tc.input, ipfw.WithTableTypeHook(colorTypes))
+			rec, err := parser.Next(&state)
+			require.Nil(t, err)
+			require.Equal(t, tc.expected, *rec)
+			require.Equal(t, ipfw.ReduceState{}, state)
+		})
+	}
+}
+
+// verifies that the hook is asked once for each type no built-in keyword
+// starts, with the rest of the physical line but neither its ending nor its
+// hash metadata.
+func Test_TableTypeHook_CallSequence(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		calls []string
+	}{
+		{
+			name:  "two custom types",
+			input: "table t create type color type shade\r\n",
+			calls: []string{"color type shade", "shade"},
+		},
+		{
+			name:  "built-in types",
+			input: "table t create type addr type iface type number type flow type mac\n",
+		},
+		{
+			name:  "hash metadata",
+			input: "table t create type color # note\n",
+			calls: []string{"color "},
+		},
+		{
+			name:  "table add",
+			input: "table t add 192.0.2.1 color\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls []string
+			recording := func(rest string) (int, error) {
+				calls = append(calls, rest)
+				return colorTypes(rest)
+			}
+			parser := ipfw.NewParser(tc.input, ipfw.WithTableTypeHook(recording))
+			_, err := parser.Next(ipfw.DiscardState{})
+			require.Nil(t, err)
+			require.Equal(t, tc.calls, calls)
+		})
+	}
+}
+
+// verifies that a built-in keyword claims every type it starts, so the hook
+// never sees one and the remainder fails the line.
+func Test_TableTypeHook_Precedence(t *testing.T) {
+	calls := 0
+	counting := func(rest string) (int, error) {
+		calls++
+		return len(rest), nil
+	}
+	nextError(t, ipfw.NewParser("table t create type macro", ipfw.WithTableTypeHook(counting)),
+		ipfw.ParseError{
+			Kind:   ipfw.ErrExpectedNewlineOrEOF,
+			Line:   1,
+			Column: 23,
+			Text:   "table t create type macro",
+		})
+	require.Zero(t, calls)
+}
+
+// verifies that a declined type keeps the grammar's failure and that a hook
+// error is positioned by its count, an error kind kept and any other error
+// reported as a state failure.
+func Test_TableTypeHook_Errors(t *testing.T) {
+	boom := errors.New("boom")
+	wrapped := ipfw.ErrExpectedToken.Wrap(boom)
+	cases := []struct {
+		name     string
+		input    string
+		hook     ipfw.TableTypeHook
+		expected ipfw.ParseError
+	}{
+		{
+			name:  "declined type",
+			input: "table t create type hue",
+			hook:  colorTypes,
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedTableType,
+				Line:   1,
+				Column: 20,
+				Text:   "table t create type hue",
+			},
+		},
+		{
+			name:  "error kind from the hook",
+			input: "table t create type color:",
+			hook: func(string) (int, error) {
+				return len("color"), ipfw.ErrExpectedToken
+			},
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedToken,
+				Line:   1,
+				Column: 25,
+				Text:   "table t create type color:",
+			},
+		},
+		{
+			name:  "wrapped error kind",
+			input: "table t create type color:",
+			hook: func(string) (int, error) {
+				return 2, wrapped
+			},
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedToken,
+				Err:    wrapped,
+				Line:   1,
+				Column: 22,
+				Text:   "table t create type color:",
+			},
+		},
+		{
+			name:  "plain error from the hook",
+			input: "table t create type color",
+			hook: func(string) (int, error) {
+				return 0, boom
+			},
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrState,
+				Err:    boom,
+				Line:   1,
+				Column: 20,
+				Text:   "table t create type color",
+			},
+		},
+		{
+			name:  "part of a token taken",
+			input: "table t create type colorful",
+			hook:  colorTypes,
+			expected: ipfw.ParseError{
+				Kind:   ipfw.ErrExpectedNewlineOrEOF,
+				Line:   1,
+				Column: 25,
+				Text:   "table t create type colorful",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			nextError(t, ipfw.NewParser(tc.input, ipfw.WithTableTypeHook(tc.hook)), tc.expected)
+		})
+	}
+}
+
+// verifies that counts outside the supplied text are clamped: a negative one
+// declines and an oversized one takes the rest of the line, the ending staying
+// for the line to end on.
+func Test_TableTypeHook_ConsumptionBounds(t *testing.T) {
+	negative := func(string) (int, error) {
+		return -1, nil
+	}
+	nextError(t, ipfw.NewParser("table t create type color\n", ipfw.WithTableTypeHook(negative)),
+		ipfw.ParseError{
+			Kind:   ipfw.ErrExpectedTableType,
+			Line:   1,
+			Column: 20,
+			Text:   "table t create type color",
+		})
+	oversized := func(string) (int, error) {
+		return 1 << 20, nil
+	}
+	var state ipfw.ReduceState
+	parser := ipfw.NewParser("table t create type color\r\n", ipfw.WithTableTypeHook(oversized))
+	rec, err := parser.Next(&state)
+	require.Nil(t, err)
+	require.Equal(t, customTable("table t create type color", "color"), *rec)
+}
+
+// verifies that parsing a custom table type allocates nothing.
+func Test_TableTypeHook_NoAllocs(t *testing.T) {
+	const input = "table t create type color # note\r\n"
+	parser := ipfw.NewParser(input, ipfw.WithTableTypeHook(colorTypes))
+	_, err := parser.Next(ipfw.DiscardState{})
+	require.Nil(t, err)
+	ok := true
+	allocations := testing.AllocsPerRun(100, func() {
+		parser.Reset(input)
+		if _, err := parser.Next(ipfw.DiscardState{}); err != nil {
+			ok = false
+		}
+	})
+	require.True(t, ok)
+	require.Zero(t, allocations)
+}
