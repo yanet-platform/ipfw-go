@@ -2607,8 +2607,7 @@ func Test_VM_Check_ResolvedEmpty_NoAllocs(t *testing.T) {
 	}
 }
 
-// verifies that me and me6 match the addresses the context lists, in the
-// packet's family only, so one VM gives different verdicts per context.
+// verifies that local-address targets depend on the context, with me6 restricted to IPv6.
 func Test_VM_Check_Me(t *testing.T) {
 	src := ruleset(`
 		add pass ip from me to me
@@ -2662,7 +2661,7 @@ func Test_VM_Check_Me(t *testing.T) {
 			verdict: pass,
 		},
 		{
-			name:    "IPv6 packet, me never matches it",
+			name:    "IPv6 packet, source not local",
 			ctx:     &vm.Context{LocalAddrs: []netip.Addr{netip.MustParseAddr("2001:db8::2")}},
 			packet:  vm.NewIPv6Packet(netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8::2")),
 			verdict: deny,
@@ -2670,6 +2669,74 @@ func Test_VM_Check_Me(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.verdict, machine.Check(tc.ctx, tc.packet))
+		})
+	}
+}
+
+// verifies that me matches local IPv6 addresses exactly, including under negation.
+func Test_VM_Check_Me_IPv6(t *testing.T) {
+	local := netip.MustParseAddr("2001:db8::1")
+	remote := netip.MustParseAddr("2001:db8::2")
+	local6 := &vm.Context{LocalAddrs: []netip.Addr{local}}
+	cases := []struct {
+		name    string
+		body    string
+		ctx     *vm.Context
+		packet  vm.Packet
+		verdict ipfw.Action
+	}{
+		{
+			name:    "local IPv6 source is me",
+			body:    "me to any",
+			ctx:     local6,
+			packet:  vm.NewIPv6Packet(local, remote),
+			verdict: deny,
+		},
+		{
+			name:    "local IPv6 destination is me",
+			body:    "any to me",
+			ctx:     local6,
+			packet:  vm.NewIPv6Packet(remote, local),
+			verdict: deny,
+		},
+		{
+			name:    "negated me excludes local IPv6 source",
+			body:    "not me to any",
+			ctx:     local6,
+			packet:  vm.NewIPv6Packet(local, remote),
+			verdict: pass,
+		},
+		{
+			name:    "negated me matches remote IPv6 source",
+			body:    "not me to any",
+			ctx:     local6,
+			packet:  vm.NewIPv6Packet(remote, local),
+			verdict: deny,
+		},
+		{
+			name: "exact mapped local address is me",
+			body: "me to any",
+			ctx: &vm.Context{LocalAddrs: []netip.Addr{
+				netip.MustParseAddr("::ffff:192.0.2.1"),
+			}},
+			packet:  raw6("::ffff:192.0.2.1", "2001:db8::2"),
+			verdict: deny,
+		},
+		{
+			name: "mapped address differs from unmapped local address",
+			body: "me to any",
+			ctx: &vm.Context{LocalAddrs: []netip.Addr{
+				netip.MustParseAddr("192.0.2.1"),
+			}},
+			packet:  raw6("::ffff:192.0.2.1", "2001:db8::2"),
+			verdict: pass,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "add deny ip from " + tc.body + "\nadd pass ip from any to any\n"
+			machine := build(t, src, none)
 			require.Equal(t, tc.verdict, machine.Check(tc.ctx, tc.packet))
 		})
 	}
@@ -3920,10 +3987,11 @@ func Test_VM_Check_TableArgAddress(t *testing.T) {
 		return vm.NewIPv6Packet(netip.MustParseAddr(src), netip.MustParseAddr(dst))
 	}
 	cases := []struct {
-		name   string
-		body   string
-		packet vm.Packet
-		seen   []traced
+		name       string
+		body       string
+		packet     vm.Packet
+		localAddrs []netip.Addr
+		seen       []traced
 	}{
 		{
 			name:   "source entry",
@@ -4000,12 +4068,20 @@ func Test_VM_Check_TableArgAddress(t *testing.T) {
 			packet: tcp4("192.0.2.1", "203.0.113.1"),
 			seen:   []traced{jumped, fell},
 		},
+		{
+			name:       "IPv6 local address skips later lookup",
+			body:       "{ me or table(src) } to any",
+			packet:     v6("2001:db8::1", "2001:db8:1::1"),
+			localAddrs: []netip.Addr{netip.MustParseAddr("2001:db8::1")},
+			seen:       []traced{jumped, fell},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			machine := build(t, fmt.Sprintf(src, tc.body), none, ipfw.WithLabels())
 			tracer := &recordingTracer{}
-			_, matched := machine.CheckTrace(&vm.Context{IfName: "vlan0"}, tc.packet, tracer)
+			ctx := &vm.Context{IfName: "vlan0", LocalAddrs: tc.localAddrs}
+			_, matched := machine.CheckTrace(ctx, tc.packet, tracer)
 			require.True(t, matched)
 			require.Equal(t, tc.seen, tracer.seen)
 		})

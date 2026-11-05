@@ -1381,13 +1381,10 @@ func (m *VM[V4, V6]) matchTargets6(
 	return false
 }
 
-// matchNamedTarget reports whether the address is the target's, for the
-// kinds a scan meets rarely, family being the one the check found the
-// address to belong to.
+// matchNamedTarget checks the local-address and table targets of a rule.
 //
-// me and me6 are the context's addresses of the packet's family, a
-// missing table holds nothing, and a table lookup asking for a value holds
-// only an address whose entry has it.
+// The me target accepts both valid address families, while me6 accepts only IPv6.
+// Local addresses match exactly. A missing table or mismatched entry value never matches.
 func (m *VM[V4, V6]) matchNamedTarget(
 	target *ipfw.TargetMatch[V4, V6],
 	ctx *Context,
@@ -1396,7 +1393,7 @@ func (m *VM[V4, V6]) matchNamedTarget(
 ) bool {
 	switch target.Kind {
 	case ipfw.TargetMe:
-		return family == IPv4 && slices.Contains(ctx.LocalAddrs, addr)
+		return (family == IPv4 || family == IPv6) && slices.Contains(ctx.LocalAddrs, addr)
 	case ipfw.TargetMe6:
 		return family == IPv6 && slices.Contains(ctx.LocalAddrs, addr)
 	case ipfw.TargetTable:
