@@ -1039,6 +1039,13 @@ func Test_Formatter_AppendRecord_InvalidValues(t *testing.T) {
 			err: ipfw.ErrUnknownTargetKind,
 		},
 		{
+			name: "resolved empty member is not a raw target",
+			mutate: func(record *ipfw.ParsedRecord) {
+				record.Body.Sources = []ipfw.Target{{Kind: ipfw.TargetNone}}
+			},
+			err: ipfw.ErrUnknownTargetKind,
+		},
+		{
 			name: "or-continuation without a predecessor",
 			mutate: func(record *ipfw.ParsedRecord) {
 				record.Body.Sources = []ipfw.Target{{Pattern: 1, Kind: ipfw.TargetAny}}

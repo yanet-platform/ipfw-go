@@ -2,7 +2,7 @@ package ipfw
 
 import "strings"
 
-// TargetKind classifies a source or destination token by its shape.
+// TargetKind identifies a raw or resolved source or destination member.
 type TargetKind uint8
 
 // The target kinds. The parser classifies by shape and never validates a
@@ -20,6 +20,8 @@ const (
 	TargetNetwork4
 	TargetNetwork6
 	TargetCustom
+	// TargetNone is an empty resolved member, never emitted by the parser.
+	TargetNone
 )
 
 // Target is one member of a source or destination of the rule body.
