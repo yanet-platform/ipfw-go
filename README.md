@@ -167,6 +167,7 @@ the option when constructing the parser, including parsers passed to `vm.Build`.
 | `WithLabels()` | Label declarations and symbolic `skipto` are rejected | `:NAME` declarations and `skipto :NAME` jumps |
 | `WithCommandHook(hook)` | Unknown command lines are rejected | The hook parses unknown commands using the existing sub-parsers |
 | `WithOptionHook(hook)` | Unknown rule options are rejected | The hook parses unknown option keywords and their arguments |
+| `WithTableTypeHook(hook)` | Unknown table types are rejected | The hook takes a table type the grammar does not know |
 | `WithProtoChecker(checker)` | A rule body's grammar goes by its shape | The first protocol selects a legacy or option-only body, as in FreeBSD |
 
 `Reset` retains the configured options. Hooks own the syntax they consume and report a byte offset
@@ -176,6 +177,9 @@ only for its position. Parser hook input never includes hash metadata or a later
 `ParseOptions` similarly limits its hook to the text before the first line ending.
 Enabled built-in syntax takes precedence over command hooks. A command hook can supply a
 `RecordLabel` explicitly when built-in labels are disabled.
+The built-in table types likewise take precedence over a table-type hook. It is asked once for
+each `type` whose value no built-in keyword starts, and the table keeps the text it took as
+`TypeText` with the type `TableTypeCustom`.
 
 An option hook also acts as a parser probe. Without `WithProtoChecker`, only the first group member
 of a possible option-only body is probed to choose its grammar. With a checker, the protocol check
@@ -234,7 +238,7 @@ for {
 text, err := ipfw.NewFormatter().AppendRuleset(nil, ruleset)
 ```
 
-Both the record and the body belong to the parser and the state, so `NewParsedRecord` copies them before the next `Next` call and remembers whether an instruction used a legacy, native option-only, or comment-only body. Collecting a ruleset allocates by design; `AppendRecord` and `AppendRuleset` themselves append without allocating once the destination has capacity. A value the parser cannot produce — an unknown kind, a broken `or` chain, a stray field — is rejected with an `ErrorKind`. On error, the append methods preserve the destination's length and visible bytes, though unused capacity may contain attempted output. `WithCustomOptAppender` reconstructs `OptCustom` and a hook-produced option whose built-in spelling cannot preserve its position, such as a grouped `OptComment`.
+Both the record and the body belong to the parser and the state, so `NewParsedRecord` copies them before the next `Next` call and remembers whether an instruction used a legacy, native option-only, or comment-only body. Collecting a ruleset allocates by design; `AppendRecord` and `AppendRuleset` themselves append without allocating once the destination has capacity. A value the parser cannot produce — an unknown kind, a broken `or` chain, a stray field — is rejected with an `ErrorKind`. On error, the append methods preserve the destination's length and visible bytes, though unused capacity may contain attempted output. `WithCustomOptAppender` reconstructs `OptCustom` and a hook-produced option whose built-in spelling cannot preserve its position, such as a grouped `OptComment`. A custom table type is written as the text its hook took, which must be one token that no built-in type keyword starts.
 
 Replaying accepted input is the other direction: every `Record.Text` holds its line without leading and trailing whitespace, so appending the texts with a newline per record plays the accepted lines back. The whitespace the parser trimmed stays gone, and the replay always ends with a newline the source may not have had. See `ExampleFormatter_AppendRuleset`.
 
@@ -291,7 +295,7 @@ terminated the search rather than the configured default verdict being used.
 
 A rule without a number is numbered one past the previous rule, where FreeBSD adds `net.inet.ip.fw.autoinc_step`, 100 by default: rulesets that leave most rules unnumbered and number a few, as YANET rulesets do, rely on it. An explicit number may not go back. A numeric `skipto`, and a `skipto tablearg` whose table value is a number, lands as in FreeBSD on the first later rule numbered at or after the target, the next rule when the target is not past the jumping rule's own number. A static jump no later rule reaches is a build error, or falls through under `UnresolvedJumpsFallThrough`, and a tablearg one ends the search with the default verdict.
 
-A `table NAME create type` line says what the keys of the table are: an address table takes networks and, through the target resolver, hostnames and custom targets, an interface table takes interface names. A table never created is an address table, as in `ipfw(8)`. An address lookup finds the most specific network holding the address, as the radix tables of FreeBSD do, so a network type gives its `NumHostBits` next to `ContainsAddr`. A `skipto tablearg` jumps where the entry of the last lookup of the rule that found one says, looked up as `ipfw_chk` does: the source address, then the destination, then the options in order. An address in `table(NAME,VALUE)` holds only when its entry has the value, two numbers compared as numbers, and a value asked for by name, like `skipto=100`, is `ErrUnsupportedTableValue`.
+A `table NAME create type` line says what the keys of the table are: an address table takes networks and, through the target resolver, hostnames and custom targets, an interface table takes interface names. A table never created is an address table, as in `ipfw(8)`. Any other type, a custom one included, fails the build with `ErrUnsupportedTableType`. An address lookup finds the most specific network holding the address, as the radix tables of FreeBSD do, so a network type gives its `NumHostBits` next to `ContainsAddr`. A `skipto tablearg` jumps where the entry of the last lookup of the rule that found one says, looked up as `ipfw_chk` does: the source address, then the destination, then the options in order. An address in `table(NAME,VALUE)` holds only when its entry has the value, two numbers compared as numbers, and a value asked for by name, like `skipto=100`, is `ErrUnsupportedTableValue`.
 
 `Packet` is an interface over the header fields the matchers read, so a structure of your own, a decoded protobuf message for one, is checked without copying. The VM decides which fields mean something, as `ipfw_chk` does: it asks for ports only of TCP, UDP, SCTP and UDP-Lite, for flags only of TCP, for the type only of ICMP and ICMPv6, and for none of them on a non-first fragment, so an implementation just reports what its headers hold. `RawIPv4Packet` and `RawIPv6Packet` implement it over raw bytes, read the way `ipfw_chk` reads them: past IPv4 options and IPv6 extension headers, an IPv6 fragment header included. `NewIPv4Packet`, `NewIPv6Packet` and their `With` methods build such packets for tests, each returning a copy. See `ExampleBuild` and `ExampleVM_CheckTrace`.
 
@@ -314,6 +318,7 @@ Everything the format leaves to the site — what a name means, what a keyword t
 |---|---|
 | `WithCommandHook` | a line the grammar does not know, the hook parsing it out of the exported sub-parsers |
 | `WithOptionHook` | an option the grammar does not know, the hook consuming its arguments |
+| `WithTableTypeHook` | a table type the grammar does not know, the table keeping the text the hook took |
 | `WithProtoChecker` | which names are protocols, choosing between a legacy and an option-only rule body |
 | `State`, `VMState` | your own consumer of the tokens, raw or typed |
 

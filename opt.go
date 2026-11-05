@@ -80,10 +80,7 @@ func (m OptKind) String() string {
 // effects are provisional until it succeeds. A failure does not roll them
 // back, so callers must discard or reset them after an error.
 func ParseOptions(s string, state State, hook OptionHook) (int, error) {
-	line, afterLine := takeLine(s)
-	if afterLine != "" && strings.HasSuffix(line, "\r") {
-		line = line[:len(line)-1]
-	}
+	line := lineText(s)
 	var ctx optionContext
 	rest, err := parseOptions(&ctx, line, state, hook)
 	return consumed(line, rest, err)

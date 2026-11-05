@@ -729,6 +729,87 @@ func Test_Formatter_AppendRecord_Tables(t *testing.T) {
 	}
 }
 
+// verifies that a custom table type is written as the text its hook took and
+// parses back through the hook, and that a text which could not is rejected.
+func Test_Formatter_TableTypeCustom(t *testing.T) {
+	var state ipfw.ReduceState
+	parser := ipfw.NewParser("table t create   type color # note\n", ipfw.WithTableTypeHook(colorTypes))
+	rec, err := parser.Next(&state)
+	require.Nil(t, err)
+	text, formatErr := ipfw.NewFormatter().Record(ipfw.NewParsedRecord(rec, &state))
+	require.NoError(t, formatErr)
+	require.Equal(t, "table t create type color # note", text)
+
+	cases := []struct {
+		name  string
+		table ipfw.Table
+		err   error
+	}{
+		{
+			name:  "empty custom text",
+			table: ipfw.Table{Name: "t", Kind: ipfw.TableCreate, Type: ipfw.TableTypeCustom},
+			err:   ipfw.ErrInvalidName,
+		},
+		{
+			name: "custom text of two tokens",
+			table: ipfw.Table{
+				Name:     "t",
+				Kind:     ipfw.TableCreate,
+				Type:     ipfw.TableTypeCustom,
+				TypeText: "two words",
+			},
+			err: ipfw.ErrInvalidName,
+		},
+		{
+			name: "custom text with a hash",
+			table: ipfw.Table{
+				Name:     "t",
+				Kind:     ipfw.TableCreate,
+				Type:     ipfw.TableTypeCustom,
+				TypeText: "a#b",
+			},
+			err: ipfw.ErrInvalidName,
+		},
+		{
+			name: "custom text a built-in keyword starts",
+			table: ipfw.Table{
+				Name:     "t",
+				Kind:     ipfw.TableCreate,
+				Type:     ipfw.TableTypeCustom,
+				TypeText: "macro",
+			},
+			err: ipfw.ErrInvalidName,
+		},
+		{
+			name: "custom text on a built-in type",
+			table: ipfw.Table{
+				Name:     "t",
+				Kind:     ipfw.TableCreate,
+				Type:     ipfw.TableTypeAddr,
+				TypeText: "color",
+			},
+			err: ipfw.ErrUnexpectedBody,
+		},
+		{
+			name: "custom text on an add",
+			table: ipfw.Table{
+				Name:     "t",
+				Kind:     ipfw.TableAdd,
+				TypeText: "color",
+				Key:      ipfw.TableKey{Kind: ipfw.TableKeyNetwork4, Text: "192.0.2.1"},
+			},
+			err: ipfw.ErrUnexpectedBody,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			record := ipfw.ParsedRecord{Record: ipfw.Record{Kind: ipfw.RecordTable, Table: tc.table}}
+			_, err := ipfw.NewFormatter().Record(record)
+			require.ErrorIs(t, err, tc.err)
+		})
+	}
+}
+
 // verifies that a whole ruleset keeps its record order, labels around a
 // symbolic skipto, empty lines and comments, already-canonical text coming
 // back identical.
@@ -2301,7 +2382,7 @@ func seedRecord(seed []byte) ipfw.ParsedRecord {
 	record.Record.Table = ipfw.Table{
 		Name:  rng.maybeText(),
 		Kind:  ipfw.TableKind(rng.byte() % 4),
-		Type:  ipfw.TableType(rng.byte() % 7),
+		Type:  ipfw.TableType(rng.byte() % 8),
 		Key:   ipfw.TableKey{Kind: ipfw.TableKeyKind(rng.byte() % 5), Text: rng.maybeText()},
 		Value: rng.maybeText(),
 	}
@@ -2344,6 +2425,8 @@ func seedRecord(seed []byte) ipfw.ParsedRecord {
 			record.Body.Options = append(record.Body.Options, seedOpt(rng))
 		}
 	}
+	// Drawn last, so the seeds drawn before the field existed keep their shapes.
+	record.Record.Table.TypeText = rng.maybeText()
 	return record
 }
 
@@ -2392,6 +2475,16 @@ func validSeedRecord(seed string) (ipfw.ParsedRecord, bool) {
 		record.Body = ipfw.ReduceState{
 			Options: []ipfw.Opt{{Kind: ipfw.OptComment, Text: " cached"}},
 		}
+	case "valid/table-custom-type":
+		record.Record.Kind = ipfw.RecordTable
+		record.Record.Instruction = ipfw.Instruction{}
+		record.Record.Table = ipfw.Table{
+			Name:     "t",
+			Kind:     ipfw.TableCreate,
+			Type:     ipfw.TableTypeCustom,
+			TypeText: "color",
+		}
+		record.Body = ipfw.ReduceState{}
 	case "valid/table-hostname":
 		record.Record.Kind = ipfw.RecordTable
 		record.Record.Instruction = ipfw.Instruction{}
@@ -2470,6 +2563,7 @@ var fuzzRecordSeeds = [][]byte{
 	[]byte("valid/tcpflags-overlap"),
 	[]byte("valid/check-state-comment"),
 	[]byte("valid/table-hostname"),
+	[]byte("valid/table-custom-type"),
 }
 
 // verifies that an arbitrary record either formats into text that parses
@@ -2488,7 +2582,8 @@ func Fuzz_Formatter_Record(f *testing.F) {
 			return
 		}
 		var state ipfw.ReduceState
-		rec, parseErr := ipfw.NewParser(text+"\n", ipfw.WithLabels()).Next(&state)
+		parser := ipfw.NewParser(text+"\n", ipfw.WithLabels(), ipfw.WithTableTypeHook(tokenTableType))
+		rec, parseErr := parser.Next(&state)
 		require.Nilf(t, parseErr, "the canonical text %q must parse back", text)
 		expected := record.Record
 		expected.Line = 1
@@ -2498,6 +2593,15 @@ func Fuzz_Formatter_Record(f *testing.F) {
 		reparsed := ipfw.NewParsedRecord(rec, &state)
 		require.Equal(t, record.BodyKind, reparsed.BodyKind)
 	})
+}
+
+// tokenTableType takes one token as a custom table type, the shape a
+// formatter writes one in.
+func tokenTableType(rest string) (int, error) {
+	if idx := strings.IndexAny(rest, " \t\n\r\f"); idx >= 0 {
+		return idx, nil
+	}
+	return len(rest), nil
 }
 
 // verifies that every built-in parser output has a canonical formatter representation.

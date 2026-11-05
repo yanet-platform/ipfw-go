@@ -14,6 +14,9 @@ type parserOptions struct {
 	// OptionHook takes the option keywords the grammar does not know, nil
 	// rejecting them.
 	OptionHook OptionHook
+	// TableTypeHook takes the table types the grammar does not know, nil
+	// rejecting them.
+	TableTypeHook TableTypeHook
 	// ProtoChecker chooses the grammar of a rule body, nil leaving it to the
 	// shape of the body.
 	ProtoChecker ProtoChecker
@@ -45,6 +48,13 @@ func WithCommandHook(hook CommandHook) ParserOption {
 func WithOptionHook(hook OptionHook) ParserOption {
 	return func(opts *parserOptions) {
 		opts.OptionHook = hook
+	}
+}
+
+// WithTableTypeHook hands the table types the grammar does not know to hook.
+func WithTableTypeHook(hook TableTypeHook) ParserOption {
+	return func(opts *parserOptions) {
+		opts.TableTypeHook = hook
 	}
 }
 
@@ -178,7 +188,7 @@ func (m *Parser) parseLine(text string, state State) (string, fail) {
 		if !ok {
 			return text, fail{Kind: ErrExpectedWhitespace, At: rest}
 		}
-		record.Table, rest, err = parseTable(rest)
+		record.Table, rest, err = parseTable(rest, m.opts.TableTypeHook)
 		if err.Failed() {
 			return text, err
 		}
@@ -225,10 +235,7 @@ func parseLineEnd(s string) (string, bool) {
 // hookLine hands a line the grammar does not know to the command hook, the
 // record becoming the hook's and the rest starting where it stopped.
 func (m *Parser) hookLine(s string, state State) (string, fail) {
-	line, afterLine := takeLine(s)
-	if afterLine != "" && strings.HasSuffix(line, "\r") {
-		line = line[:len(line)-1]
-	}
+	line := lineText(s)
 	rec, n, err := m.opts.CommandHook(line, state)
 	n = min(max(n, 0), len(line))
 	if err != nil {
@@ -586,8 +593,9 @@ func parseTrailingComment(ctx *optionContext, s string, state State) (string, fa
 	return rest, fail{}
 }
 
-// parseTable parses `NAME create|add …` after `table `.
-func parseTable(s string) (Table, string, fail) {
+// parseTable parses `NAME create|add …` after `table `, the hook taking the
+// table types the grammar does not know.
+func parseTable(s string, hook TableTypeHook) (Table, string, fail) {
 	name, rest := token(s)
 	if name == "" {
 		return Table{}, s, fail{Kind: ErrExpectedToken, At: s}
@@ -601,7 +609,7 @@ func parseTable(s string) (Table, string, fail) {
 	switch {
 	case hasPrefix(rest, "create"):
 		table.Kind = TableCreate
-		table.Type, rest, err = parseTableCreate(rest[len("create"):])
+		rest, err = parseTableCreate(rest[len("create"):], hook, &table)
 	case hasPrefix(rest, "add"):
 		table.Kind = TableAdd
 		rest, err = parseTableAdd(rest[len("add"):], &table)
@@ -614,24 +622,47 @@ func parseTable(s string) (Table, string, fail) {
 	return table, rest, fail{}
 }
 
-// parseTableCreate parses the options after `create`, the last `type`
-// winning and none being fine.
-func parseTableCreate(s string) (TableType, string, fail) {
+// parseTableCreate parses the options after `create` into the table, the
+// last `type` winning and none being fine.
+func parseTableCreate(s string, hook TableTypeHook, table *Table) (string, fail) {
 	rest := s
-	tableType := TableTypeUnset
 	buf, ok := ws1Keyword(rest, "type")
 	for ok {
-		var kind ErrorKind
 		if buf, ok = ws1(buf); !ok {
-			return TableTypeUnset, s, fail{Kind: ErrExpectedWhitespace, At: buf}
+			return s, fail{Kind: ErrExpectedWhitespace, At: buf}
 		}
-		if tableType, buf, kind = parseTableType(buf); kind != 0 {
-			return TableTypeUnset, s, fail{Kind: kind, At: buf}
+		var err fail
+		if buf, err = parseCreateType(buf, hook, table); err.Failed() {
+			return s, err
 		}
 		rest = buf
 		buf, ok = ws1Keyword(rest, "type")
 	}
-	return tableType, rest, fail{}
+	return rest, fail{}
+}
+
+// parseCreateType reads the value of one `type` into the table, the hook
+// taking only a value that no built-in keyword starts.
+func parseCreateType(s string, hook TableTypeHook, table *Table) (string, fail) {
+	tableType, rest, kind := parseTableType(s)
+	if kind == 0 {
+		table.Type, table.TypeText = tableType, ""
+		return rest, fail{}
+	}
+	if hook == nil {
+		return s, fail{Kind: kind, At: s}
+	}
+	line := lineText(s)
+	n, err := hook(line)
+	n = min(max(n, 0), len(line))
+	if err != nil {
+		return s, failFrom(err, s[n:])
+	}
+	if n == 0 {
+		return s, fail{Kind: kind, At: s}
+	}
+	table.Type, table.TypeText = TableTypeCustom, s[:n]
+	return s[n:], fail{}
 }
 
 // parseTableAdd parses the `KEY [VALUE]` after `add` into the table, the
@@ -691,6 +722,16 @@ func parseTableType(s string) (TableType, string, ErrorKind) {
 		}
 	}
 	return TableTypeUnset, s, ErrExpectedTableType
+}
+
+// lineText is the physical line at the start of s without its LF or CRLF,
+// the text a hook is handed.
+func lineText(s string) string {
+	line, afterLine := takeLine(s)
+	if afterLine != "" && strings.HasSuffix(line, "\r") {
+		line = line[:len(line)-1]
+	}
+	return line
 }
 
 // takeLine leaves the newline for the line-ending parser.
